@@ -1,0 +1,35 @@
+# Mise en ligne : le jeu derrière Caddy, qui obtient et renouvelle le certificat HTTPS tout seul.
+# 1. copier .env.example en .env et le remplir (au minimum DOMAIN et SAM_ADMIN_TOKEN)
+# 2. faire pointer le DNS du domaine vers le serveur (ports 80 et 443 ouverts)
+# 3. docker compose up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SAM_TRUST_PROXY: "1" # le jeu n'est joignable que par Caddy
+    volumes:
+      - data:/app/server/data
+    expose:
+      - "3001"
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:

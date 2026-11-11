@@ -1,0 +1,28 @@
+# Déploiement sur Render (https://render.com) — Blueprint.
+# Render → New → Blueprint → choisir ce dépôt : il crée le service d'après ce fichier.
+# Palier Starter obligatoire : le palier gratuit s'endort après 15 min et n'a pas de disque persistant.
+services:
+  - type: web
+    name: steal-a-masterpiece
+    runtime: docker
+    plan: starter
+    region: frankfurt # le plus proche de la France
+    numInstances: 1 # une seule : les quartiers et les enchères vivent en mémoire
+    healthCheckPath: /api/stats
+    disk:
+      name: data
+      mountPath: /app/server/data # joueurs, ventes, clés push
+      sizeGB: 1
+    envVars:
+      - key: SAM_TRUST_PROXY
+        value: "1" # Render est un proxy : lire la vraie adresse des joueurs
+      - key: SAM_ADMIN_TOKEN
+        generateValue: true # mot de passe du panneau /admin/, à lire dans Render → Environment
+      - key: SAM_VAPID_SUBJECT
+        sync: false # à remplir : mailto:votre@adresse (contact pour les notifications push)
+      - key: SAM_GOOGLE_CLIENT_ID
+        sync: false # facultatif : connexion Google
+      - key: SAM_ANDROID_PACKAGE
+        sync: false # facultatif : APK Android
+      - key: SAM_ANDROID_SHA256
+        sync: false

@@ -1,0 +1,10 @@
+node_modules
+dist
+server/data
+tests/shots
+.git
+.env
+*.log
+public/game.bundle.js
+public/admin.bundle.js
+vite.config.ts.timestamp-*

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#08090f" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <title>Steal a Masterpiece — Jouer</title>
+  <link rel="stylesheet" href="/src/shared/theme.css" />
+  <style>
+    body { overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; background: #07080d; }
+    canvas.game { touch-action: none; }
+
+    #wallet { position: fixed; left: 14px; top: calc(var(--bar-h) + 12px); z-index: 20; min-width: 230px; padding: 12px 16px; border-radius: 16px; background: rgba(10,12,20,.82); border: 1px solid rgba(232,182,76,.35); backdrop-filter: blur(8px); }
+    #wallet .name { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); font-weight: 800; display: flex; justify-content: space-between; gap: 10px; }
+    #wallet .name button { background: none; border: none; color: #a9a49a; cursor: pointer; font-size: 12px; padding: 0; }
+    #wallet .coins { display: flex; align-items: center; gap: 10px; margin: 4px 0 2px; }
+    #wallet .coins b { font-size: 30px; font-variant-numeric: tabular-nums; }
+    .coin { width: 24px; height: 24px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3b0, #ffc83d 45%, #b77a12); box-shadow: 0 0 0 2px #8a5a0a inset; flex: none; }
+    #wallet .row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: #cfc9bb; }
+    #income { color: #7dff9a; font-weight: 700; }
+    #wallet.bump .coins b { animation: bump .35s ease; }
+    @keyframes bump { 50% { transform: scale(1.15); color: #ffd36b; } }
+    body.playing .back-link { display: none; }
+
+    #quest { position: fixed; left: 14px; top: calc(var(--bar-h) + 168px); z-index: 20; width: 260px; padding: 12px 14px; border-radius: 16px; background: rgba(10,12,20,.82); border: 1px solid rgba(255,255,255,.12); backdrop-filter: blur(8px); font-size: 13px; }
+    #quest .qhead { display: flex; justify-content: space-between; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; color: #a9a49a; }
+    #questReward { color: var(--gold); }
+    #questLabel { font-size: 15px; font-weight: 700; margin: 4px 0 8px; line-height: 1.3; }
+    #quest .bar { height: 8px; border-radius: 99px; background: rgba(255,255,255,.1); overflow: hidden; }
+    #questBar { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #4cc38a, #7dff9a); transition: width .4s; }
+    #questHint { color: #a9a49a; margin-top: 7px; line-height: 1.4; }
+    #questClaim { margin-top: 10px; width: 100%; padding: 10px; border-radius: 10px; border: none; background: var(--gold); color: #1b1308; font-weight: 900; cursor: pointer; animation: glow 1.2s ease-in-out infinite; }
+    @keyframes glow { 50% { box-shadow: 0 0 0 6px rgba(232,182,76,.25); } }
+    #quest.done { border-color: var(--gold); }
+    #rankInfo { color: var(--gold); font-weight: 700; }
+    #shieldInfo { color: #9fe3ff; font-size: 12px; }
+    #shieldInfo.danger { color: #ff8fa0; }
+    #alert { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0; transition: opacity .3s; box-shadow: inset 0 0 120px 30px rgba(255, 30, 50, .65); }
+    #alert.on { opacity: 1; animation: siren .5s ease-in-out infinite alternate; }
+    @keyframes siren { from { box-shadow: inset 0 0 90px 20px rgba(255, 30, 50, .45); } to { box-shadow: inset 0 0 160px 50px rgba(255, 30, 50, .8); } }
+    #netStatus { position: fixed; left: 50%; top: calc(var(--bar-h) + 12px); transform: translateX(-50%); z-index: 30; padding: 8px 16px; border-radius: 999px; background: rgba(120, 20, 30, .9); font-weight: 700; font-size: 13px; }
+    .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #a9a49a; margin-bottom: 8px; font-weight: 700; }
+    .colors { display: flex; gap: 10px; flex-wrap: wrap; }
+    .colors button { width: 38px; height: 38px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; box-shadow: inset 0 -4px 0 rgba(0,0,0,.25); }
+    .colors button.on { border-color: #fff; transform: scale(1.1); }
+    @media (max-width: 600px) {
+      #wallet { min-width: 0; padding: 10px 12px; }
+      #wallet .coins b { font-size: 24px; }
+      /* compact, sous le porte-monnaie : ne cache pas le personnage */
+      #quest { top: calc(var(--bar-h) + 150px); width: min(62vw, 250px); padding: 9px 11px; }
+      #questLabel { font-size: 13px; margin: 3px 0 6px; }
+      #questHint { display: none; }
+    }
+    #tools { position: fixed; right: 14px; top: calc(var(--bar-h) + 12px); z-index: 20; display: flex; gap: 8px; }
+    #qualityBtn { font-size: 12px !important; font-weight: 900; }
+    #tools button { width: 42px; height: 42px; border-radius: 12px; background: rgba(10,12,20,.82); border: 1px solid rgba(255,255,255,.15); color: #fff; cursor: pointer; font-size: 18px; }
+
+    #prompt { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 20; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 92vw; }
+    #prompt span { padding: 10px 16px; border-radius: 14px; background: rgba(10,12,20,.88); border: 1px solid rgba(232,182,76,.5); font-weight: 700; font-size: 15px; }
+    #prompt kbd { display: inline-block; background: var(--gold); color: #1b1308; border-radius: 6px; padding: 1px 8px; margin-right: 8px; font-weight: 900; }
+    #prompt .poor { border-color: rgba(255,107,107,.6); color: #ffb3b3; }
+
+    #banner { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(.9); z-index: 25; text-align: center; opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; font: 800 clamp(26px, 5vw, 44px) Georgia, serif; color: #fff; text-shadow: 0 3px 0 #000, 0 8px 30px rgba(0,0,0,.6); }
+    #banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    #banner small { display: block; font: 700 17px 'Segoe UI', sans-serif; color: #ffd36b; margin-top: 6px; }
+
+    .overlay { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; padding: calc(var(--bar-h) + 16px) 16px 16px; background: rgba(5,6,10,.7); backdrop-filter: blur(6px); }
+    .overlay.open { display: flex; }
+    .sheet { width: min(520px, 100%); background: #10131d; border: 1px solid rgba(232,182,76,.35); border-radius: 22px; padding: 28px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - var(--bar-h) - 32px); overflow: auto; }
+    .sheet h1 { font: 800 30px Georgia, serif; }
+    .sheet p { color: #a9a49a; line-height: 1.55; }
+    .sheet input { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 12px; padding: 13px 14px; font-size: 17px; }
+    .sheet .go { background: var(--gold); color: #1b1308; border: none; border-radius: 12px; padding: 14px; font-size: 18px; font-weight: 800; cursor: pointer; }
+    .keys { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; font-size: 14px; color: #cfc9bb; }
+    .keys kbd { background: #1c2030; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; padding: 2px 8px; font-size: 12px; white-space: nowrap; }
+    #loading { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: #07080d; color: var(--gold); font: 700 18px 'Segoe UI', sans-serif; }
+
+    #touch { display: none; }
+    body.touch.playing #touch { display: block; }
+    #joy { position: fixed; left: 22px; bottom: 26px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.3); z-index: 22; touch-action: none; }
+    #joyKnob { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: rgba(232,182,76,.85); pointer-events: none; }
+    .tbtn { position: fixed; z-index: 22; width: 72px; height: 72px; border-radius: 50%; border: none; font-weight: 900; font-size: 16px; touch-action: none; }
+    #tA { right: 24px; bottom: 110px; background: var(--gold); color: #1b1308; }
+    #tJ { right: 108px; bottom: 34px; background: rgba(255,255,255,.18); color: #fff; }
+    #tR { right: 24px; bottom: 196px; width: 56px; height: 56px; font-size: 13px; background: rgba(255,107,107,.85); color: #fff; }
+    body.touch #prompt { bottom: 200px; }
+    #toast { bottom: 96px; max-width: 92vw; text-align: center; } /* au-dessus de l'invite d'action */
+    body.touch #toast { bottom: 262px; }
+
+    /* ---- phase 3 : sécurité, marché noir, outils ---- */
+    #secInfo { font-size: 12px; color: #ffd36b; }
+    #secInfo.none { color: #ff8fa0; }
+    #secBtn { width: auto !important; padding: 0 12px; font-size: 14px !important; font-weight: 800; border-color: rgba(232,182,76,.55) !important; }
+    #secBtn.warn { animation: glow 1.2s ease-in-out infinite; border-color: #ff6b6b !important; }
+    #toolbar { position: fixed; left: 14px; bottom: 26px; z-index: 21; display: flex; gap: 8px; }
+    #toolbar button { position: relative; width: 54px; height: 54px; border-radius: 14px; background: rgba(10,12,20,.86); border: 1px solid rgba(180,107,255,.55); color: #fff; font-size: 24px; cursor: pointer; }
+    #toolbar button b { position: absolute; right: 3px; bottom: 1px; font-size: 12px; color: #ffd36b; }
+    #toolbar button i { position: absolute; left: 4px; top: 1px; font-size: 10px; font-style: normal; color: #a9a49a; }
+    #toolbar button.armed { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(232,182,76,.35); }
+    body.touch #toolbar { left: 22px; bottom: 170px; }
+    @media (max-width: 600px) { #tools { flex-direction: column; } #secBtn .txt, #saleBtn .txt { display: none; } #saleBtn { padding: 0 !important; width: 42px !important; } #secBtn { padding: 0 !important; width: 42px !important; } }
+    body.touch #toolbar i { display: none; }
+    .shop { display: flex; flex-direction: column; gap: 10px; }
+    .shop h2 { font: 800 18px Georgia, serif; margin-top: 6px; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .shop h2 small { font: 700 12px 'Segoe UI', sans-serif; color: #7dff9a; }
+    .shop h2 small.off { color: #ff8fa0; }
+    .offer { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
+    .offer .t { font-weight: 800; }
+    .offer .d { grid-column: 1; color: #a9a49a; font-size: 12.5px; line-height: 1.4; }
+    .offer button { grid-row: 1 / span 2; grid-column: 2; min-width: 112px; padding: 10px 12px; border-radius: 10px; border: none; background: var(--gold); color: #1b1308; font-weight: 900; cursor: pointer; }
+    .offer button:disabled { background: #3a3f4d; color: #a9a49a; cursor: default; }
+    .offer button.poor { background: #5a2b33; color: #ffb3b3; }
+    .faille { font-size: 12.5px; color: #cfc9bb; background: rgba(255,59,78,.08); border: 1px solid rgba(255,59,78,.25); border-radius: 12px; padding: 10px 12px; line-height: 1.5; }
+    /* ---- phase 4 : hôtel des ventes ---- */
+    #saleBtn { width: auto !important; padding: 0 12px; font-size: 14px !important; font-weight: 800; background: #7a1520 !important; border-color: #ff6b6b !important; animation: glow 1.4s ease-in-out infinite; }
+    body.in-hall #wallet, body.in-hall #quest, body.in-hall #toolbar, body.in-hall #prompt, body.in-hall #touch, body.in-hall #saleBtn, body.in-hall #secBtn { display: none !important; }
+    #hallUi { display: none; }
+    body.in-hall #hallUi { display: block; }
+    .hall-top { position: fixed; left: 50%; top: calc(var(--bar-h) + 12px); transform: translateX(-50%); z-index: 20; display: flex; gap: 10px; align-items: center; padding: 8px 10px 8px 16px; border-radius: 999px; background: rgba(20,8,10,.85); border: 1px solid rgba(201,162,74,.5); font-weight: 800; white-space: nowrap; max-width: calc(100vw - 24px); }
+    .hall-top button { border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff; border-radius: 999px; padding: 6px 12px; cursor: pointer; font-weight: 700; }
+    #hallSale { color: var(--gold); overflow: hidden; text-overflow: ellipsis; }
+    .hall-card { position: fixed; left: 14px; top: calc(var(--bar-h) + 70px); z-index: 20; width: 250px; padding: 14px; border-radius: 16px; background: rgba(14,8,10,.86); border: 1px solid rgba(201,162,74,.4); font-size: 13px; color: #cfc9bb; line-height: 1.5; }
+    .hall-card b { display: block; font: 800 19px Georgia, serif; color: #fff; margin-bottom: 2px; }
+    .hall-card .rar { font-weight: 900; }
+    .hall-bid { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20; width: min(560px, calc(100vw - 24px)); padding: 14px 16px; border-radius: 18px; background: rgba(14,8,10,.9); border: 1px solid rgba(201,162,74,.5); display: flex; flex-direction: column; gap: 9px; }
+    .hall-bid .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    #bidPrice { font: 900 32px Georgia, serif; color: #ffd36b; font-variant-numeric: tabular-nums; }
+    #bidLeader { font-weight: 800; text-align: right; }
+    #bidLeader.me { color: #7dff9a; }
+    .hall-bid .bar { height: 7px; border-radius: 99px; background: rgba(255,255,255,.1); overflow: hidden; }
+    #bidTimer { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #ff6b6b, #ffd36b); }
+    #bidStatus { font-size: 13px; color: #cfc9bb; min-height: 18px; }
+    .bids { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .bids button, #bidGo { padding: 11px 6px; border-radius: 12px; border: none; background: var(--gold); color: #1b1308; font-weight: 900; cursor: pointer; font-size: 14px; line-height: 1.2; }
+    .bids button small { display: block; font-size: 11px; font-weight: 700; opacity: .8; }
+    .bids button:disabled, #bidGo:disabled { background: #3a3f4d; color: #a9a49a; cursor: default; }
+    .custom { display: flex; gap: 8px; }
+    #bidCustom { flex: 1; min-width: 0; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 12px; padding: 10px 12px; font-size: 15px; color: #fff; }
+    #bidWallet { font-size: 12px; color: #a9a49a; display: flex; justify-content: space-between; }
+    @media (max-width: 700px) { .hall-card { width: auto; right: 14px; padding: 10px 12px; } .hall-card .more { display: none; } #bidPrice { font-size: 26px; } }
+
+    .push-ask { position: fixed; right: 14px; top: calc(var(--bar-h) + 66px); z-index: 30; width: min(320px, calc(100vw - 28px)); padding: 14px; border-radius: 16px; background: rgba(10,12,20,.94); border: 1px solid var(--gold); display: flex; flex-direction: column; gap: 10px; font-weight: 700; line-height: 1.4; }
+    .push-ask div { display: flex; gap: 8px; }
+    .push-ask button { flex: 1; padding: 10px; border-radius: 10px; border: none; background: var(--gold); color: #1b1308; font-weight: 900; cursor: pointer; }
+    .push-ask button.ghost { background: rgba(255,255,255,.1); color: #fff; }
+
+    /* ---- phase 5 : classements ---- */
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tabs button { flex: 1; min-width: 100px; padding: 9px 8px; border-radius: 10px; border: 1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.05); color: #cfc9bb; font-weight: 800; cursor: pointer; }
+    .tabs button.on { background: var(--gold); color: #1b1308; border-color: var(--gold); }
+    ol.board { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    ol.board li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.04); }
+    ol.board li.me { background: rgba(232,182,76,.16); border: 1px solid rgba(232,182,76,.5); }
+    ol.board .rk { width: 28px; font-weight: 900; color: #a9a49a; }
+    ol.board li:nth-child(1) .rk { color: #ffd36b; }
+    ol.board li:nth-child(2) .rk { color: #d9dde6; }
+    ol.board li:nth-child(3) .rk { color: #d08a4a; }
+    ol.board .nm { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    ol.board b { color: #ffd36b; font-variant-numeric: tabular-nums; }
+    ol.board .muted { color: #a9a49a; }
+
+    .sheet .close { align-self: flex-end; background: none; border: 1px solid rgba(255,255,255,.2); color: #fff; border-radius: 10px; padding: 6px 12px; cursor: pointer; }
+  </style>
+</head>
+<body class="has-livebar">
+  <div id="livebar" class="livebar"></div>
+  <div id="loading">Ouverture du musée…</div>
+  <!-- La racine redirige vers /game/ : pas besoin de lien retour -->
+  <canvas id="c" class="game"></canvas>
+
+  <div id="wallet">
+    <div class="name"><span id="museumName">Mon musée</span><button id="renameBtn" title="Renommer">Renommer</button></div>
+    <div class="coins"><i class="coin"></i><b id="coins">0</b></div>
+    <div class="row"><span id="income">+0 /s</span><span id="slotsInfo">0/4 œuvres</span></div>
+    <div class="row"><span id="valueInfo">Valeur : 0</span><span id="reserveInfo"></span></div>
+    <div class="row"><span id="rankInfo"></span></div>
+    <div class="row"><span id="shieldInfo"></span></div>
+    <div class="row"><span id="secInfo"></span></div>
+  </div>
+  <div id="toolbar" hidden></div>
+  <div id="alert" aria-hidden="true"></div>
+  <div id="netStatus" hidden>Connexion au quartier…</div>
+  <div id="quest" hidden>
+    <div class="qhead"><span id="questStep">Objectif</span><span id="questReward"></span></div>
+    <div id="questLabel"></div>
+    <div class="bar"><i id="questBar"></i></div>
+    <div id="questHint"></div>
+    <button id="questClaim" hidden>Récupérer la récompense</button>
+  </div>
+  <div id="tools">
+    <button id="saleBtn" hidden title="Rejoindre la salle des ventes">🔨<span class="txt"> Vente</span></button>
+    <button id="boardBtn" title="Classements">🏆</button>
+    <button id="secBtn" title="Sécurité de votre musée (G)">🛡<span class="txt"> Sécurité</span></button>
+    <button id="qualityBtn" title="Qualité graphique">HD</button>
+    <button id="muteBtn" title="Son">🔊</button>
+    <button id="helpBtn" title="Commandes">?</button>
+  </div>
+  <div id="prompt" hidden></div>
+  <div id="banner"></div>
+  <div id="toast" class="toast"></div>
+
+  <div id="welcome" class="overlay">
+    <form class="sheet" id="welcomeForm">
+      <h1>Votre musée vous attend</h1>
+      <p>Vous commencez avec un petit local et 500 pièces. Achetez des chefs-d’œuvre au convoi, exposez-les pour encaisser, puis agrandissez. Le musée le plus riche s’affiche sur la place.</p>
+      <input id="nameInput" maxlength="24" placeholder="Nom de votre musée (ex. Musée du Soleil)" autocomplete="off" />
+      <div>
+        <div class="lbl">Couleur de votre personnage</div>
+        <div id="colors" class="colors"></div>
+      </div>
+      <div>
+        <div class="lbl">Pays de votre musée</div>
+        <div id="countries" class="colors"></div>
+      </div>
+      <button class="go" type="submit">Ouvrir mon musée</button>
+      <div id="googleWrap" hidden>
+        <div class="lbl" id="googleLbl">Déjà un musée sur un autre appareil ?</div>
+        <div id="googleBox"></div>
+      </div>
+    </form>
+  </div>
+
+  <div id="help" class="overlay">
+    <div class="sheet">
+      <h1>Commandes</h1>
+      <div class="keys">
+        <kbd>Z Q S D</kbd><span>se déplacer (WASD / flèches) · <kbd>Maj</kbd> courir</span>
+        <kbd>Espace</kbd><span>sauter</span>
+        <kbd>E</kbd><span>acheter l’œuvre du camion, agrandir le musée</span>
+        <kbd>R</kbd><span>revendre l’œuvre devant vous (50 %)</span>
+        <kbd>E maintenu</kbd><span>dans un musée rival : décrocher une œuvre, puis la ramener chez vous</span>
+        <kbd>G</kbd><span>sécurité : gardes, caméras, lasers, vitrines, générateur, assurance</span>
+        <kbd>1 à 5</kbd><span>utiliser un outil acheté au marché noir (tente violette sur la place)</span>
+        <kbd>Souris</kbd><span>glisser pour tourner la caméra, molette pour zoomer</span>
+      </div>
+      <p>Encaissez en marchant sur le cercle doré de la caisse. Hors ligne, la caisse se remplit à moitié vitesse jusqu’à son plafond.</p>
+      <p>Les gardes voient dans leur cône jaune, et seulement dans leur salle. Ils tournent sur eux-mêmes au centre de chaque salle, et bâillent avant la relève (toutes les 10 min). Les caméras sonnent au décrochage, les lasers quand on sort avec une œuvre.</p>
+      <p>Entrer chez un rival coûte un billet (une petite part de la valeur de son musée), que le propriétaire encaisse. Voler une Mythique prend 20 s, alerte tout le serveur, et n’importe quel joueur peut arrêter le voleur pour toucher une prime de 1 % de sa valeur.</p>
+      <button class="go" id="helpClose">Reprendre</button>
+    </div>
+  </div>
+
+  <div id="pushAsk" class="push-ask" hidden>
+    <span>🔔 Être prévenu si on cambriole votre musée, ou quand une grande vente commence ?</span>
+    <div><button id="pushYes">Activer les alertes</button><button id="pushNo" class="ghost">Plus tard</button></div>
+  </div>
+
+  <div id="hallUi">
+    <div class="hall-top"><span id="hallSale">Hôtel des ventes</span><button id="hallLeave">Quitter la salle</button></div>
+    <div class="hall-card" id="lotCard" hidden>
+      <b id="lotTitle"></b>
+      <div id="lotArtist" class="more"></div>
+      <div><span id="lotRarity" class="rar"></span></div>
+      <div>Estimation : <strong id="lotEstimate"></strong></div>
+      <div class="more">Revenu : <strong id="lotIncome"></strong></div>
+    </div>
+    <div class="hall-bid">
+      <div class="row1"><span id="bidPrice">—</span><span id="bidLeader"></span></div>
+      <div class="bar"><i id="bidTimer"></i></div>
+      <div id="bidStatus"></div>
+      <div class="bids"><button id="bid1"></button><button id="bid2"></button><button id="bid3"></button></div>
+      <div class="custom"><input id="bidCustom" inputmode="numeric" placeholder="Montant libre" autocomplete="off" /><button id="bidGo">Enchérir</button></div>
+      <div id="bidWallet"><span id="bidCoins"></span><span id="bidEscrow"></span></div>
+    </div>
+  </div>
+
+  <div id="security" class="overlay">
+    <div class="sheet">
+      <button class="close" data-close>Fermer · Échap</button>
+      <h1>Sécurité du musée</h1>
+      <p>Tout peut être volé, même quand vous êtes absent. Les protections coûtent cher et expirent : revenez les renouveler.</p>
+      <div id="secBody" class="shop"></div>
+    </div>
+  </div>
+
+  <div id="boards" class="overlay">
+    <div class="sheet">
+      <button class="close" data-close>Fermer · Échap</button>
+      <h1>Classements</h1>
+      <div id="boardTabs" class="tabs"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;">
+        <p id="boardSub" style="margin:0;"></p>
+        <select id="boardCountryFilter" style="background:var(--bg,#181a20);color:#fff;border:1px solid #333;border-radius:6px;padding:4px 8px;font-size:12px;">
+          <option value="">Monde entier 🌍</option>
+        </select>
+      </div>
+      <ol id="boardList" class="board"></ol>
+    </div>
+  </div>
+
+  <div id="market" class="overlay">
+    <div class="sheet">
+      <button class="close" data-close>Fermer · Échap</button>
+      <h1>Marché noir</h1>
+      <p>Outils à usage unique (3 de chaque au maximum). Utilisez-les près d’un musée rival avec les touches 1 à 5.</p>
+      <div id="marketBody" class="shop"></div>
+    </div>
+  </div>
+
+  <div id="decor" class="overlay">
+    <div class="sheet">
+      <button class="close" data-close>Fermer · Échap</button>
+      <h1 id="decorTitle">Décor de la salle</h1>
+      <p>Personnalisez l’ambiance, les moulures et les revêtements de cette salle (5 000 pièces).</p>
+      <div id="decorBody" class="shop"></div>
+    </div>
+  </div>
+
+  <div id="touch">
+    <div id="joy"><div id="joyKnob"></div></div>
+    <button class="tbtn" id="tA" data-action="action">E</button>
+    <button class="tbtn" id="tJ" data-action="jump">Saut</button>
+    <button class="tbtn" id="tR" data-action="alt" hidden>R</button>
+  </div>
+
+  <script type="module" src="/src/game/main.ts"></script>
+</body>
+</html>

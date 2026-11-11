@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <meta name="theme-color" content="#08090f" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <title>Admin — Steal a Masterpiece</title>
+  <link rel="stylesheet" href="/src/shared/theme.css" />
+  <style>
+    body { background: #07080d; }
+    main { width: min(1100px, 100% - 32px); margin: 0 auto; padding: 28px 0 60px; display: flex; flex-direction: column; gap: 20px; }
+    h1 { font: 800 30px Georgia, serif; }
+    h2 { font: 800 19px Georgia, serif; margin-bottom: 10px; }
+    .card { background: #10131d; border: 1px solid rgba(232,182,76,.25); border-radius: 18px; padding: 18px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,.07); vertical-align: top; }
+    th { color: #a9a49a; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 800; background: rgba(255,255,255,.08); }
+    .tag.abuse { background: #7a1520; color: #fff; }
+    .tag.live { background: #ff3b4e; color: #fff; }
+    .tag.grande, .tag.prestige { background: rgba(232,182,76,.25); color: #ffd36b; }
+    input, select { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 10px; padding: 9px 11px; font-size: 14px; color: #fff; }
+    select option { background: #10131d; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #cfc9bb; }
+    form { display: flex; flex-direction: column; gap: 12px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+    .row > * { flex: 1; min-width: 140px; }
+    button { padding: 9px 14px; border-radius: 10px; border: none; background: var(--gold); color: #1b1308; font-weight: 900; cursor: pointer; }
+    button.ghost { background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.18); }
+    button.danger { background: #7a1520; color: #fff; }
+    .lot { display: flex; gap: 8px; }
+    .lot select:first-child { flex: 2; }
+    .muted { color: #a9a49a; font-size: 13px; }
+    .stats { display: flex; gap: 24px; flex-wrap: wrap; }
+    .stats b { display: block; font: 800 26px Georgia, serif; color: var(--gold); }
+    #msg { min-height: 20px; font-weight: 700; }
+    #msg.err { color: #ff8fa0; }
+    #msg.ok { color: #7dff9a; }
+    #login { max-width: 420px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Panneau admin</h1>
+
+    <section class="card" id="login">
+      <h2>Connexion</h2>
+      <form id="loginForm">
+        <label>Jeton admin (variable SAM_ADMIN_TOKEN du serveur)<input id="token" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Entrer</button>
+      </form>
+    </section>
+
+    <div id="panel" hidden>
+      <div id="msg"></div>
+      <section class="card">
+        <div class="stats">
+          <div><b id="sPlayers">—</b><span class="muted">joueurs</span></div>
+          <div><b id="sOnline">—</b><span class="muted">en ligne</span></div>
+          <div><b id="sDistricts">—</b><span class="muted">quartiers</span></div>
+          <div><b id="sLive">—</b><span class="muted">vente en cours</span></div>
+        </div>
+      </section>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Créer une vente « admin abuse »</h2>
+          <form id="saleForm">
+            <label>Titre<input id="title" maxlength="40" value="Admin abuse" required /></label>
+            <div class="row">
+              <label>Date et heure (heure de votre appareil)<input id="at" type="datetime-local" required /></label>
+            </div>
+            <div class="muted" id="atHint">Au moins 1 h à l’avance, pour laisser le temps de prévenir les joueurs.</div>
+            <div id="lots" style="display:flex;flex-direction:column;gap:8px"></div>
+            <div class="row"><button type="button" class="ghost" id="addLot">+ Ajouter un lot</button></div>
+            <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="announce" checked /> Annoncer tout de suite (notification push + bandeau en jeu)</label>
+            <button type="submit">Programmer la vente</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>Derniers lots adjugés</h2>
+          <table><thead><tr><th>Œuvre</th><th>Prix</th><th>Gagnant</th></tr></thead><tbody id="results"></tbody></table>
+          <h2 style="margin-top:18px">Dernières notifications</h2>
+          <table><thead><tr><th>Joueur</th><th>Alerte</th></tr></thead><tbody id="pushes"></tbody></table>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>Planning</h2>
+        <table><thead><tr><th>Quand</th><th>Vente</th><th>Lots</th><th></th></tr></thead><tbody id="sales"></tbody></table>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="/src/admin/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+# Mise en ligne avancée avec base PostgreSQL et cache Redis (optionnel)
+# Usage : docker compose -f docker-compose.prod.yml up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SAM_TRUST_PROXY: "1"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sam_user}:${POSTGRES_PASSWORD:-sam_pass}@postgres:5432/${POSTGRES_DB:-sam_db}
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - data:/app/server/data
+    expose:
+      - "3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sam_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sam_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-sam_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sam_user} -d ${POSTGRES_DB:-sam_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  data:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

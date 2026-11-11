@@ -1,0 +1,168 @@
+import type { FrameId } from './catalog';
+import type { MuseumSnap } from './museumView';
+
+export interface PlotInfo {
+  index: number;
+  owner: MuseumSnap | null;
+  online: boolean;
+  lockedUntil: number;
+  lockReadyAt: number;
+  jamUntil: number;
+  powerAt: number;
+  powerUntil: number;
+}
+
+/** Un garde, simulé par le serveur. */
+export interface NetGuard {
+  plot: number;
+  k: number;
+  x: number;
+  z: number;
+  f: number;
+  ry: number;
+  s: 'patrol' | 'yawn' | 'break' | 'chase' | 'alert' | 'return' | 'blind' | 'lured';
+}
+
+export interface NetPlayer {
+  id: string;
+  name: string;
+  color: string;
+  plot: number;
+  x: number;
+  z: number;
+  /** Étage (0 = rez-de-chaussée). */
+  f: number;
+  ry: number;
+  anim: string;
+  carry: { workId: string; frame: FrameId } | null;
+  /** Déguisé en employé (outil du marché noir). */
+  disguised?: boolean;
+  stealing: { plot: number; uid: string; endsAt: number } | null;
+}
+
+export type StealEvent =
+  | { t: 'steal'; phase: 'refused'; error: string }
+  | { t: 'steal'; phase: 'start'; thief: string; thiefName: string; plot: number; uid: string; workId: string; endsAt: number; ms: number; crowbar: boolean }
+  | { t: 'steal'; phase: 'caught'; thief: string; thiefName: string; plot: number; jailUntil: number }
+  | { t: 'steal'; phase: 'cancel'; thief: string; plot: number; uid: string; reason: string }
+  | { t: 'steal'; phase: 'carry'; thief: string; thiefName: string; plot: number; uid: string; workId: string; frame: FrameId }
+  | { t: 'steal'; phase: 'delivered'; thief: string; thiefName: string; plot: number; victimName: string; uid: string; workId: string; frame: FrameId; refund: number }
+  | { t: 'steal'; phase: 'arrested'; thief: string; thiefName: string; by: string; byName: string; plot: number; uid: string; workId: string; fine: number; bounty?: number; jailUntil: number }
+  | { t: 'steal'; phase: 'returned'; thief: string; plot: number; uid: string; workId: string; message: string };
+
+/** Salle des ventes (phase 4). */
+export interface HallSeat {
+  seat: number;
+  id: string;
+  name: string;
+  color: string;
+  npc: boolean;
+}
+export interface HallLot {
+  index: number;
+  count: number;
+  workId: string;
+  frame: FrameId;
+  estimate: number;
+  phase: 'present' | 'bidding' | 'sold';
+  phaseEnd: number;
+  price: number;
+  step: number;
+  min: number;
+  leader: { id: string; name: string; npc: boolean; seat: number } | null;
+  lastBid: { seat: number; at: number; name: string; amount: number } | null;
+  outcome: { sold: boolean; npc?: boolean; name?: string; price?: number; id?: string } | null;
+}
+export interface SaleInfo {
+  id: string;
+  kind: 'express' | 'grande' | 'prestige' | 'abuse';
+  label: string;
+  at: number;
+  live: boolean;
+}
+export interface HallState {
+  t: 'hall';
+  now: number;
+  you: { seat: number | null };
+  seats: HallSeat[];
+  sale: (SaleInfo & { lots: Array<{ workId: string; frame: FrameId; estimate: number }> }) | null;
+  next: SaleInfo | null;
+  lot: HallLot | null;
+}
+
+export type ServerMsg =
+  | HallState
+  | { t: 'mythic'; phase: 'start'; thief: string; thiefName: string; victimName: string; workId: string; district: number }
+  | { t: 'mythic'; phase: 'saved'; thiefName: string; byName: string; workId: string; bounty: number }
+  | { t: 'mythic'; phase: 'stolen'; thiefName: string; victimName: string; workId: string }
+  | { t: 'ticket'; ok: boolean; price: number; name: string }
+  | { t: 'visitor'; name: string; price: number }
+  | { t: 'hall-error'; error: string }
+  | { t: 'won'; workId: string; frame: FrameId; price: number }
+  | { t: 'sale'; phase: 'soon'; id: string; label: string; kind: string; at: number }
+  | { t: 'sale'; phase: 'start'; id: string; label: string; kind: string; lots: number; workId: string }
+  | { t: 'sale'; phase: 'sold'; label: string; workId: string; frame: FrameId; sold: boolean; price: number; winner: string | null; npc: boolean; winnerId: string | null }
+  | { t: 'sale'; phase: 'end'; id: string; label: string }
+  | { t: 'welcome'; now: number; you: { id: string; plot: number; jailUntil: number }; plots: PlotInfo[]; players: NetPlayer[]; guards: NetGuard[]; district: number }
+  | { t: 'snap'; now: number; players: NetPlayer[]; guards: NetGuard[] }
+  | { t: 'alarm'; plot: number; thief: string; thiefName: string; reason: 'camera' | 'laser' | 'sabotage' }
+  | { t: 'tool'; ok: boolean; tool: string; error?: string; message?: string; plot?: number; tools?: Record<string, number> }
+  | { t: 'fx'; kind: 'fumigene' | 'leurre'; plot: number; x: number; z: number; until: number }
+  | { t: 'join'; player: NetPlayer }
+  | { t: 'leave'; id: string }
+  | { t: 'plot'; plot: PlotInfo }
+  | { t: 'lock'; plot: number; lockedUntil: number; lockReadyAt: number; error?: string }
+  | { t: 'teleport'; x: number; z: number; f?: number }
+  | { t: 'kicked'; reason: string }
+  | { t: 'error'; error: string }
+  | StealEvent;
+
+/** Connexion WebSocket au quartier, avec reconnexion automatique. */
+export class Net {
+  private ws: WebSocket | null = null;
+  private retry = 0;
+  private closed = false;
+  connected = false;
+  onMessage: (m: ServerMsg) => void = () => undefined;
+  onStatus: (connected: boolean) => void = () => undefined;
+
+  constructor(private auth: () => { id: string; token: string } | null) {}
+
+  connect(): void {
+    const a = this.auth();
+    if (!a || this.closed) return;
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    this.ws = ws;
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ t: 'auth', id: a.id, token: a.token }));
+      this.retry = 0;
+    };
+    ws.onmessage = (e) => {
+      let m: ServerMsg;
+      try {
+        m = JSON.parse(e.data as string) as ServerMsg;
+      } catch {
+        return;
+      }
+      if (m.t === 'welcome') {
+        this.connected = true;
+        this.onStatus(true);
+      }
+      if (m.t === 'kicked') this.closed = true;
+      this.onMessage(m);
+    };
+    ws.onclose = () => {
+      this.connected = false;
+      this.onStatus(false);
+      if (this.closed) return;
+      // reconnexion progressive : 1 s, 2 s, 4 s… jusqu'à 15 s
+      const delay = Math.min(15000, 1000 * 2 ** this.retry++);
+      setTimeout(() => this.connect(), delay);
+    };
+  }
+
+  send(msg: Record<string, unknown>): void {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+  }
+}
