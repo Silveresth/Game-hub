@@ -18,7 +18,8 @@ import { Convoy, artTexture } from './convoy';
 import { Visitors } from './visitors';
 import { Input } from './input';
 import { Sfx } from './sfx';
-import { CATALOG, incomeOf, money, perSec, work } from './catalog';
+import { CATALOG, artUrl, incomeOf, money, perSec, work } from './catalog';
+import { VfxEngine } from './vfx';
 
 const liveBar = mountLiveBar();
 setupPwa('../sw.js');
@@ -37,11 +38,11 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#f0dcc4', 90, 260);
+scene.fog = new THREE.Fog('#220b38', 90, 260); // Ambiance violet néon cartoon
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.35;
-scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x6b5a45, 1.15));
-const sun = new THREE.DirectionalLight(0xfff0d8, 2.4);
+scene.environmentIntensity = 0.45;
+scene.add(new THREE.HemisphereLight(0x00e5ff, 0xff007f, 1.35)); // Éclairage cyan & magenta
+const sun = new THREE.DirectionalLight(0xfff8e7, 2.6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 });
@@ -90,6 +91,12 @@ orbit.minDistance = 4;
 orbit.maxDistance = 24;
 orbit.minPolarAngle = 0.35;
 orbit.maxPolarAngle = 1.32;
+// Contrôles Roblox : Clic-droit pour la rotation de caméra, molette pour le zoom
+orbit.mouseButtons = {
+  LEFT: null,
+  MIDDLE: THREE.MOUSE.DOLLY,
+  RIGHT: THREE.MOUSE.ROTATE,
+};
 
 const hall = new AuctionHall();
 hall.resize(innerWidth, innerHeight);
@@ -107,6 +114,7 @@ const convoy = new Convoy(scene);
 const visitors = new Visitors(scene);
 const remotes = new RemotePlayers(scene);
 const guards = new Guards(scene);
+const vfxEngine = new VfxEngine(scene);
 remotes.hidden = (x, z, f) => hiddenAt(x, z, f);
 guards.hidden = (x, z, f) => hiddenAt(x, z, f);
 const input = new Input();
@@ -211,10 +219,21 @@ function renderHud(): void {
   }
   $('museumName').textContent = state.name;
   $('coins').textContent = money(state.coins);
+  $('topCoins').textContent = money(state.coins);
+  $('topRebirth').textContent = `NIV. ${state.level ?? 1}`;
   $('income').textContent = `+${perSec(state.income)} /s`;
-  $('slotsInfo').textContent = `${shown}/${state.slots} œuvres`;
-  $('valueInfo').textContent = `Valeur : ${money(state.value)}`;
+  $('slotsInfo').textContent = `${shown}/${state.slots} Piédestaux`;
+  $('valueInfo').textContent = `Valeur : $${money(state.value)}`;
   $('reserveInfo').textContent = reserve ? `${reserve} en réserve` : '';
+  const invBadge = $('invBadge');
+  if (invBadge) invBadge.textContent = String(state.artworks.length);
+  if (carrying) {
+    $('heldSlot').classList.remove('empty');
+    $('heldBrainrotName').textContent = work(carrying.workId).title;
+  } else {
+    $('heldSlot').classList.add('empty');
+    $('heldBrainrotName').textContent = 'Vide';
+  }
 }
 
 const fmtDur = (ms: number) => {
@@ -268,7 +287,9 @@ let crowbarArmed = false;
 
 let decorRoomIndex: number | null = null;
 
-function openOverlay(id: 'security' | 'market' | 'decor'): void {
+type OverlayId = 'security' | 'market' | 'decor' | 'invOverlay' | 'dailyOverlay';
+
+function openOverlay(id: OverlayId): void {
   if (!state) return;
   $(id).classList.add('open');
   input.enabled = false;
@@ -277,11 +298,11 @@ function openOverlay(id: 'security' | 'market' | 'decor'): void {
   else if (id === 'decor') renderDecor();
 }
 function closeOverlays(): void {
-  for (const id of ['security', 'market', 'help', 'boards', 'decor']) $(id).classList.remove('open');
+  for (const id of ['security', 'market', 'help', 'boards', 'decor', 'invOverlay', 'dailyOverlay']) $(id).classList.remove('open');
   if (!$('welcome').classList.contains('open')) input.enabled = true;
 }
 document.querySelectorAll<HTMLElement>('[data-close]').forEach((b) => (b.onclick = closeOverlays));
-for (const id of ['security', 'market', 'boards', 'decor']) $(id).addEventListener('pointerdown', (e) => e.target === $(id) && closeOverlays());
+for (const id of ['security', 'market', 'boards', 'decor', 'invOverlay', 'dailyOverlay']) $(id).addEventListener('pointerdown', (e) => e.target === $(id) && closeOverlays());
 $('secBtn').onclick = () => openOverlay('security');
 
 function offerHtml(title: string, desc: string, price: number | null, data: Record<string, string | number>, label?: string): string {
@@ -578,6 +599,42 @@ function setPrompt(items: Array<{ key: string; text: string; poor?: boolean }>):
 $('muteBtn').onclick = () => ($('muteBtn').textContent = sfx.toggleMute() ? '🔇' : '🔊');
 $('helpBtn').onclick = () => $('help').classList.add('open');
 $('helpClose').onclick = () => $('help').classList.remove('open');
+$('shopBtn')?.addEventListener('click', () => openOverlay('market'));
+$('dailyBtn')?.addEventListener('click', () => openOverlay('dailyOverlay'));
+$('claimDailyBtn')?.addEventListener('click', () => {
+  vfxEngine.burstCoins(pos, 16);
+  vfxEngine.spawnText('+$1,000 CASH!', pos, '#76ff03');
+  toast('🎁 Récompense quotidienne réclamée : +$1,000 Cash !');
+  closeOverlays();
+});
+$('sideQuestsBtn')?.addEventListener('click', () => {
+  if (state?.quest) {
+    toast(`📜 Quête active : ${state.quest.label} (+${money(state.quest.reward)} Cash)`);
+  }
+});
+$('sideTradeBtn')?.addEventListener('click', () => {
+  toast('🤝 Trading Plaza : Approchez-vous d’un joueur pour échanger des Brainrots !');
+});
+$('sideRebirthBtn')?.addEventListener('click', () => {
+  toast(`⭐ Rebirth : Niveau actuel ${state?.level ?? 1}. Agrandissez votre base pour le prochain palier !`);
+});
+$('sideInvBtn')?.addEventListener('click', () => {
+  if (!state) return;
+  const list = $('invList');
+  if (list) {
+    list.innerHTML = state.artworks.map((a) => {
+      const wk = work(a.workId);
+      const rar = CATALOG.rarities[wk.rarity];
+      return `<div style="background:#141829;border:3px solid #000;border-radius:12px;padding:8px;text-align:center;">
+        <img src="${artUrl(a.workId)}" style="width:100%;height:68px;object-fit:cover;border-radius:8px;border:2px solid #000;" />
+        <div style="font-weight:900;font-size:12px;margin:4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${wk.title}</div>
+        <div style="font-size:10px;font-weight:900;color:${rar.color};text-transform:uppercase;">${rar.label}</div>
+        <div style="font-size:11px;color:#76ff03;font-weight:900;">+$${money(wk.price)}</div>
+      </div>`;
+    }).join('') || '<div style="color:#a0aec0;grid-column:1/-1;">Aucun Brainrot dans l’inventaire. Adoptez-en au convoi !</div>';
+  }
+  openOverlay('invOverlay');
+});
 addEventListener('pointerdown', () => sfx.unlock());
 addEventListener('keydown', (e) => {
   sfx.unlock();
@@ -1225,12 +1282,15 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
         carryPlot = m.plot;
         setCarry({ workId: m.workId, frame: m.frame });
         sfx.rare();
-        banner('Vous l’avez !', 'Ramenez-la dans votre musée sans vous faire toucher par le propriétaire ni par un garde');
+        vfxEngine.spawnText('STOLEN!', pos, '#ff007f', { height: 1.5 });
+        vfxEngine.spawnStealSparks(pos);
+        banner('BRAQUAGE RÉUSSI !', `Tu as volé « ${title} » ! Fuis vers ta base pour l'exposer !`);
       } else if (m.plot === myPlot) {
         // l'œuvre disparaît du mur : on le voit, mais sans caméra la sirène ne sonne pas
         remotes.setWanted(m.thief, true);
         refreshSoon();
-        banner('Au voleur !', `${m.thiefName} s’enfuit avec « ${title} » : touchez-le pour l’arrêter`);
+        vfxEngine.spawnText('TAKEN!', pos, '#ff1744', { height: 1.4 });
+        banner('BRAQUAGE EN COURS !', `${m.thiefName} s’enfuit avec ton Brainrot « ${title} » : Rattrape-le !`);
       }
       break;
     case 'delivered':
@@ -1239,12 +1299,15 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
         setCarry(null);
         sfx.expand();
         player?.gesture('Wave', 'Idle');
-        banner('Casse réussi !', `« ${title} » est maintenant dans votre musée`);
+        vfxEngine.spawnText('+$' + money(work(m.workId).price), pos, '#76ff03', { height: 1.6 });
+        vfxEngine.burstConfetti(pos, 36);
+        vfxEngine.burstCoins(pos, 20);
+        banner('BRAQUAGE SÉCURISÉ ! 🏆', `« ${title} » est posé sur ton piédestal ! +Revenu passif !`);
         refreshSoon();
       } else if (m.plot === myPlot) {
         alarm(false);
         sfx.error();
-        banner('On vous a volé…', m.refund > 0 ? `${m.thiefName} est reparti avec « ${title} ». Assurance : +${money(m.refund)} pièces` : `${m.thiefName} est reparti avec « ${title} ». Protégez-vous : G`);
+        banner('Brainrot Perdu...', m.refund > 0 ? `${m.thiefName} a emporté « ${title} ». Assurance : +$${money(m.refund)}` : `${m.thiefName} a emporté « ${title} ». Protège ta base avec des lasers !`);
         refreshSoon();
       } else toast(`${m.thiefName} a volé « ${title} » au ${m.victimName}`);
       break;
@@ -1567,6 +1630,13 @@ function canMove(x: number, z: number): boolean {
   return !district.blocked(x, z, RADIUS, frameBoxes, frameCircles);
 }
 
+let autoSprint = false;
+let sprintSparkTimer = 0;
+$('sprintBtn')?.addEventListener('click', () => {
+  autoSprint = !autoSprint;
+  $('sprintBtn')?.classList.toggle('active', autoSprint);
+});
+
 function updatePlayer(dt: number): void {
   if (!player) return;
   const a = input.axis();
@@ -1576,11 +1646,15 @@ function updatePlayer(dt: number): void {
   const dx = -fwd.z * a.x + fwd.x * a.y;
   const dz = fwd.x * a.x + fwd.z * a.y;
   const mag = Math.min(1, Math.hypot(dx, dz));
-  // une œuvre sous le bras ralentit de 30 % ; pendant le décrochage, on ne bouge pas
-  const speed = (input.running() ? 7.5 : 4.4) * (carrying ? 0.7 : 1) * (stealing ? 0 : 1);
-  const k = 1 - Math.exp(-12 * dt);
-  vel.x += ((mag > 0.05 ? (dx / mag) * speed * mag : 0) - vel.x) * k;
-  vel.y += ((mag > 0.05 ? (dz / mag) * speed * mag : 0) - vel.y) * k;
+  
+  // Physique Roblox : accélération instantanée, inertie punchy, sprint dynamique
+  const isRunning = input.running() || autoSprint;
+  const targetSpeed = (isRunning ? 8.4 : 5.0) * (carrying ? 0.75 : 1) * (stealing ? 0 : 1);
+  const responsiveness = mag > 0.05 ? 32 : 20; // Arrêt sec et réactivité vive Roblox
+  const k = 1 - Math.exp(-responsiveness * dt);
+  
+  vel.x += ((mag > 0.05 ? (dx / mag) * targetSpeed * mag : 0) - vel.x) * k;
+  vel.y += ((mag > 0.05 ? (dz / mag) * targetSpeed * mag : 0) - vel.y) * k;
 
   const nx = pos.x + vel.x * dt;
   const nz = pos.z + vel.y * dt;
@@ -1595,23 +1669,47 @@ function updatePlayer(dt: number): void {
     vel.x = 0;
   } else vel.set(0, 0);
 
+  // Étincelles de sprint Roblox
+  if (isRunning && mag > 0.5 && pos.y <= 0.05) {
+    sprintSparkTimer += dt;
+    if (sprintSparkTimer > 0.25) {
+      sprintSparkTimer = 0;
+      vfxEngine.spawnStealSparks(pos.clone().setY(pos.y + 0.05));
+    }
+  }
+
+  // Saut franc et réactif Roblox Studio (hauteur vive et gravité cartoon)
   if (input.consume('jump') && pos.y <= 0.001) {
-    vy = 6.2;
+    vy = 7.4;
     sfx.jump();
     player.gesture('Jump', 'Idle');
+    vfxEngine.spawnStealSparks(pos.clone().setY(pos.y + 0.1));
   }
-  vy -= 18 * dt;
+  vy -= 22 * dt;
   pos.y = Math.max(0, pos.y + vy * dt);
   if (pos.y === 0) vy = 0;
 
+  // Détection des trampolines de l'arène (propulsion verticale Roblox)
+  for (const t of [{ x: -16, z: 12 }, { x: 16, z: 12 }, { x: -28, z: -12 }, { x: 28, z: -12 }]) {
+    if (Math.hypot(pos.x - t.x, pos.z - t.z) < 1.4 && pos.y < 0.4) {
+      vy = 12.5; // Super jump trampoline
+      sfx.expand();
+      player.gesture('Jump', 'Idle');
+      vfxEngine.burstConfetti(pos.clone().setY(0.5), 18);
+      vfxEngine.spawnText('BOING!', pos.clone().setY(1.2), '#ff007f');
+      break;
+    }
+  }
+
   const sp = vel.length();
-  if (sp > 0.3) {
+  if (sp > 0.2) {
+    // Rotation Roblox : orientation ultra rapide vers la direction du pas
     const want = Math.atan2(vel.x, vel.y);
     let d = want - facing;
     d = Math.atan2(Math.sin(d), Math.cos(d));
-    facing += d * Math.min(1, dt * 12);
+    facing += d * Math.min(1, dt * 24);
   }
-  player.play(sp > 5.6 ? 'Running' : sp > 0.3 ? 'Walking' : 'Idle');
+  player.play(sp > 5.8 ? 'Running' : sp > 0.25 ? 'Walking' : 'Idle');
   player.root.position.copy(pos);
   player.root.position.y += floor * FLOOR_H;
   player.root.rotation.y = facing;
@@ -1808,28 +1906,35 @@ const camRay = new THREE.Raycaster();
 const camDir = new THREE.Vector3();
 
 function updateCamera(dt: number): void {
-  const target = pos.clone().add(new THREE.Vector3(0, 1.5 + floor * FLOOR_H, 0));
-  focus.lerp(target, 1 - Math.exp(-10 * dt));
+  // Déplacement et suivi de caméra dynamique style Roblox
+  const target = pos.clone().add(new THREE.Vector3(0, 1.6 + floor * FLOOR_H, 0));
+  // Suivi rapide et net (amorti réactif)
+  focus.lerp(target, 1 - Math.exp(-18 * dt));
   const delta = focus.clone().sub(orbit.target);
   orbit.target.add(delta);
   camera.position.add(delta);
-  // Dans un musée (sans toit), la caméra monte pour regarder par-dessus les murs ; dehors, elle redescend.
+
   const inside = !!viewAt();
-  orbit.maxPolarAngle += ((inside ? 0.72 : 1.32) - orbit.maxPolarAngle) * (1 - Math.exp(-3 * dt));
-  userDist += ((inside ? Math.max(userDist, 13) : userDist) - userDist) * (1 - Math.exp(-2 * dt));
-  // 1. revenir à la distance voulue, 2. appliquer rotation / zoom de l'utilisateur, 3. mémoriser la distance
+  orbit.maxPolarAngle += ((inside ? 0.85 : 1.35) - orbit.maxPolarAngle) * (1 - Math.exp(-6 * dt));
+  userDist += ((inside ? Math.max(userDist, 10) : userDist) - userDist) * (1 - Math.exp(-4 * dt));
+
   camDir.copy(camera.position).sub(orbit.target).normalize();
   camera.position.copy(orbit.target).addScaledVector(camDir, userDist);
   orbit.update();
   userDist = camera.position.distanceTo(orbit.target);
-  // 4. collision avec les murs
+
+  // Évitement rapide des murs
   camDir.copy(camera.position).sub(orbit.target).normalize();
   camRay.set(orbit.target, camDir);
   camRay.far = userDist;
   const occ: THREE.Object3D[] = [...district.occluders];
   for (const v of views.values()) if (v.plot.x === undefined || Math.abs(v.plot.x - pos.x) < 40) occ.push(...v.occluders);
   const hit = camRay.intersectObjects(occ, false)[0];
-  if (hit) camera.position.copy(orbit.target).addScaledVector(camDir, Math.max(0.3, hit.distance - 0.3));
+  if (hit) camera.position.copy(orbit.target).addScaledVector(camDir, Math.max(0.4, hit.distance - 0.25));
+
+  // Empêcher la caméra de passer sous le sol
+  camera.position.y = Math.max(camera.position.y, 0.8);
+
   sun.position.copy(focus).add(new THREE.Vector3(26, 42, 14));
   sun.target.position.copy(focus);
 }
@@ -1891,6 +1996,7 @@ renderer.setAnimationLoop(() => {
   guards.update(dt, t);
   updateFx(t);
   district.update(t);
+  vfxEngine.update(dt);
   const alarmOn = performance.now() < alarmUntil;
   $('alert').classList.toggle('on', alarmOn);
   if (state && Math.floor(t) !== Math.floor(t - dt)) {

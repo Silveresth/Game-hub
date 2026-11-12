@@ -36,12 +36,12 @@ export class Label {
     g.clearRect(0, 0, w, h);
     const total = lines.reduce((s, l) => s + (l.size ?? 40) * 1.18, 0);
     if (opts.bg) {
-      g.font = `${lines[0]?.weight ?? 800} ${lines[0]?.size ?? 40}px 'Segoe UI', system-ui, sans-serif`;
-      const width = Math.min(w - 8, Math.max(...lines.map((l) => { g.font = `${l.weight ?? 700} ${l.size ?? 40}px 'Segoe UI', system-ui, sans-serif`; return g.measureText(l.text).width; })) + 48);
+      g.font = `${lines[0]?.weight ?? 900} ${lines[0]?.size ?? 40}px 'Fredoka One', 'Luckiest Guy', 'Impact', 'Segoe UI', sans-serif`;
+      const width = Math.min(w - 8, Math.max(...lines.map((l) => { g.font = `${l.weight ?? 800} ${l.size ?? 40}px 'Fredoka One', 'Luckiest Guy', 'Impact', sans-serif`; return g.measureText(l.text).width; })) + 48);
       const bh = Math.min(h - 8, total + 24);
       g.fillStyle = opts.bg;
-      g.strokeStyle = opts.border ?? 'rgba(255,255,255,.25)';
-      g.lineWidth = 4;
+      g.strokeStyle = opts.border ?? '#00e5ff';
+      g.lineWidth = 6;
       g.beginPath();
       g.roundRect((w - width) / 2, (h - bh) / 2, width, bh, 22);
       g.fill();
@@ -52,9 +52,10 @@ export class Label {
     g.textBaseline = 'top';
     for (const l of lines) {
       const size = l.size ?? 40;
-      g.font = `${l.weight ?? 700} ${size}px 'Segoe UI', system-ui, sans-serif`;
-      g.lineWidth = Math.max(4, size / 7);
-      g.strokeStyle = 'rgba(0,0,0,.7)';
+      g.font = `${l.weight ?? 900} ${size}px 'Fredoka One', 'Luckiest Guy', 'Impact', sans-serif`;
+      g.lineJoin = 'round';
+      g.lineWidth = Math.max(6, size / 5);
+      g.strokeStyle = '#000000';
       g.strokeText(l.text, w / 2, y + size * 0.09, w - 16);
       g.fillStyle = l.color ?? '#fff';
       g.fillText(l.text, w / 2, y + size * 0.09, w - 16);

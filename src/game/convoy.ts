@@ -45,14 +45,14 @@ class Truck {
   private sirens: THREE.Mesh[] = [];
 
   constructor() {
-    // 1. Châssis & carrosserie moderne / cyberpunk
-    const bodyMat = std(0x0f1118, { roughness: 0.25, metalness: 0.65 });
-    const trimMat = std(0x232838, { roughness: 0.3, metalness: 0.8 });
-    const chromeMat = std(0xdddddd, { roughness: 0.1, metalness: 0.95 });
+    // 1. Châssis & carrosserie cartoony Low-Poly Cyberpunk
+    const bodyMat = std(0x111422, { roughness: 0.35, metalness: 0.4 });
+    const trimMat = std(0x00e5ff, { roughness: 0.2, metalness: 0.7, emissive: 0x006688, emissiveIntensity: 0.4 });
+    const chromeMat = std(0xffd600, { roughness: 0.1, metalness: 0.9 });
     const glassMat = new THREE.MeshPhysicalMaterial({
-      color: 0x64b5f6,
+      color: 0x00e5ff,
       transmission: 0.85,
-      opacity: 1,
+      opacity: 0.9,
       transparent: true,
       roughness: 0.1,
       metalness: 0.1,

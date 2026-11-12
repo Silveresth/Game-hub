@@ -681,7 +681,7 @@ export class MuseumView {
     this.signKey = name;
     const m = this.signMesh.material as THREE.MeshStandardMaterial;
     m.map?.dispose();
-    m.map = signTexture([['MUSÉE', '#e8b64c', 54], [name.toUpperCase(), '#fff4dc', 92]]);
+    m.map = signTexture([['BASE BRAINROT', '#00e5ff', 50], [name.toUpperCase(), '#ffd600', 88]]);
     m.emissiveMap = m.map;
     m.needsUpdate = true;
   }
@@ -809,21 +809,21 @@ export class MuseumView {
 
   private buildOwnExtras(): void {
     const f = this.plot.f;
-    // caisse
+    // caisse / Piédestal de revenu passif
     const reg = new THREE.Group();
-    const counter = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.8), std(0x2b1d14, { roughness: 0.4 }));
-    counter.position.y = 0.5;
-    const top = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 0.9), std(0xe9e2d0, { roughness: 0.25 }));
-    top.position.y = 1.04;
-    this.cashStack = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.4, 24), new THREE.MeshStandardMaterial({ color: 0xffc83d, metalness: 1, roughness: 0.25 }));
-    this.cashStack.position.y = 1.28;
+    const counter = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.2, 0.8, 16), std(0x1a1d2e, { roughness: 0.3 }));
+    counter.position.y = 0.4;
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.12, 16), std(0xffd600, { metalness: 0.8, roughness: 0.2 }));
+    top.position.y = 0.86;
+    this.cashStack = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.5, 16), new THREE.MeshStandardMaterial({ color: 0x76ff03, emissive: 0x33aa00, emissiveIntensity: 0.5, metalness: 0.5, roughness: 0.2 }));
+    this.cashStack.position.y = 1.15;
     reg.add(counter, top, this.cashStack);
     reg.position.copy(this.registerPos).add(new THREE.Vector3(0, 0, -f * 1.2));
-    // panneau d'agrandissement
+    // pupitre d'agrandissement de base
     const sign = new THREE.Group();
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.6, 0.14), std(0x23262e, { metalness: 0.6 }));
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.6, 0.2), std(0x1a1d2e, { metalness: 0.6 }));
     post.position.y = 0.8;
-    const board = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.9, 0.08), std(0x3d6bff, { emissive: 0x1d3aa8, emissiveIntensity: 0.5 }));
+    const board = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.0, 0.1), std(0x00e5ff, { emissive: 0x007799, emissiveIntensity: 0.5 }));
     board.position.y = 1.8;
     sign.add(post, board);
     sign.position.copy(this.signPos).add(new THREE.Vector3(0, 0, -f * 1.2));
@@ -831,15 +831,15 @@ export class MuseumView {
     this.extras.traverse((o) => ((o as THREE.Mesh).castShadow = true));
 
     const ring = (at: THREE.Vector3, color: number) => {
-      const r = new THREE.Mesh(new THREE.RingGeometry(0.75, 1.0, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.75, depthWrite: false }));
+      const r = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.25, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false }));
       r.rotation.x = -Math.PI / 2;
       r.position.copy(at).setY(0.04);
       this.extras.add(r);
       this.rings.push(r);
     };
-    ring(this.registerPos, 0xffc83d);
-    ring(this.signPos, 0x6f8dff);
-    ring(this.lockPos, 0xff4d6d);
+    ring(this.registerPos, 0x76ff03); // Vert lime pour le cash passif
+    ring(this.signPos, 0x00e5ff); // Cyan pour l'upgrade
+    ring(this.lockPos, 0xff007f); // Magenta pour le verrou / shield
     this.registerLabel = new Label(0.9, 640, 200);
     this.registerLabel.sprite.position.copy(this.registerPos).add(new THREE.Vector3(0, 2.7, -f * 1.2));
     this.signLabel = new Label(0.85, 640, 200);

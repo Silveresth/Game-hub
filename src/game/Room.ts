@@ -31,14 +31,14 @@ const WALL_T = 0.24;
 const HALF = CELL / 2;
 
 const THEME_COLORS: Record<ThemeId, { wall: number; floor: number; trim: number }> = {
-  modern:      { wall: 0xf5f0e6, floor: 0xd9d1bf, trim: 0xe8e0ce },
-  classic:     { wall: 0xece4d3, floor: 0x8b7355, trim: 0xd4c9b2 },
-  futuristic:  { wall: 0x1a1d2b, floor: 0x23262e, trim: 0x2b2f38 },
-  zen:         { wall: 0xe9e2d0, floor: 0xc4b896, trim: 0xd5cdb5 },
+  modern:      { wall: 0x1a1e2e, floor: 0x121420, trim: 0x00e5ff },
+  classic:     { wall: 0x22182e, floor: 0x161020, trim: 0xff007f },
+  futuristic:  { wall: 0x0f1a24, floor: 0x091018, trim: 0x76ff03 },
+  zen:         { wall: 0x1b1c2b, floor: 0x11131f, trim: 0xffd600 },
 };
 
 const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
-  new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
+  new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.1, flatShading: true, ...extra });
 
 /**
  * Bâtiment composé de salles sur une grille.
@@ -132,13 +132,22 @@ export class MuseumBuilding {
         }
       }
 
-      // Plinthes basses (trim)
+      // Plinthes basses néon (trim)
       const trim = new THREE.Mesh(
         new THREE.BoxGeometry(CELL + WALL_T, 0.25, CELL + WALL_T),
-        std(colors.trim, { roughness: 0.5 }),
+        std(colors.trim, { roughness: 0.2, emissive: colors.trim, emissiveIntensity: 0.35 }),
       );
       trim.position.set(cx, 0.125, cz);
       this.group.add(trim);
+
+      // Tapis rouge d'exposition central pour les Brainrots
+      const redCarpet = new THREE.Mesh(
+        new THREE.PlaneGeometry(CELL * 0.42, CELL * 0.85),
+        std(0xd50000, { roughness: 0.6 }),
+      );
+      redCarpet.rotation.x = -Math.PI / 2;
+      redCarpet.position.set(cx, 0.02, cz);
+      this.group.add(redCarpet);
     }
   }
 
