@@ -30,11 +30,11 @@ const WALL_H = 5;
 const WALL_T = 0.24;
 const HALF = CELL / 2;
 
-const THEME_COLORS: Record<ThemeId, { wall: number; floor: number; trim: number }> = {
-  modern:      { wall: 0xf5f0e6, floor: 0xd9d1bf, trim: 0xe8e0ce },
-  classic:     { wall: 0xece4d3, floor: 0x8b7355, trim: 0xd4c9b2 },
-  futuristic:  { wall: 0x1a1d2b, floor: 0x23262e, trim: 0x2b2f38 },
-  zen:         { wall: 0xe9e2d0, floor: 0xc4b896, trim: 0xd5cdb5 },
+const THEME_COLORS: Record<ThemeId, { wall: number; floor: number; trim: number; wallRoughness?: number; floorRoughness?: number; floorMetalness?: number }> = {
+  modern:      { wall: 0x3a424e, floor: 0x242831, trim: 0x4f5b6d, wallRoughness: 0.5, floorRoughness: 0.25, floorMetalness: 0.1 }, // Béton ciré anthracite moderne, murs contrastés galerie contemporaine
+  classic:     { wall: 0x6e262c, floor: 0x54361c, trim: 0xb89758, wallRoughness: 0.8, floorRoughness: 0.4 }, // Velours rouge rubis impérial, parquet bois noble chaleureux et moulures dorées
+  futuristic:  { wall: 0x121524, floor: 0x0c0f1a, trim: 0x00d2ff, wallRoughness: 0.3, floorRoughness: 0.2, floorMetalness: 0.4 }, // Cyber-galerie sombre néon cyan & reflets tech
+  zen:         { wall: 0x485848, floor: 0xb8aa82, trim: 0x33251a, wallRoughness: 0.85, floorRoughness: 0.6 }, // Bambou vert sauge, nattes tatami sable et boiseries sombres cèdre
 };
 
 const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
@@ -74,7 +74,7 @@ export class MuseumBuilding {
       // Sol
       const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(CELL, CELL),
-        std(colors.floor, { roughness: 0.65 }),
+        std(colors.floor, { roughness: colors.floorRoughness ?? 0.65, metalness: colors.floorMetalness ?? 0 }),
       );
       floor.rotation.x = -Math.PI / 2;
       floor.position.set(cx, 0, cz);
@@ -98,7 +98,38 @@ export class MuseumBuilding {
            (entrance.side === 'w' && dx === -1 && dz === 0) ||
            (entrance.side === 'e' && dx === 1 && dz === 0));
 
-        if (neighbor) continue; // ouverture vers la salle voisine
+        if (neighbor) {
+          // Entre deux salles voisines : arcade ouverte avec retombées de mur latérales (largeur d'arche = 4.2m)
+          // Permet aux tableaux accrochés sur les ailes de reposer sur un véritable mur physique !
+          // segW = (12 - 4.2) / 2 = 3.9 m de chaque côté
+          const doorPassage = 4.2;
+          const segW = (CELL - doorPassage) / 2;
+          for (const side of [-1, 1]) {
+            const partitionWall = new THREE.Mesh(
+              new THREE.BoxGeometry(axis === 'z' ? segW : WALL_T, WALL_H, axis === 'x' ? segW : WALL_T),
+              std(colors.wall, { roughness: colors.wallRoughness ?? 0.7 }),
+            );
+            partitionWall.position.set(
+              cx + (axis === 'z' ? side * (segW / 2 + doorPassage / 2) : offset),
+              WALL_H / 2,
+              cz + (axis === 'x' ? side * (segW / 2 + doorPassage / 2) : offset),
+            );
+            this.group.add(partitionWall);
+            this.hangables.push(partitionWall);
+          }
+          // Imposte supérieure au-dessus de l'arcade pour une belle transition architecturale
+          const transom = new THREE.Mesh(
+            new THREE.BoxGeometry(axis === 'z' ? doorPassage : WALL_T, 1.2, axis === 'x' ? doorPassage : WALL_T),
+            std(colors.trim, { roughness: 0.5 }),
+          );
+          transom.position.set(
+            cx + (axis === 'x' ? offset : 0),
+            WALL_H - 0.6,
+            cz + (axis === 'z' ? offset : 0),
+          );
+          this.group.add(transom);
+          continue;
+        }
 
         if (isEntrance) {
           // mur percé : deux segments de chaque côté de la porte (largeur 3 m)
@@ -106,7 +137,7 @@ export class MuseumBuilding {
           for (const side of [-1, 1]) {
             const wall = new THREE.Mesh(
               new THREE.BoxGeometry(axis === 'z' ? segW : WALL_T, WALL_H, axis === 'x' ? segW : WALL_T),
-              std(colors.wall),
+              std(colors.wall, { roughness: colors.wallRoughness ?? 0.7 }),
             );
             wall.position.set(
               cx + (axis === 'z' ? side * (segW / 2 + 1.5) : offset),
@@ -120,7 +151,7 @@ export class MuseumBuilding {
           // mur plein
           const wall = new THREE.Mesh(
             new THREE.BoxGeometry(axis === 'z' ? CELL : WALL_T, WALL_H, axis === 'x' ? CELL : WALL_T),
-            std(colors.wall),
+            std(colors.wall, { roughness: colors.wallRoughness ?? 0.7 }),
           );
           wall.position.set(
             cx + (axis === 'x' ? offset : 0),

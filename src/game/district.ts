@@ -156,7 +156,7 @@ export class District {
       new THREE.ShaderMaterial({
         side: THREE.BackSide,
         depthWrite: false,
-        uniforms: { top: { value: new THREE.Color('#5d8fe0') }, horizon: { value: new THREE.Color('#ffe0c0') } },
+        uniforms: { top: { value: new THREE.Color('#2568ba') }, horizon: { value: new THREE.Color('#9fc2ea') } },
         vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
         fragmentShader: /* glsl */ `
           uniform vec3 top;
@@ -183,22 +183,22 @@ export class District {
   private buildGround(): void {
     // Grand dallage minéral et allées structurées en plaques de pierre
     // 1. Dalle de fondation globale en pierre beige/grège chaleureuse
-    const baseStone = tileTexture('#9e9382', 'rgba(50,45,35,0.35)', 8, 0.04);
+    const baseStone = tileTexture('#5a5245', 'rgba(30,25,20,0.45)', 8, 0.04);
     baseStone.repeat.set(50, 50);
     this.plane(240, 180, 0, 0, std(0xffffff, { map: baseStone, roughness: 0.9 }), -0.05);
 
-    // 2. Parvis central majestueux en dalles de pierre taillée avec encadrements
-    const pav = tileTexture('#c8bead', 'rgba(70,60,45,0.4)', 4, 0.03);
+    // 2. Parvis central majestueux en pavés de pierre ambrée chaleureuse
+    const pav = tileTexture('#948470', 'rgba(40,35,28,0.5)', 4, 0.03);
     pav.repeat.set(170 / 4, 48 / 4);
     this.plane(170, 48, 0, 0, std(0xffffff, { map: pav, roughness: 0.8 }), -0.01);
 
-    // 3. Trottoirs piétons d'accès le long de la place (nord et sud)
-    const walkwayMat = std(0xdcd4c4, { roughness: 0.75 });
+    // 3. Trottoirs piétons d'accès le long de la place (nord et sud) en pierre dorée
+    const walkwayMat = std(0xa89984, { roughness: 0.75 });
     this.plane(160, 4.0, 0, -5.5, walkwayMat, 0.01);
     this.plane(160, 4.0, 0, 5.5, walkwayMat, 0.01);
 
-    // 4. Chaussée du convoi (asphalte propre avec bordures en granit clair)
-    const asphalt = tileTexture('#34373d', 'rgba(0,0,0,0)', 1, 0.04);
+    // 4. Chaussée du convoi (asphalte sombre avec bordures en granit clair)
+    const asphalt = tileTexture('#282b30', 'rgba(0,0,0,0)', 1, 0.04);
     asphalt.repeat.set(30, 1);
     this.plane(148, 6.4, 0, ROAD.z, std(0xffffff, { map: asphalt, roughness: 0.85 }), 0);
 
@@ -206,23 +206,23 @@ export class District {
       this.plane(3, 0.25, x, ROAD.z, std(0xf4f0e4), 0.01);
     }
     for (const z of [-3.35, 3.35]) {
-      const kerb = new THREE.Mesh(new THREE.BoxGeometry(148, 0.2, 0.35), std(0xe0dad0, { roughness: 0.7 }));
+      const kerb = new THREE.Mesh(new THREE.BoxGeometry(148, 0.2, 0.35), std(0x736c62, { roughness: 0.7 }));
       kerb.position.set(0, 0.1, z);
       kerb.receiveShadow = true;
       this.group.add(kerb);
     }
 
-    // 5. Parcelles des musées : dallages individuels raffinés en damier de pierre
-    const plot = tileTexture('#dfd8c8', 'rgba(80,70,55,0.3)', 6, 0.02);
+    // 5. Parcelles des musées : dallages individuels raffinés en damier de pierre noble
+    const plot = tileTexture('#8c7f6d', 'rgba(40,35,28,0.4)', 6, 0.02);
     plot.repeat.set(6, 6);
     const plotMat = std(0xffffff, { map: plot, roughness: 0.75 });
     for (const x of [-60, -20, 20, 60]) {
       for (const z of [-41, 41]) {
         // Dalle de parcelle complète
         this.plane(38, 38, x, z, plotMat, -0.005);
-        // Allée en plaques de marbre clair guidant de la chaussée jusqu'à l'entrée du musée
+        // Allée en plaques de travertin guidant de la chaussée jusqu'à l'entrée du musée
         const walkZ = z > 0 ? 15 : -15;
-        this.plane(6, 18, x, walkZ, std(0xebe5d8, { roughness: 0.7 }), 0.005);
+        this.plane(6, 18, x, walkZ, std(0xa89882, { roughness: 0.7 }), 0.005);
       }
     }
   }
@@ -254,11 +254,15 @@ export class District {
       roofPeak.position.set(0, 12.5, 0);
       g.add(roofPeak);
 
-      // Fronton triangulaire sculpté avec horloge/relief doré
-      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 9, 3.4, 3, 1), stone);
-      ped.rotation.set(Math.PI / 2, 0, Math.PI);
-      ped.scale.set(1.75, 0.65, 1);
-      ped.position.set(0, 11.5, 12.1 - 0.4);
+      // Fronton triangulaire architectural sculpté (orienté vers le ciel)
+      const pedShape = new THREE.Shape();
+      pedShape.moveTo(-13, 0);
+      pedShape.lineTo(13, 0);
+      pedShape.lineTo(0, 3.2);
+      pedShape.closePath();
+      const pedGeo = new THREE.ExtrudeGeometry(pedShape, { depth: 0.9, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.08, bevelThickness: 0.08 });
+      const ped = new THREE.Mesh(pedGeo, stone);
+      ped.position.set(0, 9.8, 12.1);
 
       const clockOrn = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.15, 24), goldAccent);
       clockOrn.rotation.x = Math.PI / 2;
@@ -344,11 +348,12 @@ export class District {
     this.group.add(f);
     this.circles.push({ x: 0, z: -12, r: 3.6 });
 
-    // lampadaires le long de la route
+    // lampadaires élégants disposés le long de la route en évitant strictement l'axe central des musées
+    // Les musées sont situés à x = -60, -20, 20, 60 -> on place les lampadaires aux entre-axes (x = -75, -40, 0, 40, 75)
     const post = std(0x23262e, { metalness: 0.6, roughness: 0.4 });
     const bulb = new THREE.MeshStandardMaterial({ color: 0xfff1cf, emissive: 0xffd58a, emissiveIntensity: 1.4 });
-    for (let x = -60; x <= 60; x += 20) {
-      for (const z of [-5, 5]) {
+    for (const x of [-75, -40, 0, 40, 75]) {
+      for (const z of [-5.2, 5.2]) {
         const l = new THREE.Group();
         const p = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 4.2, 10), post);
         p.position.y = 2.1;

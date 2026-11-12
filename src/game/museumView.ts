@@ -108,6 +108,12 @@ export class MuseumView {
   /** Musée loin de la caméra : ses œuvres ne sont pas dessinées. */
   private far = false;
 
+  // Portes battantes ouvrantes du musée
+  private leftDoorGroup: THREE.Group | null = null;
+  private rightDoorGroup: THREE.Group | null = null;
+  private doorAngle = 0; // 0 = fermé, ~1.4 = ouvert
+  readonly doorCenter: THREE.Vector3;
+
   /** Volumes qui peuvent masquer le joueur (pour la caméra), étages masqués exclus. */
   get occluders(): THREE.Object3D[] {
     return [...this.wallOcc, ...this.upperOcc.filter((_, i) => i + 1 <= this.cut).flat(), ...this.facadeOcc];
@@ -130,6 +136,7 @@ export class MuseumView {
     this.registerPos = toWorld(plot, -3.4, 0, -3.4);
     this.signPos = toWorld(plot, 3.4, 0, -3.4);
     this.lockPos = toWorld(plot, 0, 0, -4.2);
+    this.doorCenter = toWorld(plot, 0, 0, -6.0);
 
     // laser du verrou, dans l'encadrement de la porte d'entrée
     this.barrier = new THREE.Mesh(
@@ -689,6 +696,14 @@ export class MuseumView {
   private clearFacade(): void {
     disposeMerged(this.facadeMerged);
     this.facadeMerged = null;
+    if (this.leftDoorGroup) {
+      this.leftDoorGroup.removeFromParent();
+      this.leftDoorGroup = null;
+    }
+    if (this.rightDoorGroup) {
+      this.rightDoorGroup.removeFromParent();
+      this.rightDoorGroup = null;
+    }
     for (const c of [...this.facade.children]) {
       this.facade.remove(c);
       c.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
@@ -748,11 +763,25 @@ export class MuseumView {
     const entab = new THREE.Mesh(new THREE.BoxGeometry(22, 1.4, 4.2), stoneMat);
     entab.position.set(x0, 7.1, wallZ + d * 1.6);
 
-    // Fronton triangulaire majestueux avec médaillon doré
-    const pediment = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 8.5, 2.8, 3, 1), stoneMat);
-    pediment.rotation.set(Math.PI / 2, 0, Math.PI);
-    pediment.scale.set(1.4, 0.5, 1);
-    pediment.position.set(x0, 9.2, wallZ + d * 3.4);
+    // Fronton triangulaire sculpté majestueux (véritable fronton classique orienté vers le ciel)
+    const pedShape = new THREE.Shape();
+    pedShape.moveTo(-11, 0);
+    pedShape.lineTo(11, 0);
+    pedShape.lineTo(0, 2.7);
+    pedShape.closePath();
+    const pedGeo = new THREE.ExtrudeGeometry(pedShape, {
+      depth: 0.9,
+      bevelEnabled: true,
+      bevelSegments: 2,
+      steps: 1,
+      bevelSize: 0.08,
+      bevelThickness: 0.08,
+    });
+    const pediment = new THREE.Mesh(pedGeo, stoneMat);
+    pediment.position.set(x0, 7.8, wallZ + d * 3.4);
+    if (d === -1) {
+      pediment.rotation.y = Math.PI;
+    }
 
     const goldMedallion = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.15, 20), goldTrim);
     goldMedallion.rotation.x = Math.PI / 2;
@@ -767,6 +796,38 @@ export class MuseumView {
     steps.position.set(x0, 0.2, wallZ + d * 2.5);
 
     this.facade.add(entab, pediment, goldMedallion, roof, steps);
+
+    // Portes battantes d'apparat en bois noble avec vitres et garnitures dorées
+    const doorWood = std(0x2a1a12, { roughness: 0.5 });
+    const doorGlass = new THREE.MeshStandardMaterial({ color: 0x8fc5ff, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.35 });
+    const doorW = 1.45;
+    const doorH = 3.6;
+    const doorThick = 0.14;
+
+    const createLeaf = (isLeft: boolean) => {
+      const pivot = new THREE.Group();
+      // Le pivot se place sur le gond extérieur
+      pivot.position.set(x0 + (isLeft ? -1.5 : 1.5), 0, wallZ + d * 0.4);
+      if (d === -1) pivot.rotation.y = Math.PI;
+
+      const leaf = new THREE.Group();
+      const frameMesh = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, doorThick), doorWood);
+      frameMesh.position.set(isLeft ? doorW / 2 : -doorW / 2, doorH / 2, 0);
+      frameMesh.castShadow = true;
+
+      const windowPane = new THREE.Mesh(new THREE.BoxGeometry(doorW * 0.65, doorH * 0.65, doorThick * 0.5), doorGlass);
+      windowPane.position.copy(frameMesh.position);
+
+      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.5, 10), goldTrim);
+      handle.position.set(isLeft ? doorW - 0.15 : -(doorW - 0.15), doorH * 0.45, doorThick * 0.65);
+      leaf.add(frameMesh, windowPane, handle);
+      pivot.add(leaf);
+      return pivot;
+    };
+
+    this.leftDoorGroup = createLeaf(true);
+    this.rightDoorGroup = createLeaf(false);
+    this.scene.add(this.leftDoorGroup, this.rightDoorGroup);
 
     // Tapis de marbre noble menant vers la galerie
     const runway = new THREE.Mesh(
@@ -903,7 +964,7 @@ export class MuseumView {
     if (lines.length) this.status.update(lines, { bg: 'rgba(8,10,18,.75)', border: this.own ? '#ffd36b' : 'rgba(255,255,255,.3)' });
   }
 
-  update(t: number, dt: number, now: number, cam?: THREE.Vector3): void {
+  update(t: number, dt: number, now: number, cam?: THREE.Vector3, playerPos?: THREE.Vector3): void {
     // loin de la caméra, les œuvres (cachées derrière les murs) ne sont pas dessinées
     if (cam) this.far = Math.hypot(cam.x - this.plot.x, cam.z - (this.plot.z + this.plot.f * CELL)) > 75;
     for (const [uid, s] of this.shown) {
@@ -913,6 +974,17 @@ export class MuseumView {
     const locked = this.isLocked(now);
     this.barrier.visible = locked;
     if (locked) (this.barrier.material as THREE.MeshBasicMaterial).opacity = 0.35 + Math.sin(t * 10) * 0.12;
+
+    // Animation dynamique des portes battantes d'entrée : s'ouvrent à l'approche
+    if (this.leftDoorGroup && this.rightDoorGroup) {
+      const distToDoor = playerPos ? Math.hypot(playerPos.x - this.doorCenter.x, playerPos.z - this.doorCenter.z) : 99;
+      const shouldOpen = !locked && distToDoor < 5.8;
+      const targetAngle = shouldOpen ? 1.45 : 0;
+      this.doorAngle += (targetAngle - this.doorAngle) * Math.min(1, dt * 7);
+      this.leftDoorGroup.rotation.y = (this.plot.f === -1 ? Math.PI : 0) - this.doorAngle;
+      this.rightDoorGroup.rotation.y = (this.plot.f === -1 ? Math.PI : 0) + this.doorAngle;
+    }
+
     if (this.own && this.lockLabel) {
       const lines = locked
         ? [{ text: `🔒 VERROUILLÉ · ${Math.ceil((this.lockedUntil - now) / 1000)} s`, color: '#ff8fa0', size: 50, weight: 900 }]

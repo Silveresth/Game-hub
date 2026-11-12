@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 import { readFileSync } from 'node:fs';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:3001';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const layout = JSON.parse(readFileSync('src/shared/layout.json', 'utf8'));
 let failures = 0;
 const ok = (cond, label) => {
@@ -165,7 +166,6 @@ const standBy = (plot, slot) => {
   const p = slotWorld(plot, slot);
   return { x: p.x + (plot.x - p.x) * 0.25, z: p.z + (plot.z - p.z) * 0.25 };
 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 await http('dev/age', {}, A);
 let s3 = await http('security', { item: 'cameras' }, A);

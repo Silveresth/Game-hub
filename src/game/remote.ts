@@ -48,8 +48,9 @@ class Remote {
       this.carry = null;
     }
     if (carry) {
-      this.carry = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.0), new THREE.MeshBasicMaterial({ map: artTexture(carry.workId), side: THREE.DoubleSide }));
-      this.carry.position.set(0, 2.45, 0);
+      this.carry = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.9), new THREE.MeshBasicMaterial({ map: artTexture(carry.workId), side: THREE.DoubleSide }));
+      this.carry.position.set(0, 1.1, 0.55);
+      this.carry.rotation.set(-0.15, 0, 0);
       this.ch.root.add(this.carry);
     }
   }

@@ -30,6 +30,11 @@ export class Character {
     const box = new THREE.Box3().setFromObject(model);
     model.scale.setScalar(HEIGHT / (box.max.y - box.min.y));
     model.traverse((o) => {
+      // Masquer systématiquement l'arme ou accessoire de combat s'il existe dans le rig
+      if (/pistol|gun|weapon|sword|arme/i.test(o.name)) {
+        o.visible = false;
+        return;
+      }
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
       mesh.castShadow = true;

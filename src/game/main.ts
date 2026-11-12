@@ -37,11 +37,11 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#f0dcc4', 90, 260);
+scene.fog = new THREE.Fog('#7ea2c6', 90, 260); // Ciel azur avec brume atmosphérique
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.35;
-scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x6b5a45, 1.15));
-const sun = new THREE.DirectionalLight(0xfff0d8, 2.4);
+scene.environmentIntensity = 0.5;
+scene.add(new THREE.HemisphereLight(0x7ab2ff, 0x5a4a35, 1.3));
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.8);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 });
@@ -589,6 +589,8 @@ addEventListener('keydown', (e) => {
   sfx.unlock();
   if (e.code === 'Escape') {
     if (reorgSelected) {
+      if (myView && reorgSelected.uid) myView.hiddenUid = null;
+      setCarry(null);
       reorgSelected = null;
       toast('Déplacement annulé');
       return;
@@ -615,33 +617,8 @@ async function guarded<T>(fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
-/** L'œuvre achetée s'envole du camion jusqu'à son emplacement. */
-function flyArtwork(workId: string, from: THREE.Vector3, to: THREE.Vector3, ry: number): Promise<void> {
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.2), new THREE.MeshBasicMaterial({ map: artTexture(workId), side: THREE.DoubleSide }));
-  scene.add(mesh);
-  sfx.whoosh();
-  const start = performance.now();
-  const dur = 1500;
-  return new Promise((res) => {
-    const step = () => {
-      const t = Math.min(1, (performance.now() - start) / dur);
-      const e = t * t * (3 - 2 * t);
-      mesh.position.lerpVectors(from, to, e);
-      mesh.position.y += Math.sin(Math.PI * t) * 10;
-      mesh.rotation.set(0, ry + (1 - e) * Math.PI * 4, 0);
-      mesh.scale.setScalar(0.8 + Math.sin(Math.PI * t) * 0.6);
-      if (t < 1) requestAnimationFrame(step);
-      else {
-        mesh.removeFromParent();
-        mesh.geometry.dispose();
-        res();
-      }
-    };
-    requestAnimationFrame(step);
-  });
-}
 
-async function doBuy(item: ConvoyItem, from: THREE.Vector3): Promise<void> {
+async function doBuy(item: ConvoyItem, _from: THREE.Vector3): Promise<void> {
   if (!state) return;
   if (state.coins < item.price) {
     sfx.error();
@@ -659,14 +636,14 @@ async function doBuy(item: ConvoyItem, from: THREE.Vector3): Promise<void> {
     toast('Musée plein : l’œuvre part en réserve. Agrandissez pour l’exposer !');
     return;
   }
+  // L'œuvre est transportée manuellement par le joueur pour être accrochée au mur !
+  boughtToPlace = { uid: r.artwork.uid, workId: item.workId, tempSlot: r.artwork.slot };
   if (myView) myView.hiddenUid = r.artwork.uid;
   applyState(r.state);
   bumpWallet();
-  const { p, ry } = myView!.slotWorld(r.artwork.slot);
-  await flyArtwork(item.workId, from, p, ry);
-  if (myView) myView.hiddenUid = null;
+  setCarry({ workId: item.workId, frame: item.frame });
   if (item.rarity !== 'commun' || item.frame !== 'normal') sfx.rare();
-  banner(wk.title, `+${perSec(incomeOf(item.workId, item.frame))} pièces/s · exposée dans votre musée`);
+  banner(wk.title, `Œuvre entre vos mains ! Entrez dans votre musée et appuyez sur E devant un emplacement pour l'accrocher.`);
   maybeAskPush();
 }
 
@@ -714,14 +691,18 @@ $('questClaim').onclick = () => void doClaim();
 
 let sellArmed: { uid: string; until: number } | null = null;
 let reorgSelected: { uid: string; workId: string; slot: number } | null = null;
+let boughtToPlace: { uid: string; workId: string; tempSlot: number } | null = null;
 
 async function doMove(uid: string, targetSlot: number): Promise<void> {
   const r = await guarded(() => api.moveArtwork(uid, targetSlot));
   if (!r) return;
   reorgSelected = null;
+  boughtToPlace = null;
+  if (myView) myView.hiddenUid = null;
+  setCarry(null);
   applyState(r.state);
   sfx.whoosh();
-  toast(r.swapped ? 'Œuvres interverties !' : 'Œuvre déplacée !');
+  toast(r.swapped ? 'Œuvres interverties !' : 'Œuvre accrochée au mur !');
 }
 
 async function doSell(uid: string): Promise<void> {
@@ -1096,8 +1077,10 @@ function setCarry(c: { workId: string; frame: string } | null): void {
     carryMesh = null;
   }
   if (c && player) {
-    carryMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.0), new THREE.MeshBasicMaterial({ map: artTexture(c.workId), side: THREE.DoubleSide }));
-    carryMesh.position.set(0, 2.45, 0);
+    // Cadre et tableau portés à deux mains devant le personnage (hauteur poitrine/torse ~1.0m, avancé de 0.55m)
+    carryMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.9), new THREE.MeshBasicMaterial({ map: artTexture(c.workId), side: THREE.DoubleSide }));
+    carryMesh.position.set(0, 1.1, 0.55);
+    carryMesh.rotation.set(-0.15, 0, 0); // Légèrement incliné pour un portage naturel à deux mains
     player.root.add(carryMesh);
   }
 }
@@ -1768,20 +1751,35 @@ function interactions(): void {
       if (occupant) {
         items.push({ key: 'E', text: `Échanger « ${work(reorgSelected.workId).title} » avec « ${work(occupant.workId).title} »` });
       } else {
-        items.push({ key: 'E', text: `Poser « ${work(reorgSelected.workId).title} » ici` });
+        items.push({ key: 'E', text: `Accrocher « ${work(reorgSelected.workId).title} » ici` });
       }
       if (input.consume('action')) void doMove(reorgSelected.uid, nearSlot);
     } else {
-      items.push({ key: '…', text: `Déplacement de « ${work(reorgSelected.workId).title} » : approchez-vous d’un emplacement` });
+      items.push({ key: '…', text: `Transport de « ${work(reorgSelected.workId).title} » : approchez-vous d’un emplacement` });
     }
     items.push({ key: 'Échap', text: 'Annuler le déplacement' });
+  } else if (boughtToPlace) {
+    const nearSlot = museum.nearestSlot(pos, 2.2, floor, state.slots);
+    if (nearSlot !== null) {
+      const occupant = state.artworks.find((a) => a.slot === nearSlot && a.uid !== boughtToPlace?.uid);
+      if (occupant) {
+        items.push({ key: 'E', text: `Échanger et accrocher « ${work(boughtToPlace.workId).title} » ici` });
+      } else {
+        items.push({ key: 'E', text: `Accrocher « ${work(boughtToPlace.workId).title} » sur ce mur` });
+      }
+      if (input.consume('action')) void doMove(boughtToPlace.uid, nearSlot);
+    } else {
+      items.push({ key: '…', text: `Approchez-vous d'un mur dans votre musée pour accrocher « ${work(boughtToPlace.workId).title} »` });
+    }
   } else if (art) {
     const gain = art.repro ? 0 : Math.floor(work(art.workId).price * CATALOG.frames[art.frame].mult * 0.5);
-    items.push({ key: 'E', text: `Déplacer « ${work(art.workId).title} » (réorganiser)` });
+    items.push({ key: 'E', text: `Déplacer « ${work(art.workId).title} » (porter en mains)` });
     items.push({ key: 'R', text: art.repro ? `Retirer la reproduction « ${work(art.workId).title} »` : `Revendre « ${work(art.workId).title} » : +${money(gain)}` });
     if (input.consume('action')) {
       reorgSelected = { uid: art.uid, workId: art.workId, slot: art.slot };
-      toast(`« ${work(art.workId).title} » sélectionnée. Approchez-vous d’un autre emplacement et appuyez sur E.`);
+      if (myView) myView.hiddenUid = art.uid;
+      setCarry({ workId: art.workId, frame: art.frame });
+      toast(`Vous tenez « ${work(art.workId).title} ». Approchez-vous d’un autre emplacement et appuyez sur E.`);
     } else if (input.consume('alt')) void doSell(art.uid);
   } else {
     const currentRoom = museum.contains(pos, floor) ? museum.roomIndexOf(pos, floor) : null;
@@ -1891,12 +1889,12 @@ renderer.setAnimationLoop(() => {
     interactions();
   }
   player?.update(dt);
-  if (carryMesh) carryMesh.rotation.y = Math.sin(t * 2) * 0.2;
+  if (carryMesh) carryMesh.rotation.z = Math.sin(t * 3) * 0.05; // Léger balancement naturel lors de la marche
   convoy.update(now);
   // étages : on masque ceux au-dessus du joueur, dans le musée où il se trouve
   const here = viewAt();
   for (const v of views.values()) v.setCut(v === here ? floor : 99);
-  for (const v of views.values()) v.update(t, dt, now, camera.position);
+  for (const v of views.values()) v.update(t, dt, now, camera.position, pos);
   if (state && myView) myView.setRegister(cashNow(), state.cashCap, t);
   visitors.update(dt);
   remotes.update(dt, t);

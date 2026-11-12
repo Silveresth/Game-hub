@@ -53,4 +53,20 @@ export class Sfx {
     for (let i = 0; i < 6; i++) this.tone(i % 2 ? 660 : 880, i * 0.28, 0.26, 'sawtooth', 0.06);
   }
   rare(): void { [784, 987.8, 1174.7, 1568].forEach((f, i) => this.tone(f, i * 0.06, 0.4, 'sine', 0.12)); }
+
+  /** Bruit de pas feutré lors de la marche ou la course */
+  step(): void {
+    if (!this.ctx || this.muted) return;
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(110 + Math.random() * 25, c.currentTime);
+    o.frequency.exponentialRampToValueAtTime(45, c.currentTime + 0.07);
+    g.gain.setValueAtTime(0.04, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.07);
+    o.connect(g).connect(this.master);
+    o.start(c.currentTime);
+    o.stop(c.currentTime + 0.08);
+  }
 }
