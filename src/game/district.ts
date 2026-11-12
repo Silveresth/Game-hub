@@ -181,68 +181,133 @@ export class District {
   }
 
   private buildGround(): void {
-    const grass = std(0x5f9e4f, { roughness: 1 });
-    this.plane(400, 400, 0, 0, grass, -0.05);
-    const pav = tileTexture('#b9ad98', 'rgba(70,60,45,.35)', 4);
-    pav.repeat.set(170 / 4, 44 / 4);
-    this.plane(170, 44, 0, 0, std(0xffffff, { map: pav }), -0.01);
-    const asphalt = tileTexture('#3a3d44', 'rgba(0,0,0,0)', 1, 0.06);
+    // Grand dallage minéral et allées structurées en plaques de pierre
+    // 1. Dalle de fondation globale en pierre beige/grège chaleureuse
+    const baseStone = tileTexture('#9e9382', 'rgba(50,45,35,0.35)', 8, 0.04);
+    baseStone.repeat.set(50, 50);
+    this.plane(240, 180, 0, 0, std(0xffffff, { map: baseStone, roughness: 0.9 }), -0.05);
+
+    // 2. Parvis central majestueux en dalles de pierre taillée avec encadrements
+    const pav = tileTexture('#c8bead', 'rgba(70,60,45,0.4)', 4, 0.03);
+    pav.repeat.set(170 / 4, 48 / 4);
+    this.plane(170, 48, 0, 0, std(0xffffff, { map: pav, roughness: 0.8 }), -0.01);
+
+    // 3. Trottoirs piétons d'accès le long de la place (nord et sud)
+    const walkwayMat = std(0xdcd4c4, { roughness: 0.75 });
+    this.plane(160, 4.0, 0, -5.5, walkwayMat, 0.01);
+    this.plane(160, 4.0, 0, 5.5, walkwayMat, 0.01);
+
+    // 4. Chaussée du convoi (asphalte propre avec bordures en granit clair)
+    const asphalt = tileTexture('#34373d', 'rgba(0,0,0,0)', 1, 0.04);
     asphalt.repeat.set(30, 1);
-    this.plane(148, 6.4, 0, ROAD.z, std(0xffffff, { map: asphalt, roughness: 0.9 }), 0);
-    for (let x = ROAD.x0 + 2; x < ROAD.x1; x += 6) this.plane(3, 0.25, x, ROAD.z, std(0xf2ede1), 0.01);
+    this.plane(148, 6.4, 0, ROAD.z, std(0xffffff, { map: asphalt, roughness: 0.85 }), 0);
+
+    for (let x = ROAD.x0 + 2; x < ROAD.x1; x += 6) {
+      this.plane(3, 0.25, x, ROAD.z, std(0xf4f0e4), 0.01);
+    }
     for (const z of [-3.35, 3.35]) {
-      const kerb = new THREE.Mesh(new THREE.BoxGeometry(148, 0.18, 0.3), std(0xd8d2c4));
-      kerb.position.set(0, 0.09, z);
+      const kerb = new THREE.Mesh(new THREE.BoxGeometry(148, 0.2, 0.35), std(0xe0dad0, { roughness: 0.7 }));
+      kerb.position.set(0, 0.1, z);
       kerb.receiveShadow = true;
       this.group.add(kerb);
     }
-    // parcelles (dallage plus clair)
-    const plot = tileTexture('#d8d0c0', 'rgba(90,80,60,.25)', 8, 0.03);
-    plot.repeat.set(4, 4);
-    const plotMat = std(0xffffff, { map: plot });
-    for (const x of [-60, -20, 20, 60]) for (const z of [-41, 41]) this.plane(38, 38, x, z, plotMat, -0.005);
+
+    // 5. Parcelles des musées : dallages individuels raffinés en damier de pierre
+    const plot = tileTexture('#dfd8c8', 'rgba(80,70,55,0.3)', 6, 0.02);
+    plot.repeat.set(6, 6);
+    const plotMat = std(0xffffff, { map: plot, roughness: 0.75 });
+    for (const x of [-60, -20, 20, 60]) {
+      for (const z of [-41, 41]) {
+        // Dalle de parcelle complète
+        this.plane(38, 38, x, z, plotMat, -0.005);
+        // Allée en plaques de marbre clair guidant de la chaussée jusqu'à l'entrée du musée
+        const walkZ = z > 0 ? 15 : -15;
+        this.plane(6, 18, x, walkZ, std(0xebe5d8, { roughness: 0.7 }), 0.005);
+      }
+    }
   }
 
-  /** Bâtiments des autres parcelles (fermés pendant la phase solo). */
+  /** Bâtiments majestueux et palais d'art impériaux avec toiture classique complète. */
   private buildPlots(): void {
-    const stone = std(0xe8e0cf);
-    const dark = std(0x2a2d36);
+    const stone = std(0xe8e0cf, { roughness: 0.8 });
+    const dark = std(0x2a2d36, { roughness: 0.5 });
+    const roofSlate = std(0x38414e, { roughness: 0.7 });
+    const goldAccent = std(0xe8b64c, { metalness: 0.7, roughness: 0.3 });
+
     const facade = (x: number, z: number, facing: 1 | -1, title: string, sub: string, accent = 0xe8b64c, dome = false) => {
       const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(30, 9, 24), stone);
-      body.position.set(0, 4.5, 0);
+      // Corps principal de l'édifice
+      const body = new THREE.Mesh(new THREE.BoxGeometry(30, 9.5, 24), stone);
+      body.position.set(0, 4.75, 0);
       g.add(body);
       this.occluders.push(body);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(31, 0.8, 25), std(0xcfc6b2));
-      roof.position.y = 9.4;
-      g.add(roof);
-      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 9, 3.2, 3, 1), stone);
+
+      // Corniche supérieure en pierre moulurée
+      const cornice = new THREE.Mesh(new THREE.BoxGeometry(31.2, 0.6, 25.2), stone);
+      cornice.position.y = 9.8;
+      g.add(cornice);
+
+      // Toiture majestueuse à 4 pans (toit complet au-dessus du bâtiment)
+      const roofPeak = new THREE.Mesh(new THREE.ConeGeometry(19, 4.8, 4), roofSlate);
+      roofPeak.rotation.y = Math.PI / 4;
+      roofPeak.scale.set(1.15, 1, 0.9);
+      roofPeak.position.set(0, 12.5, 0);
+      g.add(roofPeak);
+
+      // Fronton triangulaire sculpté avec horloge/relief doré
+      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 9, 3.4, 3, 1), stone);
       ped.rotation.set(Math.PI / 2, 0, Math.PI);
-      ped.scale.set(1.75, 0.6, 1);
-      ped.position.set(0, 11.2, 12.1 - 0.4);
-      g.add(ped);
+      ped.scale.set(1.75, 0.65, 1);
+      ped.position.set(0, 11.5, 12.1 - 0.4);
+
+      const clockOrn = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.15, 24), goldAccent);
+      clockOrn.rotation.x = Math.PI / 2;
+      clockOrn.position.set(0, 10.8, 12.2);
+      g.add(ped, clockOrn);
+
+      // Colonnade classique avec chapiteaux dorés
       for (let i = 0; i < 6; i++) {
-        const col = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.65, 8.2, 16), stone);
-        col.position.set(-12.5 + i * 5, 4.1, 13.6);
-        g.add(col);
+        const colGroup = new THREE.Group();
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 8.4, 16), stone);
+        shaft.position.y = 4.2;
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.45, 1.3), goldAccent);
+        cap.position.y = 8.5;
+        const base = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.4, 1.4), stone);
+        base.position.y = 0.2;
+        colGroup.add(shaft, cap, base);
+        colGroup.position.set(-12.5 + i * 5, 0, 13.6);
+        g.add(colGroup);
       }
-      const steps = new THREE.Mesh(new THREE.BoxGeometry(30, 0.5, 3), std(0xd9d1bf));
-      steps.position.set(0, 0.25, 15.2);
+
+      // Grand perron et marches monumentales
+      const steps = new THREE.Mesh(new THREE.BoxGeometry(30, 0.6, 3.6), std(0xd9d1bf, { roughness: 0.8 }));
+      steps.position.set(0, 0.3, 15.4);
       g.add(steps);
-      const door = new THREE.Mesh(new THREE.BoxGeometry(4, 5.6, 0.3), dark);
-      door.position.set(0, 2.8, 12.05);
+
+      // Grande porte en chêne sombre avec poignées dorées
+      const door = new THREE.Mesh(new THREE.BoxGeometry(4.2, 5.8, 0.35), dark);
+      door.position.set(0, 2.9, 12.05);
       g.add(door);
+
+      // Dôme central prestigieux (pour l'Hôtel des Ventes)
       if (dome) {
-        const d = new THREE.Mesh(new THREE.SphereGeometry(6, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), std(accent, { metalness: 0.8, roughness: 0.3 }));
-        d.position.y = 9.8;
-        g.add(d);
+        const domeBase = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 6.2, 2.2, 32), stone);
+        domeBase.position.y = 11.0;
+        const d = new THREE.Mesh(new THREE.SphereGeometry(6, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), std(accent, { metalness: 0.8, roughness: 0.25 }));
+        d.position.y = 12.1;
+        const lantern = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 2.0, 16), goldAccent);
+        lantern.position.y = 19.1;
+        g.add(domeBase, d, lantern);
       }
+
+      // Enseigne prestigieuse en laiton gravé
       const sign = new THREE.Mesh(
-        new THREE.PlaneGeometry(10, 2.5),
-        new THREE.MeshStandardMaterial({ map: textTexture([[title, '#e8b64c', 74], [sub, '#cfc9bb', 46]]), roughness: 0.6 }),
+        new THREE.PlaneGeometry(10.5, 2.6),
+        new THREE.MeshStandardMaterial({ map: textTexture([[title, '#e8b64c', 74], [sub, '#cfc9bb', 46]]), roughness: 0.5 }),
       );
-      sign.position.set(0, 7.6, 14.3);
+      sign.position.set(0, 7.8, 14.3);
       g.add(sign);
+
       g.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) m.castShadow = m.receiveShadow = true;
@@ -251,13 +316,12 @@ export class District {
       g.rotation.y = facing === 1 ? 0 : Math.PI;
       this.group.add(g);
       // emprise au sol (corps + colonnade + marches)
-      const zFront = z + facing * 16.7;
-      const zBack = z - facing * 12;
-      this.boxes.push({ minX: x - 15.5, maxX: x + 15.5, minZ: Math.min(zFront, zBack), maxZ: Math.max(zFront, zBack) });
+      const zFront = z + facing * 17.5;
+      const zBack = z - facing * 12.5;
+      this.boxes.push({ minX: x - 15.8, maxX: x + 15.8, minZ: Math.min(zFront, zBack), maxZ: Math.max(zFront, zBack) });
     };
-    // rangée nord (façades vers le sud, +z)
-    // les 7 autres parcelles accueillent les musées des joueurs (voir MuseumView)
-    facade(60, -42, 1, 'HÔTEL DES VENTES', 'enchères · entrée libre', 0xc9302c, true);
+    // Palais des Enchères (Hôtel des Ventes) situé au nord-est
+    facade(60, -42, 1, 'HÔTEL DES VENTES', 'Enchères de Chefs-d’Œuvre', 0xc9302c, true);
   }
 
   private buildPlaza(): void {
@@ -318,22 +382,42 @@ export class District {
       this.boxes.push({ minX: x - 1.2, maxX: x + 1.2, minZ: z - 1.2, maxZ: z + 1.2 });
     }
 
-    // tente du marché noir : outils de cambrioleur (E pour entrer)
+    // Échoppe discrète et élégante du Marché Noir : comptoir en acajou et tenture pourpre
     const tent = new THREE.Group();
-    const cloth = new THREE.Mesh(new THREE.ConeGeometry(3.4, 3.4, 4), std(0x2b1f3a));
-    cloth.position.y = 3.3;
+    // Pavillon en bois sombre avec toiture en pagode/mansarde pourpre
+    const cloth = new THREE.Mesh(new THREE.ConeGeometry(3.6, 3.2, 4), std(0x2d182e, { roughness: 0.6 }));
+    cloth.position.y = 3.6;
     cloth.rotation.y = Math.PI / 4;
-    const base = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.6, 4.6), std(0x1d1626));
-    base.position.y = 0.8;
-    tent.add(cloth, base);
-    this.occluders.push(cloth, base); // la caméra passe devant la tente au lieu de cacher le joueur
-    const tag = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.05), new THREE.MeshStandardMaterial({ map: textTexture([['MARCHÉ NOIR', '#ff3b4e', 70], ['outils de cambrioleur', '#cfc9bb', 44]], 1024, 256, '#120d18') }));
-    tag.position.set(0, 1.0, 2.32);
+
+    const base = new THREE.Mesh(new THREE.BoxGeometry(4.8, 2.0, 4.8), std(0x211728, { roughness: 0.7 }));
+    base.position.y = 1.0;
+
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.0, 1.2), std(0x3e2723, { roughness: 0.4 }));
+    counter.position.set(0, 0.5, 2.0);
+
+    const lantern = new THREE.Mesh(
+      new THREE.SphereGeometry(0.25, 12, 12),
+      new THREE.MeshStandardMaterial({ color: 0xff4081, emissive: 0xc2185b, emissiveIntensity: 1.8 })
+    );
+    lantern.position.set(0, 2.5, 2.1);
+
+    tent.add(cloth, base, counter, lantern);
+    this.occluders.push(cloth, base);
+
+    const tag = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.4, 1.1),
+      new THREE.MeshStandardMaterial({
+        map: textTexture([['MARCHÉ NOIR', '#ff4081', 68], ['Outils d’Infiltration', '#e0e0e0', 42]], 1024, 256, '#180c1c'),
+        roughness: 0.5,
+      })
+    );
+    tag.position.set(0, 2.2, 2.45);
     tent.add(tag);
-    tent.position.set(-60, 0, -13);
+
+    tent.position.set(BLACK_MARKET.x, 0, BLACK_MARKET.z - 3);
     tent.traverse((o) => ((o as THREE.Mesh).castShadow = true));
     this.group.add(tent);
-    this.boxes.push({ minX: -62.3, maxX: -57.7, minZ: -15.3, maxZ: -10.7 });
+    this.boxes.push({ minX: -62.6, maxX: -57.4, minZ: -16.0, maxZ: -10.0 });
   }
 
   private buildBoard(): void {
@@ -362,13 +446,18 @@ export class District {
     this.setLeaderboard([], '');
   }
 
-  /** Grande clôture périmétrique tout autour des musées. */
+  /**
+   * Mur d'enceinte géant de la ville (hauteur 14 mètres) :
+   * Impossible de voir au-delà et impossible à traverser.
+   * Aucune grille intérieure : espace urbain fluide et élégant.
+   */
   private buildPerimeterFence(): void {
-    const postMat = std(0x2a2824, { roughness: 0.5, metalness: 0.6 });
-    const barMat = std(0x1a1816, { roughness: 0.4, metalness: 0.8 });
-    const goldPinnacle = std(0xe8b64c, { roughness: 0.3, metalness: 0.7 });
+    const wallHeight = 14.0;
+    const wallThick = 2.4;
+    const wallMat = std(0x423d37, { roughness: 0.95 });
+    const capMat = std(0x2a2723, { roughness: 0.85 });
 
-    const addFenceSegment = (x1: number, z1: number, x2: number, z2: number, solid = true) => {
+    const addPerimeterWall = (x1: number, z1: number, x2: number, z2: number) => {
       const g = new THREE.Group();
       const dx = x2 - x1;
       const dz = z2 - z1;
@@ -379,107 +468,48 @@ export class District {
       g.position.set((x1 + x2) / 2, 0, (z1 + z2) / 2);
       g.rotation.y = angle;
 
-      // Socle en pierre basse
-      const baseMat = std(0xbdb6a8, { roughness: 0.9 });
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.4, len), baseMat);
-      base.position.y = 0.2;
-      base.castShadow = true;
-      base.receiveShadow = true;
-      g.add(base);
+      // Mur d'enceinte opaque géant
+      const wallMesh = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, len), wallMat);
+      wallMesh.position.y = wallHeight / 2;
+      wallMesh.castShadow = true;
+      wallMesh.receiveShadow = true;
+      g.add(wallMesh);
+      this.occluders.push(wallMesh);
 
-      // Barres horizontales haute et intermédiaire
-      const railTop = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, len), barMat);
-      railTop.position.y = 2.4;
-      const railMid = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, len), barMat);
-      railMid.position.y = 1.3;
-      railTop.castShadow = railMid.castShadow = true;
-      g.add(railTop, railMid);
+      // Couronnement / corniche supérieure de protection
+      const capMesh = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 0.6, 1.0, len), capMat);
+      capMesh.position.y = wallHeight + 0.5;
+      capMesh.castShadow = true;
+      g.add(capMesh);
 
-      // Poteaux principaux espacés tous les 4 mètres
-      const count = Math.max(1, Math.round(len / 4));
+      // Contreforts réguliers le long du mur tous les 12 mètres
+      const count = Math.max(1, Math.round(len / 12));
       const step = len / count;
       for (let i = 0; i <= count; i++) {
         const offset = -len / 2 + i * step;
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.24, 2.7, 0.24), postMat);
-        post.position.set(0, 1.35, offset);
-        post.castShadow = true;
-        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.35, 4), goldPinnacle);
-        tip.position.set(0, 2.85, offset);
-        tip.rotation.y = Math.PI / 4;
-        tip.castShadow = true;
-        g.add(post, tip);
-      }
-
-      // Barreaux verticaux réguliers espacés de 0.4m
-      const barCount = Math.floor(len / 0.4);
-      for (let i = 1; i < barCount; i++) {
-        const offset = -len / 2 + i * (len / barCount);
-        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, 2.2, 0.05), barMat);
-        bar.position.set(0, 1.4, offset);
-        bar.castShadow = true;
-        g.add(bar);
+        const buttress = new THREE.Mesh(new THREE.BoxGeometry(wallThick + 1.2, wallHeight, 1.6), wallMat);
+        buttress.position.set(0, wallHeight / 2, offset);
+        buttress.castShadow = true;
+        g.add(buttress);
       }
 
       this.group.add(g);
 
-      if (solid) {
-        // Boîte de collision pour empêcher le joueur de traverser la clôture
-        const minX = Math.min(x1, x2) - 0.3;
-        const maxX = Math.max(x1, x2) + 0.3;
-        const minZ = Math.min(z1, z2) - 0.3;
-        const maxZ = Math.max(z1, z2) + 0.3;
-        this.boxes.push({ minX, maxX, minZ, maxZ });
-      }
+      // Boîte de collision infranchissable
+      const minX = Math.min(x1, x2) - wallThick / 2 - 0.2;
+      const maxX = Math.max(x1, x2) + wallThick / 2 + 0.2;
+      const minZ = Math.min(z1, z2) - wallThick / 2 - 0.2;
+      const maxZ = Math.max(z1, z2) + wallThick / 2 + 0.2;
+      this.boxes.push({ minX, maxX, minZ, maxZ });
     };
 
-    // 1. Clôture Périmètre Extérieur (frontières de la carte)
-    addFenceSegment(BOUNDS.minX, BOUNDS.minZ, BOUNDS.maxX, BOUNDS.minZ);
-    addFenceSegment(BOUNDS.minX, BOUNDS.maxZ, BOUNDS.maxX, BOUNDS.maxZ);
-    addFenceSegment(BOUNDS.minX, BOUNDS.minZ, BOUNDS.minX, -6);
-    addFenceSegment(BOUNDS.minX, 6, BOUNDS.minX, BOUNDS.maxZ);
-    addFenceSegment(BOUNDS.maxX, BOUNDS.minZ, BOUNDS.maxX, -6);
-    addFenceSegment(BOUNDS.maxX, 6, BOUNDS.maxX, BOUNDS.maxZ);
-
-    // 2. Grilles d'enceinte en bordure de la place (style Brainrot / Parc des Musées)
-    // Séparent la grande avenue des façades de musées avec des portails dorés devant chaque entrée.
-    const createPortalsAndFences = (zLine: number, _isSouth: boolean) => {
-      // Les musées sont situés à x = -60, -20, 20, 60 (pour le sud) et -60, -20, 20, 60 (pour le nord)
-      const museumXs = [-60, -20, 20, 60];
-      const gateHalfW = 2.4; // Largeur du passage de portail (4.8m de large)
-
-      // Segments entre x = -72 et x = 72
-      let curX = -72;
-      for (const mx of museumXs) {
-        const gateLeft = mx - gateHalfW;
-        const gateRight = mx + gateHalfW;
-        if (gateLeft > curX) {
-          addFenceSegment(curX, zLine, gateLeft, zLine, false);
-        }
-
-        // Piliers majestueux en pierre de chaque côté du portail d'entrée du musée
-        const pillarMat = std(0xd4cdbe, { roughness: 0.8 });
-        const pillarCapMat = std(0xe8b64c, { roughness: 0.3, metalness: 0.7 });
-        for (const px of [gateLeft, gateRight]) {
-          const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3.2, 0.5), pillarMat);
-          pillar.position.set(px, 1.6, zLine);
-          pillar.castShadow = true;
-          const cap = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.2, 0.65), pillarCapMat);
-          cap.position.set(px, 3.3, zLine);
-          cap.castShadow = true;
-          this.group.add(pillar, cap);
-        }
-
-        curX = gateRight;
-      }
-      if (curX < 72) {
-        addFenceSegment(curX, zLine, 72, zLine, false);
-      }
-    };
-
-    // Rangée Nord (z = -6.8) devant les musées du haut
-    createPortalsAndFences(-6.8, false);
-    // Rangée Sud (z = 6.8) devant les musées du bas
-    createPortalsAndFences(6.8, true);
+    // 4 pans du grand mur d'enceinte infranchissable qui clôture toute la ville
+    addPerimeterWall(BOUNDS.minX, BOUNDS.minZ, BOUNDS.maxX, BOUNDS.minZ);
+    addPerimeterWall(BOUNDS.minX, BOUNDS.maxZ, BOUNDS.maxX, BOUNDS.maxZ);
+    addPerimeterWall(BOUNDS.minX, BOUNDS.minZ, BOUNDS.minX, -6);
+    addPerimeterWall(BOUNDS.minX, 6, BOUNDS.minX, BOUNDS.maxZ);
+    addPerimeterWall(BOUNDS.maxX, BOUNDS.minZ, BOUNDS.maxX, -6);
+    addPerimeterWall(BOUNDS.maxX, 6, BOUNDS.maxX, BOUNDS.maxZ);
   }
 
   /**

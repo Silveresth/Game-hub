@@ -12,8 +12,8 @@ export async function loadCharacterModel(url: string): Promise<void> {
   template = await new GLTFLoader().loadAsync(url);
 }
 
-const ONE_SHOT = new Set(['Jump', 'Wave', 'ThumbsUp', 'Yes', 'No', 'Punch', 'Death', 'WalkJump']);
-const HEIGHT = 2.0; // un peu plus grand que nature : lisible en vue à la 3e personne
+const ONE_SHOT = new Set(['Jump', 'Wave', 'ThumbsUp', 'Yes', 'No', 'Punch', 'Death', 'WalkJump', 'Interact']);
+const HEIGHT = 2.0; // taille humaine naturelle : lisible en vue à la 3e personne
 
 export class Character {
   readonly root = new THREE.Group();
@@ -22,7 +22,7 @@ export class Character {
   private current = '';
   private oneShot = false;
 
-  /** @param tint couleur du corps (sinon le jaune d'origine) */
+  /** @param tint couleur du corps/vêtement */
   constructor(tint?: number) {
     if (!template) throw new Error('Modèle du personnage non chargé');
     const model = cloneSkinned(template.scene);
@@ -36,10 +36,12 @@ export class Character {
       if (tint !== undefined) {
         const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
         const tinted = mats.map((m) => {
-          if (m.name !== 'Main') return m;
-          const c = m.clone();
-          c.color.setHex(tint);
-          return c;
+          if (m.name === 'Main' || m.name.toLowerCase().includes('suit') || m.name.toLowerCase().includes('shirt') || m.name.toLowerCase().includes('body')) {
+            const c = m.clone();
+            c.color.setHex(tint);
+            return c;
+          }
+          return m;
         });
         mesh.material = Array.isArray(mesh.material) ? tinted : tinted[0];
       }
@@ -53,6 +55,10 @@ export class Character {
         action.clampWhenFinished = true;
       }
       this.actions.set(clip.name, action);
+      // Alias pour compatibilité humaine (Walk -> Walking, Run -> Running)
+      if (clip.name === 'Walk') this.actions.set('Walking', action);
+      if (clip.name === 'Run') this.actions.set('Running', action);
+      if (clip.name === 'Interact') this.actions.set('Punch', action);
     }
     this.mixer.addEventListener('finished', () => {
       this.oneShot = false;

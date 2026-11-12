@@ -1535,10 +1535,14 @@ async function mountGoogle(rename: boolean): Promise<void> {
 
 async function boot(): Promise<void> {
   try {
-    await loadCharacterModel('/models/robot.glb');
+    await loadCharacterModel('/models/human_male.glb');
   } catch {
-    $('loading').textContent = 'Impossible de charger le personnage. Vérifiez votre connexion et rechargez la page.';
-    return;
+    try {
+      await loadCharacterModel('/models/robot.glb');
+    } catch {
+      $('loading').textContent = 'Impossible de charger le personnage. Vérifiez votre connexion et rechargez la page.';
+      return;
+    }
   }
   player = new Character();
   player.root.position.copy(pos);

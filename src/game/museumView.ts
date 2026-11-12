@@ -714,95 +714,93 @@ export class MuseumView {
     this.facade.add(post, board);
   }
 
-  /** Façade moderne prestigieuse : Baies vitrées grandioses, arches épurées, éclairage néon et fronton cyberpunk élégant. */
+  /** Façade classique monumentale : colonnades de marbre, fronton orné, toit en pente noble et entrée majestueuse. */
   private buildFacade(): void {
     this.clearFacade();
-    const darkMetal = std(0x0f1118, { roughness: 0.25, metalness: 0.8 });
-    const goldTrim = std(0xe8b64c, { roughness: 0.2, metalness: 0.9 });
-    const glassMat = new THREE.MeshPhysicalMaterial({
-      color: 0x90caf9,
-      transmission: 0.75,
-      transparent: true,
-      roughness: 0.1,
-      metalness: 0.2,
-      ior: 1.5,
-    });
+    const stoneMat = std(0xe8e2d4, { roughness: 0.75 });
+    const stoneDark = std(0xd4cdbd, { roughness: 0.8 });
+    const goldTrim = std(0xe8b64c, { roughness: 0.25, metalness: 0.8 });
+    const roofSlate = std(0x363e4b, { roughness: 0.7 });
 
     const d = -this.plot.f; // direction de la place sur l'axe z
     const wallZ = this.plot.z + d * 6.1;
-    const colZ = wallZ + d * 2.6;
+    const colZ = wallZ + d * 2.8;
     const x0 = this.plot.x;
 
-    // Colonnes géométriques modernes en acier sombre & bagues dorées
-    for (const sx of [-9, -6, -3, 3, 6, 9]) {
-      const col = new THREE.Mesh(new THREE.BoxGeometry(0.7, 6.2, 0.7), darkMetal);
+    // Colonnes cannelées classiques en pierre de taille avec base et chapiteaux sculptés dorés
+    for (const sx of [-9, -5.4, -1.8, 1.8, 5.4, 9]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.58, 6.4, 16), stoneMat);
       col.position.set(x0 + sx, 3.2, colZ);
-      const ringBot = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.2, 0.85), goldTrim);
-      ringBot.position.set(x0 + sx, 0.4, colZ);
-      const ringTop = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.2, 0.85), goldTrim);
-      ringTop.position.set(x0 + sx, 6.0, colZ);
+      const ringBot = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.4, 1.3), stoneDark);
+      ringBot.position.set(x0 + sx, 0.2, colZ);
+      const ringTop = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.5, 1.3), goldTrim);
+      ringTop.position.set(x0 + sx, 6.2, colZ);
       this.facade.add(col, ringBot, ringTop);
-      this.facadeCircles.push({ x: x0 + sx, z: colZ, r: 0.55 });
+      this.facadeCircles.push({ x: x0 + sx, z: colZ, r: 0.6 });
     }
 
-    // Grandes baies vitrées de façade entre les piliers
-    const glassFacade = new THREE.Mesh(new THREE.PlaneGeometry(18, 5.8), glassMat);
-    glassFacade.position.set(x0, 3.2, wallZ + d * 0.4);
-    if (d === 1) glassFacade.rotation.y = Math.PI;
-    this.facade.add(glassFacade);
+    // Portique et mur de fondation avec grande arche d'entrée
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(20, 6.2, 0.8), stoneDark);
+    backWall.position.set(x0, 3.1, wallZ + d * 0.4);
+    this.facade.add(backWall);
 
-    // Entablement ultra-moderne avec bandeau rétro-éclairé
-    const entab = new THREE.Mesh(new THREE.BoxGeometry(21.4, 1.2, 3.6), darkMetal);
-    entab.position.set(x0, 6.9, wallZ + d * 1.5);
+    // Entablement monumental en pierre
+    const entab = new THREE.Mesh(new THREE.BoxGeometry(22, 1.4, 4.2), stoneMat);
+    entab.position.set(x0, 7.1, wallZ + d * 1.6);
 
-    const neonBar = new THREE.Mesh(
-      new THREE.BoxGeometry(21.5, 0.12, 0.2),
-      new THREE.MeshBasicMaterial({ color: 0x64b5f6 }),
-    );
-    neonBar.position.set(x0, 6.35, wallZ + d * 3.3);
+    // Fronton triangulaire majestueux avec médaillon doré
+    const pediment = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 8.5, 2.8, 3, 1), stoneMat);
+    pediment.rotation.set(Math.PI / 2, 0, Math.PI);
+    pediment.scale.set(1.4, 0.5, 1);
+    pediment.position.set(x0, 9.2, wallZ + d * 3.4);
 
-    // Toit profilé moderne
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(22, 0.4, 4.0), goldTrim);
-    roof.position.set(x0, 7.6, wallZ + d * 1.5);
+    const goldMedallion = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.15, 20), goldTrim);
+    goldMedallion.rotation.x = Math.PI / 2;
+    goldMedallion.position.set(x0, 8.6, wallZ + d * 3.55);
 
-    const steps = new THREE.Mesh(new THREE.BoxGeometry(21.4, 0.16, 4.8), std(0x181b24, { roughness: 0.5 }));
-    steps.position.set(x0, 0.08, wallZ + d * 2.2);
+    // Toit classique en ardoise sur la façade
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(22.6, 0.6, 4.6), roofSlate);
+    roof.position.set(x0, 7.9, wallZ + d * 1.6);
 
-    this.facade.add(entab, neonBar, roof, steps);
+    // Grand perron et marches monumentales d'accueil
+    const steps = new THREE.Mesh(new THREE.BoxGeometry(22.0, 0.4, 5.6), stoneDark);
+    steps.position.set(x0, 0.2, wallZ + d * 2.5);
 
-    // Allée lumineuse moderne guidant vers l'entrée
+    this.facade.add(entab, pediment, goldMedallion, roof, steps);
+
+    // Tapis de marbre noble menant vers la galerie
     const runway = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.6, 16),
-      std(0x131722, { roughness: 0.7, metalness: 0.4 }),
+      new THREE.PlaneGeometry(4.2, 16),
+      std(0xeae4d8, { roughness: 0.6 }),
     );
     runway.rotation.x = -Math.PI / 2;
-    runway.position.set(x0, 0.015, wallZ + d * 8.4);
+    runway.position.set(x0, 0.02, wallZ + d * 8.4);
 
-    const borderGoldL = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 16), goldTrim);
+    const borderGoldL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 16), goldTrim);
     borderGoldL.rotation.x = -Math.PI / 2;
-    borderGoldL.position.set(x0 - 1.8, 0.02, wallZ + d * 8.4);
+    borderGoldL.position.set(x0 - 2.1, 0.025, wallZ + d * 8.4);
 
-    const borderGoldR = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 16), goldTrim);
+    const borderGoldR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 16), goldTrim);
     borderGoldR.rotation.x = -Math.PI / 2;
-    borderGoldR.position.set(x0 + 1.8, 0.02, wallZ + d * 8.4);
+    borderGoldR.position.set(x0 + 2.1, 0.025, wallZ + d * 8.4);
 
     this.facade.add(runway, borderGoldL, borderGoldR);
 
     this.facade.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh && m !== glassFacade && m !== runway) m.castShadow = m.receiveShadow = true;
+      if (m.isMesh && m !== runway) m.castShadow = m.receiveShadow = true;
     });
 
-    // Enseigne digitale grand format
+    // Enseigne classique prestigieuse au nom du musée
     this.signMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(7.2, 1.6),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.45, roughness: 0.2 }),
+      new THREE.PlaneGeometry(8.0, 1.8),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }),
     );
-    this.signMesh.position.set(x0, 8.45, wallZ + d * 3.32);
+    this.signMesh.position.set(x0, 7.1, wallZ + d * 3.75);
     this.signMesh.rotation.y = d === -1 ? Math.PI : 0;
     this.facade.add(this.signMesh);
 
-    this.facadeOcc = [entab, roof];
+    this.facadeOcc = [entab, roof, backWall];
     this.facadeMerged = mergeStatic(this.facade);
     this.scene.add(this.facadeMerged);
   }
