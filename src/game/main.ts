@@ -273,6 +273,10 @@ function applyState(s: PlayerState): void {
   if ($('security').classList.contains('open')) renderSecurity();
   if ($('market').classList.contains('open')) renderMarket();
   if ($('shop').classList.contains('open')) renderShop();
+  // invité : on l'invite à créer un compte pour ne pas perdre son musée
+  const guestNow = !s.account.email && !s.account.google;
+  $('renameBtn').textContent = guestNow ? 'Sauvegarder' : 'Compte';
+  $('renameBtn').classList.toggle('save', guestNow);
   $('dailyBtn').hidden = !s.daily.claimable;
   $('dailyBtn').title = s.daily.claimable ? `Récompense du jour : +${money(s.daily.reward)} (série ${s.daily.streak})` : '';
 }
@@ -483,6 +487,12 @@ function renderVoiceBtn(): void {
 $('voiceBtn').onclick = () => void toggleVoice();
 $('voiceToggle').onclick = () => void toggleVoice();
 $('secBtn').onclick = () => openOverlay('security');
+// interface compacte (téléphone) : un appui sur le porte-monnaie déplie ou replie ses détails
+$('wallet').addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('button')) return;
+  $('wallet').classList.toggle('open');
+  renderTimers(); // l'objectif se recale tout de suite sous le porte-monnaie déplié
+});
 $('shopBtn').onclick = () => openOverlay('shop');
 
 // ---------------------------------------------------------------- boutique, Renaissance, récompense du jour
@@ -582,7 +592,9 @@ function renderEvent(now: number): void {
   const { current, next } = state.event;
   const el = $('eventInfo');
   if (current && current.endsAt > now) {
-    el.textContent = `${current.icon} ${current.label} : encore ${fmtDur(current.endsAt - now)} · ${current.desc}`;
+    // texte court (le porte-monnaie ne s'élargit plus) ; la description complète est dans l'infobulle et la bannière
+    el.textContent = `${current.icon} ${current.label} : encore ${fmtDur(current.endsAt - now)}`;
+    el.title = current.desc;
     el.classList.add('live');
     const key = `${current.kind}:${current.startsAt}`;
     if (eventSeen !== key && playing) {
@@ -592,6 +604,7 @@ function renderEvent(now: number): void {
     }
   } else if (next) {
     el.textContent = `${next.icon} ${next.label} dans ${fmtDur(Math.max(0, next.startsAt - now))}`;
+    el.title = next.desc;
     el.classList.remove('live');
     // l'événement vient de commencer : l'état du serveur le confirmera, on le redemande
     if (next.startsAt <= now) refreshSoon();
@@ -1864,75 +1877,216 @@ function markCountry(c: string): void {
   countriesEl.querySelectorAll<HTMLElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.c === c));
 }
 
-function openNameSheet(rename: boolean): void {
-  markColor(rename && state ? state.color : CATALOG.colors[0]);
-  markCountry(rename && state ? (state.country ?? 'FR') : 'FR');
-  const sheet = $('welcome');
-  sheet.querySelector('h1')!.textContent = rename ? 'Renommer votre musée' : 'Votre musée vous attend';
-  (sheet.querySelector('p') as HTMLElement).hidden = rename;
-  sheet.querySelector<HTMLButtonElement>('.go')!.textContent = rename ? 'Valider' : 'Ouvrir mon musée';
-  $<HTMLInputElement>('nameInput').value = rename ? state?.name ?? '' : '';
-  sheet.dataset.mode = rename ? 'rename' : 'new';
-  sheet.classList.add('open');
-  void mountGoogle(rename);
-  input.enabled = false;
-  setTimeout(() => $<HTMLInputElement>('nameInput').focus(), 50);
+// ================================================================== compte : inscription, connexion, mot de passe oublié
+
+type AuthMode = 'signup' | 'login' | 'forgot' | 'reset' | 'account';
+let authMode: AuthMode = 'signup';
+/** Jeton du lien « nouveau mot de passe » reçu par e-mail (/game/?reset=…). */
+let resetToken: string | null = null;
+const nameInput = $<HTMLInputElement>('nameInput');
+const emailInput = $<HTMLInputElement>('emailInput');
+const passInput = $<HTMLInputElement>('passInput');
+/** Application mobile (Capacitor) : Google refuse la connexion dans une vue web intégrée. */
+const inNativeApp = !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
+const isGuest = () => !!state && !state.account.email && !state.account.google;
+
+const AUTH_TEXT: Record<AuthMode, { title: string; intro: string; go: string }> = {
+  signup: { title: 'Votre musée vous attend', intro: 'Créez votre compte pour retrouver votre musée sur tous vos appareils. Vous commencez avec un petit local et 500 pièces.', go: 'Créer mon compte' },
+  login: { title: 'Bon retour', intro: 'Connectez-vous pour retrouver votre musée, sur n’importe quel appareil.', go: 'Se connecter' },
+  forgot: { title: 'Mot de passe oublié', intro: 'Indiquez l’e-mail de votre compte : vous recevrez un lien pour choisir un nouveau mot de passe.', go: 'Envoyer le lien' },
+  reset: { title: 'Nouveau mot de passe', intro: 'Choisissez votre nouveau mot de passe (8 caractères au moins).', go: 'Enregistrer et jouer' },
+  account: { title: 'Votre compte', intro: '', go: 'Enregistrer le nom et l’apparence' },
+};
+
+function authMsg(text: string, error = false): void {
+  const m = $('authMsg');
+  m.textContent = text;
+  m.hidden = !text;
+  m.classList.toggle('err', error);
 }
 
-$('welcomeForm').onsubmit = async (e) => {
-  e.preventDefault();
-  const name = $<HTMLInputElement>('nameInput').value.trim();
-  const sheet = $('welcome');
-  if (sheet.dataset.mode === 'rename') {
-    const r = await guarded(() => api.rename(name, chosenColor, chosenCountry));
-    if (!r) return;
-    applyState(r.state);
-    void refreshBoard();
-  } else {
-    if (name && (name.length < 2 || name.length > 24)) return toast('Le nom doit faire de 2 à 24 caractères');
-    void start(name || undefined, chosenColor, chosenCountry);
+function setAuthMode(mode: AuthMode): void {
+  authMode = mode;
+  const form = $('welcomeForm');
+  form.dataset.mode = mode;
+  // « save » : sans e-mail (invité, ou compte Google seul), on peut ajouter e-mail + mot de passe et garder son musée ;
+  // « member » : un compte (e-mail ou Google) peut se déconnecter
+  const visible = new Set<string>([mode]);
+  if (mode === 'account' && !state?.account.email) visible.add('save');
+  if (mode === 'account' && !isGuest()) visible.add('member');
+  form.querySelectorAll<HTMLElement>('[data-modes]').forEach((el) => (el.hidden = !el.dataset.modes!.split(' ').some((m) => visible.has(m))));
+  form.querySelectorAll<HTMLElement>('[data-auth]').forEach((b) => b.classList.toggle('on', b.dataset.auth === mode));
+  const t = AUTH_TEXT[mode];
+  $('authTitle').textContent = t.title;
+  $('authGo').textContent = t.go;
+  $('authIntro').textContent = mode !== 'account'
+    ? t.intro
+    : isGuest()
+      ? 'Votre musée n’est enregistré que sur cet appareil. Créez un compte pour le retrouver partout : vous gardez tout.'
+      : state?.account.email
+        ? `Connecté avec ${state.account.email}${state.account.google ? ' et Google' : ''}.`
+        : 'Connecté avec Google. Ajoutez un e-mail et un mot de passe pour vous connecter aussi depuis l’application mobile.';
+  passInput.autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  authMsg('');
+  void mountGoogle();
+}
+
+/** Ouvre le panneau de compte dans un mode donné. */
+function openAuth(mode: AuthMode): void {
+  if (mode === 'account' && state) {
+    nameInput.value = state.name;
+    markColor(state.color);
+    markCountry(state.country ?? 'FR');
+  } else if (mode === 'signup') {
+    markColor(CATALOG.colors[0]);
+    markCountry('FR');
   }
-  sheet.classList.remove('open');
-  input.enabled = true;
+  $('welcome').classList.add('open');
+  input.enabled = false;
+  setAuthMode(mode);
+  const first = [nameInput, emailInput, passInput].find((el) => !el.closest<HTMLElement>('[data-modes]')!.hidden && !el.value);
+  setTimeout(() => (first ?? nameInput).focus(), 50);
+}
+
+function closeAuth(): void {
+  $('welcome').classList.remove('open');
+  if (!anyOverlayOpen()) input.enabled = true;
+}
+
+/** Appel au serveur depuis le formulaire : l'erreur s'affiche dans le formulaire (pas dans un toast caché derrière). */
+async function authCall<T>(fn: () => Promise<T>): Promise<T | null> {
+  const go = $<HTMLButtonElement>('authGo');
+  go.disabled = true;
+  try {
+    return await fn();
+  } catch (e) {
+    sfx.error();
+    authMsg((e as Error).message, true);
+    return null;
+  } finally {
+    go.disabled = false;
+  }
+}
+
+/** Session ouverte (inscription, connexion, nouveau mot de passe) : on joue, ou on recharge si un autre musée était ouvert. */
+function enterWith(r: Awaited<ReturnType<typeof api.login>>): void {
+  closeAuth();
+  if (started) location.reload();
+  else void start(undefined, undefined, undefined, r);
+}
+
+$('welcomeForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = nameInput.value.trim();
+  const email = emailInput.value.trim();
+  const pass = passInput.value;
+  if ((authMode === 'signup' || authMode === 'account') && (name.length < 2 || name.length > 24)) return authMsg('Nom d’utilisateur : 2 à 24 caractères', true);
+  if ((authMode === 'signup' || authMode === 'login' || authMode === 'forgot') && !/^\S+@\S+\.\S+$/.test(email)) return authMsg('Adresse e-mail invalide', true);
+  if ((authMode === 'signup' || authMode === 'reset') && pass.length < 8) return authMsg('Mot de passe : 8 caractères au moins', true);
+  if (authMode === 'login' && !pass) return authMsg('Entrez votre mot de passe', true);
+  switch (authMode) {
+    case 'signup': {
+      const r = await authCall(() => api.register(name, email, pass, chosenColor, chosenCountry));
+      if (r) enterWith(r);
+      break;
+    }
+    case 'login': {
+      const r = await authCall(() => api.loginPassword(email, pass));
+      if (r) enterWith(r);
+      break;
+    }
+    case 'forgot': {
+      const r = await authCall(() => api.forgotPassword(email));
+      if (r) authMsg(r.devLink ? `${r.message} (mode test : ${r.devLink})` : r.message);
+      break;
+    }
+    case 'reset': {
+      if (!resetToken) return authMsg('Lien incomplet : ouvrez le lien reçu par e-mail', true);
+      const r = await authCall(() => api.resetPassword(resetToken!, pass));
+      if (r) {
+        resetToken = null;
+        enterWith(r);
+      }
+      break;
+    }
+    case 'account': {
+      const r = await authCall(() => api.rename(name, chosenColor, chosenCountry));
+      if (!r) return;
+      applyState(r.state);
+      void refreshBoard();
+      closeAuth();
+      toast('Nom et apparence enregistrés');
+      break;
+    }
+  }
+});
+
+$('welcomeForm').querySelectorAll<HTMLElement>('[data-auth]').forEach((b) => (b.onclick = () => setAuthMode(b.dataset.auth as AuthMode)));
+$('forgotLink').onclick = () => setAuthMode('forgot');
+$('backLink').onclick = () => setAuthMode('login');
+$('closeAccount').onclick = closeAuth;
+$('renameBtn').onclick = () => openAuth('account');
+// jouer tout de suite, sans compte (le nom saisi sert de nom de musée)
+$('guestLink').onclick = () => {
+  const name = nameInput.value.trim();
+  if (name && (name.length < 2 || name.length > 24)) return authMsg('Nom du musée : 2 à 24 caractères', true);
+  closeAuth();
+  void start(name || undefined, chosenColor, chosenCountry);
 };
-$('renameBtn').onclick = () => openNameSheet(true);
+// un invité transforme son musée en compte : il garde tout (œuvres, pièces, niveau)
+$('saveGo').onclick = async () => {
+  const name = nameInput.value.trim() || state?.name || '';
+  const email = emailInput.value.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return authMsg('Adresse e-mail invalide', true);
+  if (passInput.value.length < 8) return authMsg('Mot de passe : 8 caractères au moins', true);
+  const r = await authCall(() => api.register(name, email, passInput.value, chosenColor, chosenCountry));
+  if (!r) return;
+  applyState(r.state);
+  sfx.expand();
+  confetti(pos, 60);
+  passInput.value = '';
+  setAuthMode('account');
+  authMsg('✓ Compte créé : connectez-vous avec cet e-mail sur n’importe quel appareil.');
+};
+$('logoutBtn').onclick = async () => {
+  await api.logout().catch(() => undefined);
+  location.reload();
+};
 
 /**
- * Compte Google (si le serveur est configuré) : à la création, retrouver un musée existant ;
- * en renommant, lier le musée à Google pour ne jamais le perdre.
+ * Bouton Google (si le serveur est configuré) : inscription ou connexion ; dans « Mon compte », liaison au musée.
+ * Masqué dans l'application mobile : Google y refuse la connexion (vue web intégrée).
  */
-async function mountGoogle(rename: boolean): Promise<void> {
+async function mountGoogle(): Promise<void> {
   const wrap = $('googleWrap');
   wrap.hidden = true;
-  if (rename && state?.google) {
+  if (inNativeApp || authMode === 'forgot' || authMode === 'reset') return;
+  const linking = authMode === 'account';
+  const modeAtStart = authMode;
+  if (linking && state?.account.google) {
     $('googleLbl').textContent = '✓ Musée lié à votre compte Google';
     $('googleBox').innerHTML = '';
     wrap.hidden = false;
     return;
   }
-  $('googleLbl').textContent = rename ? 'Sauvegarder votre musée avec Google (pour le retrouver sur un autre appareil)' : 'Déjà un musée sur un autre appareil ?';
+  $('googleLbl').textContent = linking ? 'Ou liez votre musée à Google :' : 'ou';
   const ok = await mountGoogleButton($('googleBox'), (credential) => {
     void (async () => {
       try {
-        if (rename) {
+        if (linking) {
           const r = await api.linkGoogle(credential);
           applyState(r.state);
           sfx.expand();
-          toast('✓ Musée lié à votre compte Google');
-          void mountGoogle(true);
-        } else {
-          const r = await api.loginGoogle(credential);
-          $('welcome').classList.remove('open');
-          input.enabled = true;
-          void start(undefined, undefined, undefined, r);
-        }
+          setAuthMode('account');
+          authMsg('✓ Musée lié à votre compte Google');
+        } else enterWith(await api.loginGoogle(credential));
       } catch (e) {
         sfx.error();
-        toast((e as Error).message);
+        authMsg((e as Error).message, true);
       }
     })();
-  }, rename ? 'continue_with' : 'signin_with');
-  wrap.hidden = !ok;
+  }, linking ? 'continue_with' : authMode === 'login' ? 'signin_with' : 'signup_with');
+  wrap.hidden = !ok || authMode !== modeAtStart; // le mode a changé pendant le chargement de Google
 }
 
 /** Personnage principal chargé (false : échec). Le formulaire du nom s'affiche sans l'attendre. */
@@ -1961,6 +2115,15 @@ async function loadModels(): Promise<boolean> {
 
 async function boot(): Promise<void> {
   modelReady = loadModels();
+  // lien « nouveau mot de passe » reçu par e-mail : /game/?reset=…
+  const reset = new URLSearchParams(location.search).get('reset');
+  if (reset) {
+    resetToken = reset;
+    history.replaceState(null, '', location.pathname);
+    $('loading').hidden = true;
+    openAuth('reset');
+    return;
+  }
   if (api.hasSavedSession()) {
     // connexion lancée tout de suite, en parallèle du téléchargement du personnage (démarrage plus rapide) ;
     // en cas d'échec réseau, start() réessaie lui-même
@@ -1970,9 +2133,9 @@ async function boot(): Promise<void> {
     );
     return;
   }
-  // nouveau joueur : on choisit son nom pendant que le personnage (≈ 1 Mo) se télécharge
+  // nouveau joueur (ou déconnecté) : inscription / connexion pendant que le personnage (≈ 1 Mo) se télécharge
   $('loading').hidden = true;
-  openNameSheet(false);
+  openAuth('signup');
 }
 
 // ================================================================== joueur & interactions

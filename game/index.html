@@ -167,6 +167,82 @@
     ol.board b { color: #ffd36b; font-variant-numeric: tabular-nums; }
     ol.board .muted { color: #a9a49a; }
 
+    /* ---- compte : inscription, connexion ---- */
+    .auth [hidden] { display: none !important; }
+    .auth .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 700; color: #cfc9bb; }
+    .auth .field input { font-weight: 500; color: #fff; }
+    .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; border-radius: 12px; background: rgba(255,255,255,.06); }
+    .auth-tabs button { padding: 9px; border-radius: 9px; border: none; background: none; color: #cfc9bb; font-weight: 800; cursor: pointer; }
+    .auth-tabs button.on { background: var(--gold); color: #1b1308; }
+    .linkbtn { align-self: center; background: none; border: none; color: #cfc9bb; text-decoration: underline; cursor: pointer; font-size: 13.5px; padding: 2px; }
+    .linkbtn:hover { color: var(--gold); }
+    .linkbtn.danger { color: #ff8fa0; }
+    #forgotLink { align-self: flex-end; margin-top: -8px; }
+    .auth-msg { padding: 10px 12px; border-radius: 10px; font-size: 13.5px; line-height: 1.45; background: rgba(125,255,154,.1); border: 1px solid rgba(125,255,154,.35); color: #c8ffd5; }
+    .auth-msg.err { background: rgba(255,107,107,.1); border-color: rgba(255,107,107,.4); color: #ffc2c2; }
+    .sheet .go.alt { background: #b46bff; color: #fff; }
+    #renameBtn.save { color: #ffd36b !important; text-decoration: underline; }
+
+    /* ---- porte-monnaie : largeur bornée (un texte long ne l'étire plus sur tout l'écran) ---- */
+    #wallet { max-width: 320px; cursor: default; }
+    #wallet .row span { min-width: 0; overflow-wrap: anywhere; }
+    #wallet .more-hint { display: none; }
+
+    /* ---- téléphone (écran étroit, ou en paysage peu haut) : interface compacte ---- */
+    @media (max-width: 760px), (max-height: 520px) {
+      #wallet { top: calc(var(--bar-h) + 8px); left: 10px; min-width: 0; max-width: 210px; padding: 8px 11px; border-radius: 13px; cursor: pointer; }
+      #wallet .coins { margin: 2px 0 0; gap: 7px; }
+      #wallet .coins b { font-size: 21px; }
+      .coin { width: 19px; height: 19px; }
+      #wallet .name { font-size: 10.5px; }
+      #wallet .row { font-size: 11.5px; gap: 8px; }
+      /* détails repliés : un appui sur le porte-monnaie les déplie */
+      /* (enfants du porte-monnaie : nom, pièces, revenu, puis les détails à partir du 4e) */
+      #wallet:not(.open) .row:nth-of-type(n+4):not(:has(#eventInfo)) { display: none; }
+      #wallet .more-hint { display: block; font-size: 10.5px; color: #a9a49a; margin-top: 2px; }
+      #wallet.open .more-hint { display: none; }
+      #eventInfo { font-size: 11px; }
+      #quest { left: 10px; width: min(56vw, 230px); padding: 7px 10px; border-radius: 13px; font-size: 12px; }
+      #quest .qhead { font-size: 10px; }
+      #questLabel { font-size: 12.5px; margin: 2px 0 5px; }
+      #questHint { display: none; }
+      #questClaim { padding: 7px; margin-top: 6px; font-size: 12px; }
+      #tools { right: 10px; top: calc(var(--bar-h) + 8px); flex-direction: column; flex-wrap: wrap-reverse; max-height: calc(100vh - var(--bar-h) - 20px); gap: 6px; align-content: flex-start; }
+      #tools button { width: 38px !important; height: 38px; font-size: 16px; border-radius: 11px; }
+      #tools button .txt { display: none; }
+      #saleBtn, #secBtn { padding: 0 !important; }
+      #banner { font-size: clamp(20px, 5vw, 30px); }
+      #banner small { font-size: 13px; }
+    }
+    /* plein écran mobile (application, encoche) : l'interface reste dans la zone visible de l'écran */
+    @media (pointer: coarse) {
+      #wallet, #quest { left: max(10px, env(safe-area-inset-left)); }
+      #tools { right: max(10px, env(safe-area-inset-right)); }
+      #joy { left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom)); }
+      #tA, #tR { right: max(18px, env(safe-area-inset-right)); }
+    }
+    /* téléphone en paysage : la barre live (planning des ventes) se masque, le bouton 🔨 reste */
+    @media (max-height: 520px) and (pointer: coarse) {
+      body.playing:not(.in-hall) .livebar { display: none; }
+      body.playing:not(.in-hall) { --bar-h: 0px; }
+      body.touch:not(.chatting) #chatLog { display: none; }
+      /* discussion : un seul bouton 💬 à côté du joystick ; historique et émotes quand elle est ouverte */
+      /* (spécificité renforcée : la règle générale « body.touch #chat » est déclarée plus bas) */
+      body.touch.playing #chat { left: max(140px, calc(env(safe-area-inset-left) + 130px)); bottom: 16px; width: min(320px, 46vw); }
+      body.touch.playing:not(.chatting) #emotes { display: none; }
+      /* colonne de boutons : s'arrête avant les boutons d'action (E, Saut), quitte à faire plus de colonnes */
+      #tools { max-height: calc(100vh - 190px); }
+      #joy { width: 112px; height: 112px; left: 16px; bottom: 16px; }
+      #joyKnob { left: 31px; top: 31px; }
+      .tbtn { width: 62px; height: 62px; }
+      #tA { bottom: 86px; right: 18px; }
+      #tJ { bottom: 18px; right: 92px; }
+      #tR { bottom: 160px; right: 22px; width: 50px; height: 50px; }
+      body.touch #toolbar { bottom: 136px; left: 16px; }
+      body.touch #prompt { bottom: 22px; max-width: 54vw; }
+      body.touch #toast { bottom: 84px; }
+    }
+
     /* ---- discussion, émotes, amis, voix ---- */
     /* en bas à droite (libre sur ordinateur) ; sur écran tactile, à gauche au-dessus du joystick (boutons d'action à droite) */
     #chat { position: fixed; right: 14px; bottom: 26px; z-index: 21; width: min(340px, calc(100vw - 28px)); display: none; flex-direction: column; gap: 6px; pointer-events: none; }
@@ -227,7 +303,7 @@
   <canvas id="c" class="game"></canvas>
 
   <div id="wallet">
-    <div class="name"><span id="museumName">Mon musée</span><button id="renameBtn" title="Renommer">Renommer</button></div>
+    <div class="name"><span id="museumName">Mon musée</span><button id="renameBtn" title="Compte : nom, sauvegarde, connexion">Compte</button></div>
     <div class="coins"><i class="coin"></i><b id="coins">0</b></div>
     <div class="row"><span id="income">+0 /s</span><span id="slotsInfo">0/4 œuvres</span></div>
     <div class="row"><span id="valueInfo">Valeur : 0</span><span id="reserveInfo"></span></div>
@@ -235,6 +311,7 @@
     <div class="row"><span id="shieldInfo"></span></div>
     <div class="row"><span id="secInfo"></span></div>
     <div class="row"><span id="eventInfo"></span></div>
+    <span class="more-hint">Toucher pour les détails</span>
   </div>
   <div id="toolbar" hidden></div>
   <div id="alert" aria-hidden="true"></div>
@@ -272,24 +349,42 @@
   <div id="toast" class="toast"></div>
 
   <div id="welcome" class="overlay">
-    <form class="sheet" id="welcomeForm">
+    <!-- Compte : inscription, connexion, mot de passe oublié, nouveau mot de passe, et « Mon compte » en jeu.
+         Chaque élément porte data-modes : il ne s'affiche que dans ces modes (voir setAuthMode dans main.ts). -->
+    <form class="sheet auth" id="welcomeForm" data-mode="signup" novalidate>
       <img class="mark" src="/logo.svg" alt="" width="64" height="67" />
-      <h1>Votre musée vous attend</h1>
-      <p>Vous commencez avec un petit local et 500 pièces. Achetez des chefs-d’œuvre au convoi, exposez-les pour encaisser, puis agrandissez. Le musée le plus riche s’affiche sur la place.</p>
-      <input id="nameInput" maxlength="24" placeholder="Nom de votre musée (ex. Musée du Soleil)" autocomplete="off" />
-      <div>
+      <h1 id="authTitle">Votre musée vous attend</h1>
+      <div class="auth-tabs" data-modes="signup login" role="tablist">
+        <button type="button" role="tab" data-auth="signup">Créer un compte</button>
+        <button type="button" role="tab" data-auth="login">Se connecter</button>
+      </div>
+      <p id="authIntro"></p>
+      <label class="field" data-modes="signup account">Nom d’utilisateur
+        <input id="nameInput" maxlength="24" autocomplete="username" placeholder="ex. Musée du Soleil" /></label>
+      <label class="field" data-modes="signup login forgot save">E-mail
+        <input id="emailInput" type="email" maxlength="254" autocomplete="email" placeholder="vous@exemple.fr" /></label>
+      <label class="field" data-modes="signup login reset save">Mot de passe
+        <input id="passInput" type="password" maxlength="200" autocomplete="current-password" placeholder="8 caractères au moins" /></label>
+      <button type="button" class="linkbtn" id="forgotLink" data-modes="login">Mot de passe oublié ?</button>
+      <div data-modes="signup account">
         <div class="lbl">Couleur de votre personnage</div>
         <div id="colors" class="colors"></div>
       </div>
-      <div>
+      <div data-modes="signup account">
         <div class="lbl">Pays de votre musée</div>
         <div id="countries" class="colors"></div>
       </div>
-      <button class="go" type="submit">Ouvrir mon musée</button>
+      <p class="auth-msg" id="authMsg" role="status" hidden></p>
+      <button class="go" type="submit" id="authGo">Créer mon compte</button>
+      <button type="button" class="go alt" id="saveGo" data-modes="save">Créer mon compte et garder ce musée</button>
       <div id="googleWrap" hidden>
-        <div class="lbl" id="googleLbl">Déjà un musée sur un autre appareil ?</div>
+        <div class="lbl" id="googleLbl">ou</div>
         <div id="googleBox"></div>
       </div>
+      <button type="button" class="linkbtn" id="guestLink" data-modes="signup login">Jouer sans compte (le musée reste sur cet appareil)</button>
+      <button type="button" class="linkbtn" id="backLink" data-modes="forgot reset">Retour à la connexion</button>
+      <button type="button" class="linkbtn danger" id="logoutBtn" data-modes="member">Se déconnecter de cet appareil</button>
+      <button type="button" class="linkbtn" id="closeAccount" data-modes="account">Fermer</button>
     </form>
   </div>
 

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Steal a Masterpiece</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; place-items: center; background: radial-gradient(ellipse 60% 50% at 50% 40%, #5a1626, #240a11 75%); color: #f4ead8; font: 16px/1.5 system-ui, sans-serif; text-align: center; padding: 24px; box-sizing: border-box; }
+    img { width: 96px; height: 100px; }
+    h1 { font: 700 22px Georgia, serif; color: #f6dc96; margin: 18px 0 8px; }
+    p { max-width: 32ch; margin: 0 auto 22px; color: #cdbba3; }
+    button { padding: 14px 26px; border: 0; border-radius: 4px; background: linear-gradient(160deg, #f6dc96, #d8a64a 45%, #8f5d18); color: #2a1606; font: 800 17px Georgia, serif; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="logo.svg" alt="" />
+    <h1>Le musée est injoignable</h1>
+    <p>Vérifiez votre connexion à Internet, puis réessayez.</p>
+    <button type="button" onclick="history.length > 1 ? history.back() : location.reload()">Réessayer</button>
+  </main>
+</body>
+</html>

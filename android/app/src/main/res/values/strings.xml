@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Steal a Masterpiece</string>
+    <string name="title_activity_main">Steal a Masterpiece</string>
+    <string name="package_name">fr.stealamasterpiece.app</string>
+    <string name="custom_url_scheme">fr.stealamasterpiece.app</string>
+</resources>

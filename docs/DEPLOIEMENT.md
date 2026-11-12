@@ -41,6 +41,38 @@ Attention : `server/data` contient aussi les comptes créés par les tests. Pour
 
 ## 2. Render : le jeu et l'API
 
+Deux façons de créer le service : un **Web Service** réglé à la main (ci-dessous), ou un **Blueprint** qui lit `render.yaml` (plus bas). Le résultat est le même.
+
+### Web Service réglé à la main
+
+1. **New → Web Service**, connectez GitHub et choisissez le dépôt `Silveresth/Game-hub`, branche `main`.
+2. Réglages :
+
+   | Réglage | Valeur |
+   | --- | --- |
+   | Language | **Docker** (Render détecte le `Dockerfile` : aucune commande de build ni de démarrage à saisir) |
+   | Region | **Frankfurt (EU Central)**, comme la base Neon |
+   | Root Directory / Dockerfile Path | vides / `./Dockerfile` (valeurs par défaut) |
+   | Instance Type | **Starter** au minimum (la formule gratuite s'endort après 15 min sans visite) |
+
+3. **Environment Variables** :
+
+   | Variable | Valeur |
+   | --- | --- |
+   | `DATABASE_URL` | la chaîne de connexion Neon de l'étape 1 |
+   | `SAM_TRUST_PROXY` | `1` |
+   | `SAM_ADMIN_TOKEN` | un long secret aléatoire, par exemple généré par `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` |
+   | `SAM_VAPID_SUBJECT` | `mailto:votre@adresse` |
+   | `SAM_CORS_ORIGINS` | à ajouter à l'étape 4, une fois l'adresse Vercel connue |
+
+   Ne définissez pas `PORT` ni `HOST` : le `Dockerfile` écoute sur toutes les interfaces et sur le port fourni par Render.
+4. **Advanced** : *Health Check Path* = `/api/stats`, *Auto-Deploy* = *On Commit*. Laissez une seule instance (pas de mise à l'échelle) : quartiers et enchères vivent en mémoire.
+5. **Create Web Service**, puis passez au point 4 de la liste suivante (vérifications, domaine, jeton admin).
+
+Si vous choisissez **Language : Node** au lieu de Docker : *Build Command* `npm ci --include=dev && npm run build` (les outils de construction sont des dépendances de développement), *Start Command* `node server/index.mjs`, et ajoutez les variables `HOST` = `0.0.0.0` (sinon le serveur n'écoute que lui-même et Render ne le joint pas), `NODE_ENV` = `production` et `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` = `1`.
+
+### Ou : Blueprint (lit `render.yaml`)
+
 1. Sur https://render.com : **New → Blueprint**, choisissez le dépôt. Render lit `render.yaml` et prépare le service `steal-a-masterpiece` (Docker, région Francfort, une seule instance).
 2. Render demande les variables marquées `sync: false`. Remplissez :
 
@@ -82,7 +114,42 @@ La page d'accueil lit les statistiques du jeu depuis un autre domaine : le serve
 
 Seules les routes publiques `/api/live` et `/api/stats` sont concernées ; le jeu lui-même est sur son propre domaine et n'en a pas besoin.
 
-## 5. Options
+## 5. Comptes : e-mails « mot de passe oublié » (Brevo)
+
+Les joueurs créent un compte (nom d'utilisateur, e-mail, mot de passe) pour retrouver leur musée sur n'importe quel appareil. Le lien « mot de passe oublié » part par e-mail via Brevo.
+
+1. Créez un compte sur https://www.brevo.com (offre gratuite : quelques centaines d'e-mails par jour).
+2. **Senders, Domains & Dedicated IPs → Domains** : ajoutez `mondomaine.fr` et créez chez votre registraire les enregistrements DNS indiqués (DKIM, DMARC) : sans eux, les e-mails finissent dans les indésirables.
+3. **Senders** : ajoutez l'expéditeur, par exemple `noreply@mondomaine.fr`.
+4. **SMTP & API → API Keys → Generate a new API key**.
+5. Sur Render, ajoutez :
+
+   | Variable | Valeur |
+   | --- | --- |
+   | `BREVO_API_KEY` | la clé API Brevo |
+   | `SAM_MAIL_FROM` | l'expéditeur validé (`noreply@mondomaine.fr`) |
+   | `SAM_MAIL_FROM_NAME` | facultatif, nom affiché (par défaut « Steal a Masterpiece ») |
+   | `SAM_PUBLIC_URL` | l'adresse du jeu, `https://jouer.mondomaine.fr` (sert à construire le lien de l'e-mail) |
+
+Test : dans le jeu, « Se connecter → Mot de passe oublié », avec l'e-mail d'un compte. Sans ces variables, rien n'est envoyé (les journaux Render le signalent).
+
+## 6. Garder le service éveillé (Upstash QStash)
+
+Sur l'offre gratuite, Render endort le service après 15 minutes sans visite (les quartiers et enchères en cours sont alors perdus) et Neon met la base en veille. La route `/api/ping` répond tout de suite et interroge la base : l'appeler toutes les 10 minutes garde les deux éveillés.
+
+1. Créez un compte sur https://console.upstash.com, ouvrez **QStash**.
+2. **Schedules → Create Schedule** :
+   - *Destination* : `https://jouer.mondomaine.fr/api/ping` (ou l'adresse `….onrender.com`) ;
+   - *Cron* : `*/10 * * * *` (toutes les 10 minutes) ;
+   - *Method* : `GET`.
+3. Vérifiez dans **Logs** que les appels reviennent avec le code `200` et `"ok":true`.
+
+À savoir :
+- 144 appels par jour, dans les limites de l'offre gratuite de QStash ;
+- un service gratuit Render toujours éveillé consomme environ 730 heures par mois, à peu près tout le quota gratuit mensuel : un seul service gratuit à la fois ;
+- garder Neon éveillé consomme des heures de calcul : vérifiez votre quota dans la console Neon. Avec l'offre Starter de Render (jamais endormie), le ping reste utile pour Neon seulement si vous voulez éviter le délai du réveil.
+
+## 7. Options
 
 - **Connexion Google** : dans la console Google Cloud, client OAuth « Application Web », origine JavaScript autorisée `https://jouer.mondomaine.fr` ; mettez l'identifiant dans `SAM_GOOGLE_CLIENT_ID` sur Render.
 - **Discussion vocale sur des réseaux très fermés** (entreprises, certains opérateurs mobiles) : ajoutez un serveur TURN dans `SAM_ICE_SERVERS`, par exemple
@@ -90,11 +157,11 @@ Seules les routes publiques `/api/live` et `/api/stats` sont concernées ; le je
 - **Adresse IP des joueurs** (limites anti-abus) : par défaut, la dernière adresse de `X-Forwarded-For`. Si votre hébergeur fournit un en-tête dédié avec l'adresse du client, indiquez son nom dans `SAM_CLIENT_IP_HEADER`.
 - **Application Android** : `SAM_ANDROID_PACKAGE` et `SAM_ANDROID_SHA256` (voir `LANCEMENT.md`).
 
-## 6. Vérifications après la mise en ligne
+## 8. Vérifications après la mise en ligne
 
 1. `https://mondomaine.fr` : la barre du haut affiche « 1 en ligne » et le planning des ventes se remplit. Si les chiffres restent vides, revoir `SAM_CORS_ORIGINS` (étape 4).
 2. Bouton **Jouer gratuitement** : le jeu s'ouvre sur `https://jouer.mondomaine.fr/game/`.
-3. Créez un musée, achetez une œuvre, rechargez la page : la partie reprend.
+3. Créez un compte, achetez une œuvre, puis connectez-vous avec le même e-mail sur un autre navigateur : vous retrouvez votre musée.
 4. Sur Render, **Manual Deploy → Deploy latest commit**, puis revenez dans le jeu : votre musée est toujours là (preuve que les données sont dans Neon).
 5. `https://jouer.mondomaine.fr/admin/` avec le jeton : le planning des ventes s'affiche.
 6. Dans le jeu, activez les notifications (🛡 Sécurité) : l'appareil apparaît comme abonné.

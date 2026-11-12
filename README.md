@@ -4,6 +4,12 @@ Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâ
 
 **État : phases 0 à 6 terminées, prêt à mettre en ligne** (voir [docs/LANCEMENT.md](docs/LANCEMENT.md)).
 
+**Comptes, application mobile, maintien en éveil :**
+- **Comptes** (`server/accounts.mjs`) : inscription par nom d'utilisateur, e-mail et mot de passe (empreinte scrypt), connexion sur n'importe quel appareil, « mot de passe oublié » par e-mail (Brevo, lien valable 1 h, qui ferme les autres sessions), connexion Google (crée le compte au premier passage). Un invité qui s'inscrit garde son musée. « Jouer sans compte » reste possible.
+- **Application Android** (Capacitor, `capacitor.config.ts`, `android/`) : plein écran immersif, écran allumé, micro, icône et écran de démarrage tirés du logo. Elle ouvre le jeu en ligne. Voir [docs/MOBILE.md](docs/MOBILE.md).
+- **Interface compacte sur téléphone** : porte-monnaie repliable (toucher pour les détails), objectif réduit, boutons en colonne, marges de l'encoche respectées.
+- **`/api/ping`** : à appeler toutes les 10 min (Upstash QStash) pour garder le service Render et la base Neon éveillés.
+
 **Accueil et identité visuelle :**
 - **Page d'accueil** (`index.html`, `src/landing/main.ts`) : « la salle rouge, après la fermeture ». Un mur de velours où la Joconde a disparu : cadre vide sous un projecteur, laser, bouton « Jouer gratuitement » à la place du tableau et cartel « Volée cette nuit ». Puis le sens de la visite (les 4 étapes du jeu), la collection (une œuvre par rareté, valeur et revenu lus dans le catalogue), le casse, le planning des ventes en direct, le jeu entre amis et les questions fréquentes.
 - **Logo** : cadre doré à rosettes, masque de voleur ivoire sur toile de velours, éclat d'or et laser. `public/icons/icon.svg` (icône d'application) et `public/logo.svg` (marque seule) ; PNG régénérés par `npm run icons`.
@@ -166,6 +172,7 @@ Variables utiles :
 | `SAM_DATA_DIR` | dossier des données (par défaut `server/data`) ; pratique pour un serveur de test isolé |
 | `SAM_API` | (développement) adresse du serveur Node pour le proxy Vite, par défaut `127.0.0.1:3001` |
 | `DATABASE_URL` | PostgreSQL (Neon…) : joueurs, ventes, clés push et visiteurs en base, plus besoin de disque ; import automatique des fichiers JSON au premier démarrage sur une base vide. Sans elle : fichiers dans `server/data` |
+| `SAM_PUBLIC_URL`, `BREVO_API_KEY`, `SAM_MAIL_FROM` | e-mails « mot de passe oublié » (adresse publique du jeu pour le lien, clé Brevo, expéditeur validé) |
 | `SAM_CORS_ORIGINS` | domaines de la page d'accueil hébergée ailleurs (Vercel) autorisés à lire `/api/live` et `/api/stats` (`*.vercel.app` accepté) |
 | `SAM_CLIENT_IP_HEADER` | en-tête de l'hébergeur portant l'adresse du client (avec `SAM_TRUST_PROXY=1`) |
 | `SAM_GAME_URL` | (build de la page d'accueil seule, `npm run build:landing`) adresse du jeu, ex. `https://jouer.mondomaine.fr` |
@@ -213,6 +220,8 @@ tests/                     ws.mjs et auction.mjs (serveur), smoke.mjs (navigateu
 | Méthode | Route | Rôle |
 | --- | --- | --- |
 | POST | `/api/game/login` | crée un joueur invité `{ name, color, country }` ou reprend une session `{ id, token }` ; renvoie l’état et le gain hors ligne |
+| POST | `/api/game/register`, `/login/password`, `/password/forgot`, `/password/reset`, `/logout` | comptes : inscription `{ username, email, password }` (avec une session d'invité : son musée devient le compte), connexion, lien de réinitialisation par e-mail, nouveau mot de passe, déconnexion de l'appareil |
+| GET | `/api/ping` | maintien en éveil (interroge aussi la base) |
 | POST | `/api/game/login/google`, `/api/game/link/google` | retrouver ou lier son musée avec Google (si `SAM_GOOGLE_CLIENT_ID`) |
 | GET | `/api/game/state`, `/api/game/convoy`, `/api/game/leaderboard?board=value\|weekly\|theft\|auction\|countries` | état du joueur (caisse à jour), camions en cours, classements (`me: true` sur la ligne du joueur connecté) |
 | POST | `/api/game/buy`, `/collect`, `/expand`, `/sell`, `/move`, `/decor`, `/name`, `/claim` | actions validées par le serveur (en-têtes `x-player-id` et `x-player-token`) |

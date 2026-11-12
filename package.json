@@ -12,7 +12,10 @@
     "test": "node tests/smoke.mjs",
     "test:pwa": "node tests/pwa.mjs",
     "test:server": "node tests/ws.mjs && node tests/auction.mjs",
-    "icons": "node tools/make-icons.mjs"
+    "icons": "node tools/make-icons.mjs",
+    "android:assets": "node tools/make-android-assets.mjs",
+    "android:sync": "cap sync android",
+    "android:open": "cap open android"
   },
   "dependencies": {
     "pg": "8.13.1",
@@ -21,6 +24,9 @@
     "ws": "8.18.0"
   },
   "devDependencies": {
+    "@capacitor/android": "6.2.0",
+    "@capacitor/cli": "6.2.0",
+    "@capacitor/core": "6.2.0",
     "@types/three": "0.170.0",
     "esbuild": "0.21.5",
     "playwright": "^1.49.0",

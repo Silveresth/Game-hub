@@ -33,7 +33,7 @@ function loadScript(): Promise<void> {
 }
 
 /** Affiche le bouton Google dans `el` ; `onCredential` reçoit le jeton à envoyer au serveur. Renvoie false si indisponible. */
-export async function mountGoogleButton(el: HTMLElement, onCredential: (credential: string) => void, text: 'signin_with' | 'continue_with' = 'continue_with'): Promise<boolean> {
+export async function mountGoogleButton(el: HTMLElement, onCredential: (credential: string) => void, text: 'signin_with' | 'signup_with' | 'continue_with' = 'continue_with'): Promise<boolean> {
   const id = await googleClientId();
   if (!id) return false;
   handler = onCredential;

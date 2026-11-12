@@ -158,11 +158,19 @@ export async function createDatabase({ dataDir }) {
     }
   }
 
+  /** Requête minimale : réveille la base (Neon se met en veille quand elle ne sert pas). Renvoie la durée en ms. */
+  async function ping() {
+    const t0 = Date.now();
+    if (pg) await pg.query('SELECT 1');
+    return Date.now() - t0;
+  }
+
   return {
     loadAllPlayers,
     savePlayer,
     kvGet,
     kvSet,
+    ping,
     isPostgres: () => !!pg,
     close: () => pg?.end(),
   };

@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { cleanSubscription } from './push.mjs';
 import { clientIp } from './ip.mjs';
 import { createDatabase } from './db.mjs';
+import { cleanEmail, hashPassword, newToken, passwordProblem, sendResetEmail, verifyPassword } from './accounts.mjs';
 
 const WINDOW_MS = 20_000; // un nouveau camion du convoi toutes les 20 s
 const TRAVEL_MS = 40_000; // durée de traversée de la place
@@ -544,7 +545,40 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     if (!info || info.aud !== GOOGLE_CLIENT_ID || !okIss || Number(info.exp) * 1000 < Date.now() || !info.sub) {
       throw Object.assign(new Error('Jeton Google refusé'), { status: 401 });
     }
-    return hash(`google:${info.sub}`);
+    // on garde seulement une empreinte de l'identifiant Google ; le nom sert à nommer un nouveau musée
+    return { key: hash(`google:${info.sub}`), name: typeof info.name === 'string' ? info.name : '' };
+  }
+
+  // ---------------------------------------------------------------- comptes
+
+  /** Nouveau joueur (invité ou compte) : renvoie le joueur et son jeton de session. */
+  function newPlayer(body) {
+    const id = randomBytes(9).toString('base64url');
+    const token = newToken();
+    const p = migrate({
+      id, tokenHash: hash(token), name: cleanName(body.name) ?? `Musée n°${players.size + 1}`,
+      color: colors.includes(body.color) ? body.color : colors[0],
+      country: cleanCountry(body.country) ?? 'FR',
+      coins: START_COINS, level: 1, artworks: [], cash: 0, lastTick: Date.now(), createdAt: Date.now(), bought: [],
+    });
+    players.set(id, p);
+    touch(p);
+    return { p, token };
+  }
+
+  const byEmail = (email) => (email ? [...players.values()].find((x) => x.email === email) ?? null : null);
+  /** Nom déjà utilisé par un autre compte (les invités, eux, peuvent porter le même nom). */
+  const nameTaken = (name, self) => [...players.values()].some((x) => x !== self && (x.email || x.googleKey) && x.name.toLowerCase() === name.toLowerCase());
+
+  /** Session pour un nouvel appareil (5 appareils au plus) : jeton, état, gains hors ligne, messages en attente. */
+  function openSession(p) {
+    const token = newToken();
+    p.deviceTokens = [...(p.deviceTokens ?? []).slice(-4), hash(token)];
+    const offlineGain = accrue(p);
+    const inbox = p.inbox;
+    p.inbox = [];
+    touch(p);
+    return { id: p.id, token, state: state(p), offlineGain: Math.floor(offlineGain), created: false, inbox };
   }
 
   function metric(p, m) {
@@ -638,6 +672,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       daily: dailyInfo(p),
       event: eventAt(Date.now()),
       inviteCode: p.inviteCode,
+      // compte : l'e-mail n'est envoyé qu'à son propriétaire ; jamais le mot de passe ni son empreinte
+      account: { email: p.email ?? null, password: !!p.passwordHash, google: !!p.googleKey },
     };
   }
 
@@ -771,46 +807,143 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
         return json(res, 200, { id: existing.id, state: state(existing), offlineGain: Math.floor(offlineGain), created: false, inbox });
       }
       if (limited(`${ip}:create`, devMode ? 10_000 : 20, 10 * 60_000)) return json(res, 429, { error: 'Trop de comptes créés, réessayez plus tard' });
-      const id = randomBytes(9).toString('base64url');
-      const token = randomBytes(24).toString('base64url');
-      const p = migrate({
-        id, tokenHash: hash(token), name: cleanName(body.name) ?? `Musée n°${players.size + 1}`,
-        color: colors.includes(body.color) ? body.color : colors[0],
-        country: cleanCountry(body.country) ?? 'FR',
-        coins: START_COINS, level: 1, artworks: [], cash: 0, lastTick: Date.now(), createdAt: Date.now(), bought: [],
-      });
-      players.set(id, p);
+      const { p, token } = newPlayer(body);
+      return json(res, 201, { id: p.id, token, state: state(p), offlineGain: 0, created: true });
+    }
+
+    // ------------------------------------------------------------ comptes : inscription, connexion, mot de passe oublié
+
+    if (route === 'register' && req.method === 'POST') {
+      // inscription. Avec une session d'invité : son musée devient un compte (rien n'est perdu)
+      if (limited(`${ip}:create`, devMode ? 10_000 : 20, 10 * 60_000)) return json(res, 429, { error: 'Trop de comptes créés, réessayez plus tard' });
+      const name = cleanName(body.username);
+      if (!name) return json(res, 422, { error: 'Nom d’utilisateur : 2 à 24 caractères' });
+      const email = cleanEmail(body.email);
+      if (!email) return json(res, 422, { error: 'Adresse e-mail invalide' });
+      const bad = passwordProblem(body.password);
+      if (bad) return json(res, 422, { error: bad });
+      if (byEmail(email)) return json(res, 409, { error: 'Cet e-mail a déjà un compte : connectez-vous (ou « Mot de passe oublié »)' });
+      const guest = auth(req);
+      if (nameTaken(name, guest)) return json(res, 409, { error: 'Ce nom d’utilisateur est déjà pris' });
+      const passwordHash = await hashPassword(body.password);
+      if (guest && !guest.email) {
+        guest.name = name;
+        guest.email = email;
+        guest.passwordHash = passwordHash;
+        if (colors.includes(body.color)) guest.color = body.color;
+        const country = cleanCountry(body.country);
+        if (country) guest.country = country;
+        touch(guest);
+        changed(guest);
+        return json(res, 200, { id: guest.id, state: state(guest), upgraded: true });
+      }
+      const { p, token } = newPlayer({ ...body, name });
+      p.email = email;
+      p.passwordHash = passwordHash;
       touch(p);
-      return json(res, 201, { id, token, state: state(p), offlineGain: 0, created: true });
+      return json(res, 201, { id: p.id, token, state: state(p), offlineGain: 0, created: true });
+    }
+
+    if (route === 'login/password' && req.method === 'POST') {
+      const email = cleanEmail(body.email);
+      if (limited(`${ip}:pw`, devMode ? 10_000 : 20, 15 * 60_000) || (email && limited(`mail:${email}`, devMode ? 10_000 : 10, 15 * 60_000))) {
+        return json(res, 429, { error: 'Trop d’essais : réessayez dans quelques minutes' });
+      }
+      const p = email ? byEmail(email) : null;
+      if (!p?.passwordHash || !(await verifyPassword(String(body.password ?? ''), p.passwordHash))) {
+        return json(res, 401, { error: 'E-mail ou mot de passe incorrect' });
+      }
+      return json(res, 200, openSession(p));
+    }
+
+    if (route === 'password/forgot' && req.method === 'POST') {
+      // réponse identique que le compte existe ou non (on ne révèle pas quels e-mails sont inscrits)
+      const email = cleanEmail(body.email);
+      if (!email) return json(res, 422, { error: 'Adresse e-mail invalide' });
+      if (limited(`${ip}:forgot`, devMode ? 10_000 : 5, 15 * 60_000) || limited(`forgot:${email}`, devMode ? 10_000 : 3, 3600_000)) {
+        return json(res, 429, { error: 'Trop de demandes : réessayez plus tard' });
+      }
+      const reply = { ok: true, message: 'Si un compte existe avec cet e-mail, un lien pour changer le mot de passe vient d’y être envoyé (valable 1 heure).' };
+      const p = byEmail(email);
+      if (!p) return json(res, 200, reply);
+      const token = newToken(32);
+      p.reset = { hash: hash(token), until: Date.now() + 3600_000 };
+      touch(p);
+      const base = (process.env.SAM_PUBLIC_URL || (devMode ? `http://${req.headers.host}` : '')).replace(/\/+$/, '');
+      const link = `${base}/game/?reset=${token}`;
+      if (!base) {
+        console.error('Mot de passe oublié : SAM_PUBLIC_URL manquant, impossible de construire le lien');
+        return json(res, 200, reply);
+      }
+      try {
+        const sent = await sendResetEmail({ to: email, name: p.name, link });
+        if (sent === 'not-configured') {
+          console.warn(`Mot de passe oublié : Brevo non configuré (BREVO_API_KEY, SAM_MAIL_FROM). Lien pour ${p.name} : ${devMode ? link : '(masqué)'}`);
+          if (devMode) return json(res, 200, { ...reply, devLink: link });
+        }
+      } catch (e) {
+        console.error('Mot de passe oublié :', e.message);
+      }
+      return json(res, 200, reply);
+    }
+
+    if (route === 'password/reset' && req.method === 'POST') {
+      if (limited(`${ip}:reset`, devMode ? 10_000 : 10, 15 * 60_000)) return json(res, 429, { error: 'Trop d’essais : réessayez plus tard' });
+      const h = typeof body.token === 'string' && body.token ? hash(body.token) : '';
+      const p = h ? [...players.values()].find((x) => x.reset?.hash === h && x.reset.until > Date.now()) : null;
+      if (!p) return json(res, 410, { error: 'Lien expiré ou déjà utilisé : refaites une demande « Mot de passe oublié »' });
+      const bad = passwordProblem(body.password);
+      if (bad) return json(res, 422, { error: bad });
+      p.passwordHash = await hashPassword(body.password);
+      delete p.reset;
+      // nouveau mot de passe : toutes les sessions ouvertes ailleurs sont fermées
+      p.tokenHash = hash(newToken());
+      p.deviceTokens = [];
+      return json(res, 200, openSession(p));
     }
 
     if (route === 'login/google' && req.method === 'POST') {
-      // retrouver son musée sur un nouvel appareil
+      // connexion avec Google : retrouve le musée lié, sinon crée le compte (ou rattache le musée de l'invité)
       if (limited(`${ip}:google`, 20, 10 * 60_000)) return json(res, 429, { error: 'Trop d’essais, réessayez plus tard' });
-      let key;
+      let g;
       try {
-        key = await googleKey(body.credential);
+        g = await googleKey(body.credential);
       } catch (e) {
         return json(res, e.status ?? 401, { error: e.message });
       }
-      const p = [...players.values()].find((x) => x.googleKey === key);
-      if (!p) return json(res, 404, { error: 'Aucun musée lié à ce compte Google : commencez en invité, puis liez-le (Renommer → Google)' });
-      const token = randomBytes(24).toString('base64url');
-      p.deviceTokens = [...(p.deviceTokens ?? []).slice(-4), hash(token)]; // 5 appareils au plus
-      const offlineGain = accrue(p);
-      const inbox = p.inbox;
-      p.inbox = [];
-      touch(p);
-      return json(res, 200, { id: p.id, token, state: state(p), offlineGain: Math.floor(offlineGain), created: false, inbox });
+      let p = [...players.values()].find((x) => x.googleKey === g.key);
+      if (!p) {
+        const guest = auth(req);
+        if (guest && !guest.googleKey && !guest.email) {
+          p = guest;
+        } else {
+          let name = cleanName(g.name) ?? `Musée n°${players.size + 1}`;
+          for (let i = 2; nameTaken(name, null) && i < 99; i++) name = cleanName(`${(cleanName(g.name) ?? 'Musée').slice(0, 20)} ${i}`) ?? name;
+          p = newPlayer({ name, color: body.color, country: body.country }).p;
+        }
+        p.googleKey = g.key;
+        touch(p);
+      }
+      return json(res, 200, openSession(p));
     }
 
     const p = auth(req);
     if (!p) return json(res, 401, { error: 'Session invalide' });
 
+    if (route === 'logout' && req.method === 'POST') {
+      // déconnexion de cet appareil : son jeton ne vaut plus rien (un invité ne peut pas se déconnecter : il perdrait son musée)
+      if (!p.email && !p.googleKey) return json(res, 409, { error: 'Créez d’abord un compte, sinon votre musée serait perdu' });
+      const h = hash(String(req.headers['x-player-token'] ?? ''));
+      if (p.tokenHash === h) p.tokenHash = hash(newToken());
+      p.deviceTokens = (p.deviceTokens ?? []).filter((x) => x !== h);
+      touch(p);
+      return json(res, 200, { ok: true });
+    }
+
     if (route === 'link/google' && req.method === 'POST') {
       let key;
       try {
-        key = await googleKey(body.credential);
+        key = (await googleKey(body.credential)).key;
       } catch (e) {
         return json(res, e.status ?? 401, { error: e.message });
       }
@@ -938,6 +1071,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     if (route === 'name' && req.method === 'POST') {
       const name = body.name === undefined ? p.name : cleanName(body.name);
       if (!name) return json(res, 422, { error: 'Nom de 2 à 24 caractères' });
+      if ((p.email || p.googleKey) && nameTaken(name, p)) return json(res, 409, { error: 'Ce nom d’utilisateur est déjà pris' });
       if (body.color !== undefined && !colors.includes(body.color)) return json(res, 422, { error: 'Couleur inconnue' });
       p.name = name;
       if (body.color) p.color = body.color;

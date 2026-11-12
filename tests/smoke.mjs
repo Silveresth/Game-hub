@@ -14,12 +14,15 @@ const browser = await chromium.launch({
 const context = await browser.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 1 });
 
 let failures = 0;
+/** Erreurs attendues par test (ex. le 401 d'un mauvais mot de passe, que le navigateur journalise). */
+const EXPECTED = { 'game-account': /status of 401/ };
 async function check(name, path, fn, ctx = context) {
   if (process.env.ONLY && !name.startsWith(process.env.ONLY)) return; // ONLY=game : ne lancer qu'une partie des tests
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => {
+    if (EXPECTED[name]?.test(m.text())) return;
     if (m.type() === 'error' || (m.type() === 'warning' && /shader|WebGL|THREE/i.test(m.text()))) errors.push(m.type() + ': ' + m.text());
   });
   const t0 = Date.now();
@@ -125,7 +128,7 @@ async function newGame(p, name) {
   await p.reload({ waitUntil: 'load' });
   await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
   await p.fill('#nameInput', name);
-  await p.click('#welcomeForm .go');
+  await p.click('#guestLink');
   await until(p, (n) => window.__game?.state?.name === n && document.body.classList.contains('playing') && window.__game.myPlot >= 0, name, 30000);
 }
 
@@ -135,7 +138,7 @@ await check('game-play', '/game/', async (p) => {
   await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
   await p.fill('#nameInput', 'Musée Robot');
   await p.click('#colors button:nth-child(3)'); // bleu
-  await p.click('#welcomeForm .go');
+  await p.click('#guestLink');
   await until(p, () => window.__game?.state?.name === 'Musée Robot', null, 20000);
   const s0 = await g(p, () => window.__game.state);
   if (s0.coins !== 500 || s0.level !== 1 || s0.slots !== 4) throw new Error('état initial inattendu ' + JSON.stringify({ c: s0.coins, l: s0.level }));
@@ -210,6 +213,51 @@ await check('game-play', '/game/', async (p) => {
   await until(p, () => window.__game?.state?.name === 'Musée Robot', null, 30000);
   if (await p.evaluate(() => document.getElementById('welcome').classList.contains('open'))) throw new Error('le nom est redemandé après rechargement');
   if ((await g(p, () => window.__game.state.level)) !== 2) throw new Error('niveau perdu après rechargement');
+});
+
+// ---------------------------------------------------------------- compte : inscription, déconnexion, connexion, mot de passe oublié
+await check('game-account', '/game/', async (p) => {
+  await until(p, () => document.body.classList.contains('playing') || document.getElementById('welcome')?.classList.contains('open'), null, 120000);
+  await p.evaluate(() => localStorage.removeItem('sam-player'));
+  await p.reload({ waitUntil: 'load' });
+  await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
+  const stamp = Date.now() % 1_000_000;
+  const mail = `smoke${stamp}@exemple.fr`;
+  // inscription
+  await p.fill('#nameInput', `Compte ${stamp}`);
+  await p.fill('#emailInput', mail);
+  await p.fill('#passInput', 'motdepasse1');
+  await shot(p, 'account-1-signup');
+  await p.click('#authGo');
+  await until(p, (n) => window.__game?.state?.name === n && window.__game.state.account.email !== null && document.body.classList.contains('playing'), `Compte ${stamp}`, 60000)
+    .catch(async () => { throw new Error('inscription : ' + (await p.textContent('#authMsg'))); });
+  if ((await p.textContent('#renameBtn')) !== 'Compte') throw new Error('bouton du porte-monnaie : « Compte » attendu');
+  // déconnexion depuis « Mon compte »
+  await p.click('#renameBtn');
+  await p.waitForSelector('#logoutBtn:not([hidden])', { timeout: 20000 });
+  await shot(p, 'account-2-mon-compte');
+  await p.click('#logoutBtn');
+  await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
+  // connexion avec l'e-mail (comme sur un autre appareil)
+  await p.click('[data-auth="login"]');
+  await p.fill('#emailInput', mail);
+  await p.fill('#passInput', 'mauvais-mdp');
+  await p.click('#authGo');
+  await until(p, () => /incorrect/.test(document.getElementById('authMsg').textContent), null, 15000);
+  await p.fill('#passInput', 'motdepasse1');
+  await p.click('#authGo');
+  await until(p, (n) => window.__game?.state?.name === n && document.body.classList.contains('playing'), `Compte ${stamp}`, 60000)
+    .catch(() => { throw new Error('connexion par e-mail refusée'); });
+  // mot de passe oublié (sans Brevo en test : le lien est renvoyé dans le message)
+  await p.evaluate(() => localStorage.removeItem('sam-player'));
+  await p.reload({ waitUntil: 'load' });
+  await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
+  await p.click('[data-auth="login"]');
+  await p.click('#forgotLink');
+  await p.fill('#emailInput', mail);
+  await p.click('#authGo');
+  await until(p, () => /lien/.test(document.getElementById('authMsg').textContent), null, 15000);
+  await shot(p, 'account-3-oubli');
 });
 
 // ---------------------------------------------------------------- multijoueur : un vrai cambriolage à deux navigateurs
@@ -398,7 +446,7 @@ await check('game-mobile', '/game/', async (p) => {
   await p.reload({ waitUntil: 'load' });
   await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
   await p.fill('#nameInput', 'Musée Mobile');
-  await p.tap('#welcomeForm .go');
+  await p.tap('#guestLink');
   await until(p, () => window.__game?.state?.name === 'Musée Mobile' && document.body.classList.contains('playing'), null, 20000);
   if (!(await p.isVisible('#joy'))) throw new Error('joystick tactile absent');
   // le panneau d'objectif ne doit pas recouvrir le centre de l'écran (le personnage)

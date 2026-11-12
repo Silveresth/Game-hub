@@ -18,6 +18,12 @@ services:
         sync: false # adresse de la page d'accueil Vercel (ex. https://mondomaine.fr,https://www.mondomaine.fr)
       - key: SAM_TRUST_PROXY
         value: "1" # Render est un proxy : lire la vraie adresse des joueurs
+      - key: SAM_PUBLIC_URL
+        sync: false # adresse publique du jeu (ex. https://jouer.mondomaine.fr) : liens « mot de passe oublié »
+      - key: BREVO_API_KEY
+        sync: false # e-mails « mot de passe oublié » (Brevo → SMTP & API → clés API)
+      - key: SAM_MAIL_FROM
+        sync: false # expéditeur validé dans Brevo (ex. noreply@mondomaine.fr)
       - key: SAM_ADMIN_TOKEN
         generateValue: true # mot de passe du panneau /admin/, à lire dans Render → Environment
       - key: SAM_VAPID_SUBJECT

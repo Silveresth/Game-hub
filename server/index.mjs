@@ -281,6 +281,15 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/api/live') return openLiveStream(req, res, url);
+    if ((req.method === 'GET' || req.method === 'HEAD' || req.method === 'POST') && url.pathname === '/api/ping') {
+      // maintien en éveil (Upstash QStash toutes les 10 min) : le service Render et la base Neon ne s'endorment pas
+      try {
+        const ms = await db.ping();
+        return send(res, 200, { ok: true, db: db.isPostgres() ? 'postgres' : 'fichiers', dbMs: ms, uptime: Math.round(process.uptime()) }, undefined, { 'cache-control': 'no-store' });
+      } catch (e) {
+        return send(res, 503, { ok: false, error: `Base injoignable : ${e.message}` }, undefined, { 'cache-control': 'no-store' });
+      }
+    }
     if (url.pathname.startsWith('/api/game/')) return await game.handle(req, res, url);
     if (url.pathname.startsWith('/api/admin/')) return await adminApi(req, res, url);
     if (req.method === 'GET' && url.pathname === '/api/push/key') return send(res, 200, { key: push.publicKey });

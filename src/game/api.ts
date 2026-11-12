@@ -74,6 +74,8 @@ export interface PlayerState {
   event: { current: ConvoyEvent | null; next: ConvoyEvent | null };
   /** Code à partager pour inviter un ami dans son quartier. */
   inviteCode: string;
+  /** Compte : e-mail et mot de passe, ou Google ; sans l'un ni l'autre, c'est un invité (musée sur cet appareil). */
+  account: { email: string | null; password: boolean; google: boolean };
 }
 
 export type UpgradeId = 'speed' | 'lock' | 'vault' | 'gloves' | 'luck';
@@ -191,6 +193,42 @@ export async function loginGoogle(credential: string): Promise<{ state: PlayerSt
   return r;
 }
 export const linkGoogle = (credential: string) => post<{ state: PlayerState }>('link/google', { credential });
+
+type SessionReply = { id: string; token?: string; state: PlayerState; offlineGain: number; created: boolean; inbox?: InboxItem[]; upgraded?: boolean };
+
+function keepSession(r: SessionReply): SessionReply {
+  if (r.token) {
+    session = { id: r.id, token: r.token };
+    try {
+      localStorage.setItem(KEY, JSON.stringify(session));
+    } catch {
+      /* stockage indisponible : la session vit le temps de l'onglet */
+    }
+  }
+  return r;
+}
+
+/** Inscription. Avec une session d'invité ouverte, son musée devient le compte (rien n'est perdu). */
+export const register = async (username: string, email: string, password: string, color?: string, country?: string) =>
+  keepSession(await post<SessionReply>('register', { username, email, password, color, country }));
+/** Connexion par e-mail et mot de passe (sur n'importe quel appareil). */
+export const loginPassword = async (email: string, password: string) => keepSession(await post<SessionReply>('login/password', { email, password }));
+export const forgotPassword = (email: string) => post<{ ok: boolean; message: string; devLink?: string }>('password/forgot', { email });
+/** Nouveau mot de passe depuis le lien reçu par e-mail : les autres sessions sont fermées, celle-ci s'ouvre. */
+export const resetPassword = async (token: string, password: string) => keepSession(await post<SessionReply>('password/reset', { token, password }));
+/** Déconnexion de cet appareil. */
+export async function logout(): Promise<void> {
+  try {
+    await post('logout');
+  } finally {
+    session = null;
+    try {
+      localStorage.removeItem(KEY);
+    } catch {
+      /* rien à effacer */
+    }
+  }
+}
 
 export const hasSavedSession = () => !!loadSession();
 /** Identifiants pour le WebSocket du quartier (après login). */

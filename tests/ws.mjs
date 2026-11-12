@@ -478,6 +478,37 @@ cD2.ws.close();
   ok(lbNations.some((x) => x.country === 'JP' && x.name === 'Japon'), 'classement cumulé des nations');
 }
 
+// --- Comptes : inscription (l'invité garde son musée), autre appareil, mot de passe oublié, déconnexion ---
+{
+  const G = await newPlayer('Musée Invité');
+  await http('dev/grant', { coins: 1234 }, G);
+  const stamp = Date.now() % 1_000_000;
+  const mail = `joueur${stamp}@exemple.fr`;
+  const up = await http('register', { username: `Compte ${stamp}`, email: mail, password: 'motdepasse1' }, G);
+  ok(up.upgraded && up.state?.account.email === mail && up.state.coins === 1734, `inscription : l'invité garde son musée (${up.error ?? up.state?.coins})`);
+  ok(/déjà un compte/.test((await http('register', { username: 'Autre nom', email: mail.toUpperCase(), password: 'motdepasse1' })).error ?? ''), 'e-mail déjà inscrit refusé');
+  ok(/8 caractères/.test((await http('register', { username: 'Trop court', email: `x${mail}`, password: '123' })).error ?? ''), 'mot de passe trop court refusé');
+  ok(/incorrect/.test((await http('login/password', { email: mail, password: 'mauvais' })).error ?? ''), 'mauvais mot de passe refusé');
+  const other = await http('login/password', { email: ` ${mail.toUpperCase()} `, password: 'motdepasse1' });
+  ok(other.id === G.id && other.token && other.token !== G.token && other.state?.coins === 1734, 'connexion sur un autre appareil : même musée, nouvelle session');
+  const dev2 = { id: other.id, token: other.token };
+  const forgot = await http('password/forgot', { email: mail });
+  ok(forgot.ok && /reset=/.test(forgot.devLink ?? ''), 'mot de passe oublié : lien de réinitialisation (mode test, sans Brevo)');
+  const unknown = await http('password/forgot', { email: 'personne@exemple.fr' });
+  ok(unknown.ok && unknown.message === forgot.message && !unknown.devLink, 'même réponse pour un e-mail inconnu');
+  const resetToken = new URL(forgot.devLink).searchParams.get('reset');
+  const reset = await http('password/reset', { token: resetToken, password: 'nouveaumdp2' });
+  ok(reset.id === G.id && !!reset.token, 'nouveau mot de passe enregistré');
+  ok(!!(await http('state', null, dev2)).error && !!(await http('state', null, G)).error, 'les anciennes sessions sont fermées');
+  ok(!!(await http('password/reset', { token: resetToken, password: 'encore12345' })).error, 'lien de réinitialisation à usage unique');
+  const again = await http('login/password', { email: mail, password: 'nouveaumdp2' });
+  ok(again.id === G.id, 'connexion avec le nouveau mot de passe');
+  const s3 = { id: again.id, token: again.token };
+  ok((await http('logout', {}, s3)).ok && !!(await http('state', null, s3)).error, 'déconnexion : la session ne vaut plus rien');
+  const guest2 = await newPlayer('Musée Seul');
+  ok(/Créez d’abord un compte/.test((await http('logout', {}, guest2)).error ?? ''), 'un invité ne peut pas se déconnecter (il perdrait son musée)');
+}
+
 // --- Social : invitation, discussion, émotes, relais de la voix ---
 {
   const Ho = await newPlayer('Musée Hôte');
