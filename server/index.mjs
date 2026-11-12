@@ -5,20 +5,44 @@
 // Usage : npm run build && npm start     (PORT=3001 et HOST=127.0.0.1 par défaut)
 import http from 'node:http';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { extname, join, normalize, sep } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
+import { createDatabase } from './db.mjs';
 import { createGame } from './game.mjs';
 import { attachDistricts } from './district.mjs';
 import { createAuctions } from './auctions.mjs';
 import { createPush } from './push.mjs';
 import { clientIp } from './ip.mjs';
 
+// Filet de sécurité : une promesse rejetée oubliée est journalisée au lieu d'arrêter tout le serveur.
+process.on('unhandledRejection', (e) => console.error('Promesse rejetée non gérée :', e));
+
 const PORT = Number(process.env.PORT) || 3001;
 const HOST = process.env.HOST || '127.0.0.1';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DIST = join(ROOT, 'dist');
-const DATA = join(ROOT, 'server', 'data');
+// SAM_DATA_DIR : dossier des données (joueurs, ventes, clés push), par exemple pour isoler un serveur de test
+const DATA = process.env.SAM_DATA_DIR ? resolve(process.env.SAM_DATA_DIR) : join(ROOT, 'server', 'data');
+
+/**
+ * Domaines autorisés à lire les statistiques publiques (/api/live, /api/stats) depuis un autre site,
+ * par exemple la page d'accueil hébergée sur Vercel. Liste séparée par des virgules ; « *.vercel.app » accepte
+ * les aperçus Vercel, « * » accepte tout le monde (ces deux routes ne renvoient que des données publiques).
+ */
+const CORS_ORIGINS = (process.env.SAM_CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+function corsHeaders(req) {
+  const origin = String(req.headers.origin ?? '');
+  if (!origin || !CORS_ORIGINS.length) return {};
+  let host = '';
+  try {
+    host = new URL(origin).host;
+  } catch {
+    return {};
+  }
+  const ok = CORS_ORIGINS.some((o) => o === '*' || o === origin || (o.startsWith('*.') && host.endsWith(o.slice(1))));
+  return ok ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -75,7 +99,8 @@ async function serveStatic(res, pathname) {
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'strict-origin-when-cross-origin',
       'x-frame-options': 'SAMEORIGIN',
-      'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+      // micro autorisé sur ce site seulement (discussion vocale, sur demande du joueur)
+      'permissions-policy': 'camera=(), microphone=(self), geolocation=()',
     });
     res.end(body);
   } catch {
@@ -85,7 +110,6 @@ async function serveStatic(res, pathname) {
 
 // ------------------------------------------------------------------ barre live : présence, visiteurs, ventes
 
-const VISITORS = join(DATA, 'visitors.json');
 const VID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const MAX_LIVE = 5000;
 /** Identifiants anonymes (générés par le navigateur) de tous les visiteurs depuis le lancement. */
@@ -97,9 +121,12 @@ let visitorsTimer = null;
 function saveVisitorsSoon() {
   clearTimeout(visitorsTimer);
   visitorsTimer = setTimeout(async () => {
-    const tmp = VISITORS + '.tmp';
-    await writeFile(tmp, JSON.stringify([...visitors]));
-    await rename(tmp, VISITORS);
+    try {
+      await db.kvSet('visitors', [...visitors]);
+    } catch (e) {
+      // disque plein, base injoignable… : on le signale sans arrêter le serveur, nouvel essai à la prochaine visite
+      console.error('Enregistrement des visiteurs impossible :', e.message);
+    }
   }, 1000);
 }
 
@@ -110,9 +137,6 @@ const hashToken = (t) => createHash('sha256').update(t).digest('hex');
 function liveStats() {
   const now = Date.now();
   const richest = game.leaderboard(1)[0];
-  const top = richest
-    ? { id: 'player', name: richest.name, author: '', likes: 0, value: richest.value }
-    : null;
   return {
     online: new Set(live.values()).size,
     visitors: visitors.size,
@@ -120,7 +144,10 @@ function liveStats() {
     sales: auctions.schedule(now, 4),
     nextMajor: auctions.nextMajor(now),
     liveSale: auctions.live(),
-    top: top ? { id: top.id, name: top.name, author: top.author, likes: top.likes, value: top.value } : null,
+    // événement du convoi en cours / à venir (Heure dorée, Trésors rares, Soldes)
+    event: game.eventAt(now),
+    // musée n°1 : seulement ce que la barre live affiche (l'ancien format des musées publiés n'existe plus)
+    top: richest ? { name: richest.name, value: richest.value } : null,
   };
 }
 
@@ -145,6 +172,7 @@ function openLiveStream(req, res, url) {
     'cache-control': 'no-cache, no-transform',
     connection: 'keep-alive',
     'x-accel-buffering': 'no',
+    ...corsHeaders(req),
   });
   res.write('retry: 5000\n\n');
   live.set(res, id);
@@ -157,16 +185,33 @@ function openLiveStream(req, res, url) {
 
 // ------------------------------------------------------------------ démarrage
 
+/**
+ * Serveurs ICE de la discussion vocale (WebRTC). Par défaut un serveur STUN public ; SAM_ICE_SERVERS (JSON) permet
+ * d'ajouter un serveur TURN, nécessaire quand deux joueurs sont derrière des réseaux très fermés.
+ */
+const ICE_SERVERS = (() => {
+  try {
+    const v = JSON.parse(process.env.SAM_ICE_SERVERS ?? 'null');
+    if (Array.isArray(v) && v.length) return v;
+  } catch {
+    console.error('SAM_ICE_SERVERS illisible (JSON attendu) : serveur STUN par défaut');
+  }
+  return [{ urls: 'stun:stun.l.google.com:19302' }];
+})();
+
 const DEV = process.env.SAM_DEV === '1'; // active /api/game/dev/* et les raccourcis de test (jamais en production)
 await mkdir(DATA, { recursive: true });
-const push = await createPush({ dataDir: DATA, devMode: DEV });
+// une seule connexion à la base (PostgreSQL si DATABASE_URL, sinon fichiers JSON), partagée par tout le serveur
+const db = await createDatabase({ dataDir: DATA });
+const push = await createPush({ db, devMode: DEV });
 const game = await createGame({
   dataDir: DATA,
   catalogFile: join(ROOT, 'src', 'shared', 'catalog.json'),
   devMode: DEV,
   push,
+  db,
 });
-const auctions = await createAuctions({ game, dataDir: DATA, devMode: DEV });
+const auctions = await createAuctions({ game, db, devMode: DEV });
 
 /**
  * Digital Asset Links : prouve à Android que l'APK (Trusted Web Activity, via Bubblewrap) appartient à ce site,
@@ -184,6 +229,10 @@ function assetLinks() {
 
 const ADMIN_TOKEN = process.env.SAM_ADMIN_TOKEN || (DEV ? 'dev-admin' : '');
 const adminFails = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, list] of adminFails) if (!list.some((t) => now - t < 15 * 60_000)) adminFails.delete(ip);
+}, 5 * 60_000).unref();
 function adminOk(req, ip) {
   if (!ADMIN_TOKEN) return false;
   const now = Date.now();
@@ -223,9 +272,9 @@ async function adminApi(req, res, url) {
 }
 
 try {
-  for (const v of JSON.parse(await readFile(VISITORS, 'utf8'))) if (VID_RE.test(v)) visitors.add(v);
-} catch {
-  /* premier lancement */
+  for (const v of (await db.kvGet('visitors')) ?? []) if (VID_RE.test(v)) visitors.add(v);
+} catch (e) {
+  console.error('Lecture des visiteurs impossible :', e.message);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -235,9 +284,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/game/')) return await game.handle(req, res, url);
     if (url.pathname.startsWith('/api/admin/')) return await adminApi(req, res, url);
     if (req.method === 'GET' && url.pathname === '/api/push/key') return send(res, 200, { key: push.publicKey });
-    if (req.method === 'GET' && url.pathname === '/api/config') return send(res, 200, { googleClientId: process.env.SAM_GOOGLE_CLIENT_ID || null });
+    if (req.method === 'GET' && url.pathname === '/api/config') return send(res, 200, { googleClientId: process.env.SAM_GOOGLE_CLIENT_ID || null, iceServers: ICE_SERVERS });
     if (req.method === 'GET' && url.pathname === '/.well-known/assetlinks.json') return send(res, 200, assetLinks());
-    if (req.method === 'GET' && url.pathname === '/api/stats') return send(res, 200, liveStats(), undefined, { 'cache-control': 'no-store' });
+    if (req.method === 'GET' && url.pathname === '/api/stats') return send(res, 200, liveStats(), undefined, { 'cache-control': 'no-store', ...corsHeaders(req) });
     if (url.pathname.startsWith('/api/')) return send(res, 404, { error: 'Route inconnue' });
     return await serveStatic(res, url.pathname);
   } catch (e) {

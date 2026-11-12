@@ -155,7 +155,8 @@ export class AuctionHall {
     let sit = this.sitters.get(s.seat);
     if (sit && sit.key === key) return sit;
     if (sit) this.dropSitter(s.seat);
-    const ch = new Character(parseInt(s.color.slice(1), 16));
+    // collectionneurs PNJ : apparence variée ; joueurs : leur couleur
+    const ch = s.npc ? new Character(undefined, { crowd: true }) : new Character(parseInt(s.color.slice(1), 16));
     const p = seatPos(s.seat);
     ch.root.position.set(p.x, 0.12, p.z + 0.05);
     ch.root.rotation.y = Math.PI; // face à l'estrade

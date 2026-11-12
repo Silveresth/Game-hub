@@ -20,10 +20,17 @@ export interface LiveStats {
   nextMajor: Sale | null;
   /** Vente en cours, s'il y en a une. */
   liveSale: { label: string; kind: string; workId: string; index: number; count: number } | null;
-  top: { id: string; name: string; author: string; likes: number } | null;
+  /** Musée en tête du classement. */
+  top: { name: string; value: number } | null;
 }
 
 type Listener = (s: LiveStats) => void;
+
+/**
+ * Adresse du serveur du jeu, fixée à la compilation : vide pour le jeu lui-même (même domaine),
+ * l'adresse Render pour la page d'accueil hébergée ailleurs (Vercel), voir tools/build-landing.mjs.
+ */
+export const API_BASE: string = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '').replace(/\/+$/, '');
 
 const nf = new Intl.NumberFormat('fr-FR');
 const clockFmt = new Intl.DateTimeFormat('fr-FR', {
@@ -136,7 +143,7 @@ export function mountLiveBar(opts: { gameHref?: string } = {}): { onStats: (fn: 
 
   const connect = () => {
     if (!('EventSource' in window)) return poll();
-    const es = new EventSource(`/api/live?v=${encodeURIComponent(visitorId())}`);
+    const es = new EventSource(`${API_BASE}/api/live?v=${encodeURIComponent(visitorId())}`);
     es.onopen = () => {
       connected = true;
       bar.classList.remove('offline');
@@ -157,7 +164,7 @@ export function mountLiveBar(opts: { gameHref?: string } = {}): { onStats: (fn: 
 
   const poll = async () => {
     try {
-      const r = await fetch('/api/stats');
+      const r = await fetch(`${API_BASE}/api/stats`);
       if (r.ok) apply((await r.json()) as LiveStats);
     } catch {
       bar.classList.add('offline');
@@ -177,8 +184,10 @@ let deferredPrompt: (Event & { prompt: () => Promise<void>; userChoice: Promise<
 
 /** Enregistre le service worker (en production) et branche les boutons « Installer l'application ». */
 export function setupPwa(swUrl: string): void {
-  // Pas de service worker avec le serveur de dev Vite (port 5173) : il mettrait du code périmé en cache.
-  if ('serviceWorker' in navigator && location.port !== '5173') {
+  // L'application installable vit sur le domaine du jeu : une page d'accueil hébergée ailleurs ne l'installe pas.
+  if (API_BASE) return;
+  // Pas de service worker avec le serveur de dev Vite (quel que soit son port) : il mettrait du code périmé en cache.
+  if ('serviceWorker' in navigator && !import.meta.env.DEV) {
     addEventListener('load', () => {
       navigator.serviceWorker.register(swUrl).catch(() => undefined);
     });

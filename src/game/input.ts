@@ -1,6 +1,7 @@
 export type Action = 'action' | 'alt' | 'jump';
 
-const ACTION_KEYS: Record<string, Action> = { KeyE: 'action', Enter: 'action', KeyR: 'alt', Space: 'jump' };
+// (Entrée ouvre la discussion du quartier : elle ne sert plus d'action)
+const ACTION_KEYS: Record<string, Action> = { KeyE: 'action', KeyR: 'alt', Space: 'jump' };
 
 /**
  * Entrées : clavier (positions physiques → ZQSD sur AZERTY, WASD sur QWERTY), joystick virtuel et boutons tactiles.

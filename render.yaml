@@ -1,27 +1,31 @@
-# Déploiement sur Render (https://render.com) — Blueprint.
-# Render → New → Blueprint → choisir ce dépôt : il crée le service d'après ce fichier.
-# Palier Starter obligatoire : le palier gratuit s'endort après 15 min et n'a pas de disque persistant.
+# Déploiement du jeu sur Render (https://render.com) : jeu 3D, API, temps réel (WebSocket) et administration.
+# Render → New → Blueprint → choisir ce dépôt : le service est créé d'après ce fichier.
+# Les données durables vivent dans PostgreSQL (Neon, variable DATABASE_URL) : pas de disque nécessaire.
+# Voir docs/DEPLOIEMENT.md pour toutes les étapes (Neon, Render, Vercel, domaines).
 services:
   - type: web
     name: steal-a-masterpiece
     runtime: docker
+    # Starter au minimum : l'offre gratuite s'endort après 15 min sans visite (quartiers et enchères en cours perdus)
     plan: starter
-    region: frankfurt # le plus proche de la France
-    numInstances: 1 # une seule : les quartiers et les enchères vivent en mémoire
+    region: frankfurt # le plus proche de la France ; choisir la même région chez Neon (AWS Europe Central, Francfort)
+    numInstances: 1 # une seule instance : les quartiers et les enchères en cours vivent en mémoire
     healthCheckPath: /api/stats
-    disk:
-      name: data
-      mountPath: /app/server/data # joueurs, ventes, clés push
-      sizeGB: 1
     envVars:
+      - key: DATABASE_URL
+        sync: false # chaîne de connexion Neon (postgresql://…?sslmode=require)
+      - key: SAM_CORS_ORIGINS
+        sync: false # adresse de la page d'accueil Vercel (ex. https://mondomaine.fr,https://www.mondomaine.fr)
       - key: SAM_TRUST_PROXY
         value: "1" # Render est un proxy : lire la vraie adresse des joueurs
       - key: SAM_ADMIN_TOKEN
         generateValue: true # mot de passe du panneau /admin/, à lire dans Render → Environment
       - key: SAM_VAPID_SUBJECT
-        sync: false # à remplir : mailto:votre@adresse (contact pour les notifications push)
+        sync: false # contact des notifications push : mailto:votre@adresse
       - key: SAM_GOOGLE_CLIENT_ID
         sync: false # facultatif : connexion Google
+      - key: SAM_ICE_SERVERS
+        sync: false # facultatif : serveur TURN pour la voix (JSON)
       - key: SAM_ANDROID_PACKAGE
         sync: false # facultatif : APK Android
       - key: SAM_ANDROID_SHA256

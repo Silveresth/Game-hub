@@ -4,6 +4,34 @@ Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâ
 
 **État : phases 0 à 6 terminées, prêt à mettre en ligne** (voir [docs/LANCEMENT.md](docs/LANCEMENT.md)).
 
+**Accueil et identité visuelle :**
+- **Page d'accueil** (`index.html`, `src/landing/main.ts`) : « la salle rouge, après la fermeture ». Un mur de velours où la Joconde a disparu : cadre vide sous un projecteur, laser, bouton « Jouer gratuitement » à la place du tableau et cartel « Volée cette nuit ». Puis le sens de la visite (les 4 étapes du jeu), la collection (une œuvre par rareté, valeur et revenu lus dans le catalogue), le casse, le planning des ventes en direct, le jeu entre amis et les questions fréquentes.
+- **Logo** : cadre doré à rosettes, masque de voleur ivoire sur toile de velours, éclat d'or et laser. `public/icons/icon.svg` (icône d'application) et `public/logo.svg` (marque seule) ; PNG régénérés par `npm run icons`.
+- **Polices hébergées sur le site** (`public/fonts/`, aucune requête vers un service tiers) : Cinzel pour les titres, Bricolage Grotesque pour le texte.
+
+**Phase 8 — social et vie de la place :**
+- **Discussion du quartier** (Entrée pour écrire) : historique en bas à droite, bulles au-dessus des personnages, messages du jeu (arrivées, casses, arrestations, ventes). 4 messages / 8 s au plus, 140 caractères, injures courantes masquées par le serveur.
+- **Émotes** 👋 😂 🔥 😱 👏 ❤️ : grande icône au-dessus de la tête, avec un geste.
+- **Discussion vocale de proximité** (bouton 🎙, désactivée par défaut) : WebRTC pair à pair entre joueurs du même quartier ; le serveur ne relaie que la signalisation, entre deux micros actifs. Volume selon la distance (plein à 5 m, muet à 25 m), 🔊 au-dessus de qui parle, touche V pour couper son micro. STUN public par défaut ; `SAM_ICE_SERVERS` (JSON) pour ajouter un serveur TURN.
+- **Amis et quartier** (bouton 👥) : code et lien d'invitation (`/game/?join=CODE`) pour faire venir un ami dans son quartier (s'il y a de la place et que l'on est en ligne), champ « Rejoindre un ami », liste des joueurs présents avec bouton « Masquer » (ni texte ni voix).
+- **Place animée :** guirlandes de fanions, fleurs, bancs (les passants s'y assoient), jets de la fontaine ; confettis aux grands moments (casse, agrandissement, enchère gagnée, Renaissance, récompense du jour) et gains flottants à la caisse.
+
+**Phase 7 — progression, vie du quartier, rendu :**
+- **Boutique** (étal bleu sur la place, touche B ou bouton 🛒) : 5 améliorations permanentes à 3 niveaux, gardées après une Renaissance.
+  - 👟 Baskets de sprint (+12/24/36 % de vitesse, contrôlée aussi par le serveur) ;
+  - 🔒 Verrou renforcé (75/90/120 s) ;
+  - 💰 Coffre-fort (caisse de 3/4/6 h) ;
+  - 🧤 Gants de velours (décrochage −15/28/40 %) ;
+  - 🍀 Flair de collectionneur (Rares et Épiques ×1,3/1,7/2,2 au convoi).
+- **Renaissance** (dès le niveau 5, 50 M puis ×5 à chaque fois) : on repart de zéro (musée, œuvres, pièces) contre un revenu ×1,5, ×2, ×2,5… pour toujours. Badge ⭐ au-dessus du musée.
+- **Récompense du jour** (bouton 🎁) : la série grandit si l'on revient chaque jour ; montant indexé sur le revenu (10 à 40 min).
+- **Événements du convoi** (toutes les 15 min, pendant 3 min, les mêmes pour tous) : ✨ Heure dorée (cadres ×4), 💎 Trésors rares (Rares et Épiques ×3), 🏷 Soldes (−30 %). Annoncés dans le porte-monnaie et sur les camions.
+- **Quartier réorganisé :** le classement géant est au sud de la place, entre deux musées, face à la route ; le marché noir et la boutique sont entre deux musées (avant, ils barraient une allée et un point d'apparition) ; lampadaires au bord des trottoirs.
+- **Façades :** vraie porte dans le portique (avant, un mur plein la barrait), travée centrale dégagée, haut du portique masqué quand on est dedans ou dessous (il cachait la vue).
+- **Textures procédurales :** parquet en chevrons et damas (classique), béton ciré (moderne), grille néon (futuriste), tatami et shōji (zen). Tableaux à leurs vraies proportions, statues célèbres figuratives (Penseur, Vénus de Milo, Victoire de Samothrace, David).
+- **Personnages :** 4 tenues (homme/femme, ville/costume) et apparence aléatoire (teint, cheveux, vêtements) pour les visiteurs, les passants et les collectionneurs, qui s'assoient vraiment dans la salle des ventes.
+- **PNJ :** les visiteurs arrivent par le trottoir, prennent l'allée, passent la porte et les arcades ; des passants flânent sur la place (fontaine, classement, boutiques, façades) sans jamais traverser la route du convoi.
+
 **Phase 6 — compléments du cahier des charges :**
 - **Billet d'entrée :** entrer chez un rival (pour visiter ou voler) coûte 0,05 % de la valeur de son musée (20 pièces au minimum), encaissé par le propriétaire. Le billet vaut 10 min. Sans argent, on reste dehors.
 - **Vol d'une Mythique :** décrochage de 20 s ; l'alarme sonne même sous brouilleur ; tout le serveur est prévenu ; n'importe quel joueur qui touche le voleur l'arrête et empoche 1 % de la valeur de l'œuvre (8 M pour la Joconde).
@@ -12,7 +40,9 @@ Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâ
 - **Reproductions** (marché noir, 5 000) : copies des Mythiques, marquées « Reproduction ». Décoratives, sans valeur ni revenu, et les voleurs n'en veulent pas.
 
 **Phase 5 — étages, classements, catalogue, lancement :**
-- **Étages :** niveau 6 (1er étage, 600 M) et niveau 7 (2e étage, 6 Md), chacun avec 9 salles. 214 emplacements au total.
+- **Étages :** niveau 6 (1er étage, 600 M) et niveau 7 (2e étage, 6 Md), chacun avec 9 salles. 214 emplacements muraux au total.
+  - Niveau 8 (30 Md) : toit-terrasse avec 18 socles réservés aux statues (232 emplacements). Un tableau ne va jamais sur un socle ; avant la terrasse, une statue se pose au sol devant un mur.
+  - Au rez-de-chaussée, chaque salle ouverte reçoit ses emplacements (4 dans l'entrée, puis 6 par salle) ; les autres murs s'ouvrent avec le 1er étage.
   - Un escalier en colimaçon dans la salle d'entrée : E pour monter, R pour descendre. Le serveur vérifie qu'on passe par l'escalier, un étage à la fois.
   - Vue de l'intérieur : les étages au-dessus du joueur sont masqués (le musée n'a pas de toit).
   - Vols et arrestations se font au bon étage. Un garde est affecté à chaque étage, et il prend l'escalier pour poursuivre un voleur.
@@ -79,8 +109,9 @@ Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâ
 - **Quartiers en temps réel :** WebSocket `/ws` (bibliothèque `ws`). Jusqu’à 7 joueurs en ligne par quartier, une parcelle chacun, attribuée par le serveur. Positions relayées 10 fois par seconde, vitesse contrôlée par le serveur.
 - **Musées en sommeil :** les parcelles libres accueillent les musées de joueurs hors ligne, de valeur proche. On peut les visiter et les voler, au plus une œuvre toutes les 2 h pendant l’absence. Le volé l’apprend à sa reconnexion.
 - **Vol :** dans un musée rival, maintenir E devant une œuvre (2,5 s pour une Commune, jusqu’à 12 s pour une Mythique). On la porte ensuite au-dessus de la tête, ralenti de 30 %, jusqu’à son propre musée. Le propriétaire présent est alerté (sirène, écran rouge, voleur marqué ⚠).
-- **Arrestation :** il suffit que le propriétaire touche le voleur. L’œuvre revient, le voleur paie 10 % de sa valeur d’amende et passe 60 s en cellule.
-- **Protections :** verrou des portes (laser, 60 s, recharge 3 min), bouclier débutant (24 h tant que le musée vaut moins de 100 000), immunité de 15 min après un vol, interdiction de voler un musée valant moins de la moitié du sien.
+- **Arrestation :** il suffit que le propriétaire touche le voleur. L’œuvre revient, le voleur paie 10 % de sa valeur d’amende et passe 60 s en cellule : le serveur le retient devant son musée, sans pouvoir bouger, voler ni utiliser d'outil.
+- **Achat au convoi :** l'œuvre achetée arrive entre les mains du joueur ; E devant un emplacement de son musée pour l'accrocher (Échap la laisse à l'emplacement attribué par le serveur).
+- **Protections :** verrou des portes (laser, 60 s, recharge 3 min : personne ne franchit la porte, ni pour entrer ni pour sortir), bouclier débutant (24 h tant que le musée vaut moins de 100 000), immunité de 15 min après un vol, interdiction de voler un musée valant moins de la moitié du sien.
 - **Le serveur décide de tout :** portée, durée, livraison, arrestation et transfert de propriété. Une œuvre en cours de vol ne rapporte plus rien. Si le serveur redémarre pendant un vol, l’œuvre revient à son propriétaire.
 
 **Phase 1 — tranche jouable solo** (`game/`, `src/game/`) :
@@ -97,12 +128,11 @@ Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâ
 - **Objectifs guidés :** 12 étapes, récompenses validées par le serveur. Couleur du personnage au choix. Rang au classement dans l’interface. Façade à colonnes au nom du musée.
 - **Qualité graphique :** HD ou Éco (sans ombres, résolution 1×), Éco par défaut sur téléphone.
 - **Équilibrage :** taux de revenu par rareté ; `node tools/simulate.mjs [minutes] [parties]` mesure le rythme de progression (voir le cahier des charges).
-- **Landing page** : bouton Jouer, présentation, Mythiques, planning des ventes, musées des joueurs.
-- **Barre live** en haut de la landing et du jeu, avec des chiffres réels venus du serveur : joueurs en ligne, visiteurs depuis le lancement, heure de Paris, compte à rebours de la prochaine vente, prochaine grande vente, musée n°1.
-- **PWA** : manifeste, icônes, service worker ; le jeu s’installe et s’ouvre hors connexion.
-- **Ancien prototype :** l’éditeur de musée à la première personne (ex-Memory Museum) reste disponible sur `/museum/`. Il sert de base technique (salles, accrochage, rendu).
+- **Accueil** : page de présentation à la racine du site, bouton « Jouer gratuitement » vers `/game/`.
+- **Barre live** en haut du jeu (capsule), avec des chiffres réels venus du serveur : joueurs en ligne, compte à rebours de la prochaine vente (ou vente en direct), musée n°1. Le serveur compte aussi les visiteurs depuis le lancement (`/api/stats`).
+- **PWA** : manifeste, icônes, service worker ; le jeu s’installe et s’ouvre hors connexion. Modèles 3D et œuvres sont servis depuis le cache puis rafraîchis en arrière-plan.
 
-Stack : Three.js 0.170, TypeScript, Vite (multi-pages), serveur Node avec deux dépendances (`ws` pour le temps réel, `web-push` pour les notifications).
+Stack : Three.js 0.170, TypeScript, Vite (serveur de développement), esbuild (build de production), serveur Node avec deux dépendances (`ws` pour le temps réel, `web-push` pour les notifications).
 
 > ⚠️ Vite ne fonctionne pas si le chemin du projet contient un `#` (par exemple `C:\Users\#NESTOR.COM\…`).
 > Gardez le projet dans un dossier comme `C:\dev\game-hub`.
@@ -111,8 +141,8 @@ Stack : Three.js 0.170, TypeScript, Vite (multi-pages), serveur Node avec deux d
 
 ```bash
 npm install
-npm run server   # terminal 1 : API (musées publiés) sur http://127.0.0.1:3001
-npm run dev      # terminal 2 : http://127.0.0.1:5173 (redirige /api vers le serveur)
+npm run server   # terminal 1 : API + temps réel sur http://127.0.0.1:3001
+npm run dev      # terminal 2 : http://127.0.0.1:5173/game/ (redirige /api et /ws vers le serveur)
 ```
 
 Production (build + un seul serveur pour le site et l'API) :
@@ -121,68 +151,86 @@ Production (build + un seul serveur pour le site et l'API) :
 npm start        # http://127.0.0.1:3001   (variables PORT et HOST disponibles)
 ```
 
-Variables utiles : `SAM_ADMIN_TOKEN` (active le panneau `/admin/`), `SAM_VAPID_SUBJECT` (contact des notifications push, une URL ou `mailto:`). En mode test (`SAM_DEV=1`), le jeton admin vaut `dev-admin`.
+**Mise en ligne** : page d'accueil sur Vercel, jeu et API sur Render, base sur Neon, voir [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md) (`vercel.json`, `render.yaml`, `npm run build:landing`). Serveur unique avec Docker et Caddy : [docs/LANCEMENT.md](docs/LANCEMENT.md).
 
-Au premier lancement, le serveur crée 3 musées de démonstration pour que l'onglet « Explorer » ne soit pas vide.
+`npm run build` vide `dist/`, vérifie les types, puis produit des bundles minifiés (avec source maps) : le code réservé au développement (`import.meta.env.DEV`, dont l'accès de test `window.__game`) en est retiré.
+
+Variables utiles :
+
+| Variable | Rôle |
+| --- | --- |
+| `SAM_ADMIN_TOKEN` | active le panneau `/admin/` (en mode test, le jeton vaut `dev-admin`) |
+| `SAM_VAPID_SUBJECT` | contact des notifications push (une URL ou `mailto:`) |
+| `SAM_TRUST_PROXY=1` | derrière un proxy (Caddy, Render) : l'adresse du joueur est la **dernière** de `X-Forwarded-For` |
+| `SAM_PROXY_HOPS` | plusieurs proxys en chaîne : nombre d'adresses à ignorer en fin de `X-Forwarded-For` (1 par défaut) |
+| `SAM_DATA_DIR` | dossier des données (par défaut `server/data`) ; pratique pour un serveur de test isolé |
+| `SAM_API` | (développement) adresse du serveur Node pour le proxy Vite, par défaut `127.0.0.1:3001` |
+| `DATABASE_URL` | PostgreSQL (Neon…) : joueurs, ventes, clés push et visiteurs en base, plus besoin de disque ; import automatique des fichiers JSON au premier démarrage sur une base vide. Sans elle : fichiers dans `server/data` |
+| `SAM_CORS_ORIGINS` | domaines de la page d'accueil hébergée ailleurs (Vercel) autorisés à lire `/api/live` et `/api/stats` (`*.vercel.app` accepté) |
+| `SAM_CLIENT_IP_HEADER` | en-tête de l'hébergeur portant l'adresse du client (avec `SAM_TRUST_PROXY=1`) |
+| `SAM_GAME_URL` | (build de la page d'accueil seule, `npm run build:landing`) adresse du jeu, ex. `https://jouer.mondomaine.fr` |
+| `SAM_ICE_SERVERS` | serveurs ICE de la voix, en JSON (ex. `[{"urls":"turn:turn.exemple.fr:3478","username":"u","credential":"p"}]`) ; par défaut un STUN public |
+| `SAM_DEV=1` | mode test : routes `/api/game/dev/*`, pas de contrôle de vitesse. **Jamais en production** |
 
 ## Commandes
 
 | Touche | Action |
 | --- | --- |
 | ZQSD / WASD / flèches, Maj | marcher, courir |
-| Souris | regarder |
-| **E** | mode édition : viser un mur et cliquer pour une photo, une œuvre générée ou un son ; viser le sol et cliquer pour une sculpture ; cliquer sur une œuvre pour la modifier |
-| Échap | menu : **Plan & salles** (agrandir, choisir l'ambiance), **Publier**, **Explorer les musées**, export/import JSON |
+| Clic droit + souris, molette | tourner la caméra, zoomer |
+| **E** | acheter au convoi, accrocher / déplacer une œuvre, voler (maintenir), monter l'escalier, entrer (hôtel des ventes, marché noir) |
+| **R** | revendre une œuvre (deux appuis), descendre l'escalier, décor de la salle |
+| **T** | décor de la salle (ambiance, 5 000 pièces) |
+| **G** | panneau Sécurité |
+| **B** | boutique (améliorations, récompense du jour, Renaissance) |
+| **Entrée** | écrire au quartier (Échap pour fermer) |
+| **V** | couper / rétablir son micro (discussion vocale activée par 🎙) |
+| **1 à 6** | outils du marché noir (brouilleur, fumigène, pied-de-biche, leurre, pince, déguisement) |
+| Échap | fermer un panneau, annuler un déplacement, laisser l'œuvre achetée à sa place |
 
 ## Architecture
 
 ```
-index.html                 accueil + musées de la communauté (src/hub/)
-museum/index.html          interface du musée (menu à onglets, fenêtre d'œuvre)
-src/shared/theme.css       thème commun
-
-src/museum/
-  Room.ts                  MuseumBuilding : grille de salles, portes, murs, 4 ambiances, collisions
-  MuseumExhibitor.ts       Wall Snapping Engine (normale en repère monde) + placement au sol
-  Artifact.ts              photos, sons (PositionalAudio), sculptures, halos lumineux
-  art.ts                   générateur d'œuvres procédurales déterministes (gen:style:seed)
-  storage.ts               sauvegarde locale, validation, migration v1 → v2
-  defaults.ts              musée de départ
-  api.ts                   client REST
-  main.ts                  contrôles FPS, édition, plan, publication, exploration, visite
-
-server/index.mjs           API REST + fichiers statiques
-server/seeds.mjs           musées de démonstration
-tests/smoke.mjs            tests navigateur de bout en bout (Playwright + Edge)
+index.html                 page d'accueil (src/landing/main.ts : barre live, ventes, cartels de la collection)
+game/index.html            le jeu 3D (src/game/)
+admin/index.html           panneau admin des ventes (src/admin/)
+src/shared/                catalog.json (œuvres, prix, règles), layout.json (géométrie), live.ts (barre live, PWA), theme.css
+src/game/                  client du jeu : main.ts (boucle, HUD, interactions), museumView.ts (musées), district.ts (quartier),
+                           net.ts (WebSocket), api.ts (REST), guards.ts, convoy.ts, auction.ts, remote.ts…
+server/index.mjs           HTTP : API, barre live (SSE), fichiers statiques
+server/game.mjs            économie (le serveur fait autorité), comptes, classements
+server/district.mjs        quartiers temps réel, vols, outils, verrou, billets
+server/guards.mjs          intelligence des gardes
+server/auctions.mjs        hôtel des ventes
+server/push.mjs            notifications Web Push
+server/db.mjs              persistance (JSON, PostgreSQL facultatif)
+tools/gen-layout.mjs       génère src/shared/layout.json (salles, emplacements, parcelles)
+tests/                     ws.mjs et auction.mjs (serveur), smoke.mjs (navigateur), pwa.mjs (build)
 ```
 
 ## API (serveur Node)
 
 | Méthode | Route | Rôle |
 | --- | --- | --- |
-| POST | `/api/game/login` | crée un joueur invité `{ name }` ou reprend une session `{ id, token }` ; renvoie l’état et le gain hors ligne |
-| GET | `/api/game/state`, `/api/game/convoy`, `/api/game/leaderboard` | état du joueur (caisse à jour), camions en cours, musées les plus riches |
-| POST | `/api/game/buy`, `/collect`, `/expand`, `/sell`, `/name` | actions validées par le serveur (en-têtes `x-player-id` et `x-player-token`) |
-| POST | `/api/game/security` | `{ item: guards\|cameras\|lasers\|generator\|insurance\|vitrine, tier?, slot? }` : acheter une protection |
-| POST | `/api/game/blackmarket` | `{ tool }` : acheter un outil de cambrioleur |
+| POST | `/api/game/login` | crée un joueur invité `{ name, color, country }` ou reprend une session `{ id, token }` ; renvoie l’état et le gain hors ligne |
+| POST | `/api/game/login/google`, `/api/game/link/google` | retrouver ou lier son musée avec Google (si `SAM_GOOGLE_CLIENT_ID`) |
+| GET | `/api/game/state`, `/api/game/convoy`, `/api/game/leaderboard?board=value\|weekly\|theft\|auction\|countries` | état du joueur (caisse à jour), camions en cours, classements (`me: true` sur la ligne du joueur connecté) |
+| POST | `/api/game/buy`, `/collect`, `/expand`, `/sell`, `/move`, `/decor`, `/name`, `/claim` | actions validées par le serveur (en-têtes `x-player-id` et `x-player-token`) |
+| POST | `/api/game/security` | `{ item: guards\|cameras\|lasers\|generator\|dog\|insurance\|vitrine, tier?, slot? }` : acheter une protection |
+| POST | `/api/game/blackmarket` | `{ tool }` (ou `{ tool: 'repro', workId }`) : acheter un outil ou une reproduction |
+| POST | `/api/game/upgrade`, `/rebirth`, `/daily` | boutique `{ id: speed\|lock\|vault\|gloves\|luck }`, Renaissance, récompense du jour |
 | POST | `/api/game/push/subscribe`, `/api/game/push/prefs` | abonner un appareil aux notifications, régler les catégories |
-| GET | `/api/push/key` | clé publique VAPID |
+| GET | `/api/push/key`, `/api/config` | clé publique VAPID, configuration publique (Google) |
 | GET/POST/DELETE | `/api/admin/overview`, `/api/admin/sales[/:id[/announce\|/start]]` | panneau admin (en-tête `x-admin-token`) ; `start` seulement en mode test |
-| WS | `/ws` | quartier en temps réel. Client → serveur : `auth`, `pos`, `steal`, `steal-cancel`, `lock`, `tool`, `refresh`, `hall-enter`, `hall-leave`, `bid`. Serveur → client : `welcome`, `snap` (joueurs et gardes), `plot`, `steal`, `alarm`, `tool`, `fx`, `hall`, `won`, `sale`… |
+| WS | `/ws` | quartier en temps réel. Client → serveur : `auth`, `pos`, `steal`, `steal-cancel`, `lock`, `tool`, `refresh`, `hall-enter`, `hall-leave`, `bid`, `chat`, `emote`, `voice`, `rtc` (l'authentification accepte `join` : code d'invitation). Serveur → client : `welcome`, `snap` (joueurs et gardes), `plot`, `steal`, `alarm`, `tool`, `fx`, `hall`, `won`, `sale`… Ping toutes les 30 s : une connexion morte est fermée |
 | GET | `/api/live?v=<id visiteur>` | flux SSE de la barre live, envoyé toutes les 5 s ; la connexion ouverte compte comme « en ligne », plusieurs onglets comptent pour une personne |
-| GET | `/api/stats` | mêmes chiffres en une requête (secours) |
-| GET | `/api/museums?sort=popular\|recent` | liste publique |
-| POST | `/api/museums` | publier `{ museum, thumbnail }` → `{ id, token }` |
-| PUT | `/api/museums/:id` (en-tête `x-edit-token`) | mettre à jour son musée |
-| GET | `/api/museums/:id` | charger un musée (compte une vue) |
-| GET | `/api/museums/:id/thumb` | vignette JPEG |
-| POST | `/api/museums/:id/like` | « j'aime » (un par visiteur) |
+| GET | `/api/stats` | mêmes chiffres en une requête (secours, healthcheck) |
 
-Les données envoyées sont validées et nettoyées, la taille est limitée et un anti-abus simple par IP est en place. Le jeton d'édition n'est stocké que sous forme de hachage.
+Les données envoyées sont validées : seules les clés connues du catalogue sont acceptées (jamais `__proto__`, `constructor`…), les prix doivent être des nombres finis, le pays doit figurer au catalogue. Un anti-abus simple par IP est en place (tables purgées régulièrement).
 
 ## Tests
 
-Avec le serveur lancé en mode test (`SAM_DEV=1`, qui active `/api/game/dev/grant` pour donner des pièces ; jamais en production) et `npm run dev` :
+Avec le serveur lancé en mode test (`SAM_DEV=1`, jamais en production) :
 
 ```powershell
 $env:SAM_DEV="1"; npm run server
@@ -191,24 +239,27 @@ $env:SAM_DEV="1"; npm run server
 Puis :
 
 ```bash
-npm test         # PW_CHANNEL=chrome pour utiliser Chrome au lieu d'Edge
-npm run test:pwa # après « npm start » : service worker, manifeste, icônes, ouverture hors connexion
-npm run test:server # serveur en mode test, sans navigateur :
-                    #   tests/ws.mjs      vol, arrestation, verrou, musée endormi, gardes, caméras, vitrines, outils, étages, billet, Mythique, chasseur de primes, déguisement, reproductions
+npm run test:server # sans navigateur :
+                    #   tests/ws.mjs      vol, arrestation, cellule, verrou, musée endormi, gardes, caméras, vitrines, outils, étages,
+                    #                     socles de statues, billet, Mythique, chasseur de primes, déguisement, reproductions, clés interdites
                     #   tests/auction.mjs enchères (PNJ, argent bloqué, adjudication), notifications, admin
+npm test            # avec « npm run dev » lancé : parties dans le navigateur (PW_CHANNEL=chrome pour Chrome au lieu d'Edge)
+                    #   achat puis accrochage, objectifs, caisse, agrandissement, revente, cambriolage à deux, sécurité,
+                    #   marché noir, enchères, admin, étages, classements, mobile, barre live
+npm run test:pwa    # après « npm start » : service worker, manifeste, icônes, ouverture hors connexion
 ```
 
-Les tests de la landing vérifient la barre live : chiffres reçus du serveur, heure, compte à rebours, un seul « en ligne » pour deux onglets, pas de défilement horizontal sur mobile.
+Pour ne pas toucher aux données de `server/data`, on peut lancer un serveur de test isolé :
 
-Les tests couvrent :
-- l'ajout d'une salle et le changement d'ambiance ;
-- la création d'une sculpture, d'une œuvre générée et d'une photo ;
-- la publication et la liste « Explorer » ;
-- la visite en lecture seule et le « j'aime ».
+```powershell
+$env:SAM_DEV="1"; $env:PORT="3011"; $env:SAM_DATA_DIR="$env:TEMP\sam-test"; npm run server
+node tests/ws.mjs http://127.0.0.1:3011
+$env:SAM_API="127.0.0.1:3011"; npx vite --port 5174   # puis : node tests/smoke.mjs http://127.0.0.1:5174
+```
 
 Les captures sont écrites dans `tests/shots/`.
 
 ## Limites connues
 
-- Les musées publiés sont stockés en fichiers JSON dans `server/data/`. Il n'y a ni base de données ni comptes utilisateurs : le jeton d'édition est gardé dans le navigateur de l'auteur.
-- Photos et sons sont stockés en data-URL. La sauvegarde locale du navigateur (environ 5 Mo) sature vite avec de l'audio : publiez ou exportez.
+- Quartiers et enchères vivent en mémoire : **une seule instance** du serveur à la fois (y compris avec PostgreSQL).
+- Les joueurs sont stockés en fichiers JSON dans `server/data/players/` (ou PostgreSQL si configuré). Un compte invité tient à son jeton, gardé dans le navigateur ; le lier à Google permet de le retrouver ailleurs.

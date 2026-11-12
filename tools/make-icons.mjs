@@ -12,7 +12,7 @@ async function render(file, size, { maskable = false } = {}) {
   // icône adaptative : fond plein (sans coins arrondis) et motif dans la zone sûre de 80 %
   const inner = maskable ? Math.round(size * 0.8) : size;
   const body = maskable
-    ? `<div style="width:${size}px;height:${size}px;background:#0b0d14;display:grid;place-items:center"><div style="width:${inner}px;height:${inner}px">${svg}</div></div>`
+    ? `<div style="width:${size}px;height:${size}px;background:#2c0b14;display:grid;place-items:center"><div style="width:${inner}px;height:${inner}px">${svg}</div></div>`
     : `<div style="width:${size}px;height:${size}px">${svg}</div>`;
   await page.setContent(`<html><body style="margin:0;background:transparent">${body}<style>svg{width:100%;height:100%;display:block}</style></body></html>`);
   await page.screenshot({ path: `public/icons/${file}`, omitBackground: !maskable });

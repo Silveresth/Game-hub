@@ -1,45 +1,53 @@
+// Build de production (npm run build) : vérification TypeScript, bundles esbuild, copie des fichiers statiques → dist/.
+// Le serveur de développement (npm run dev) utilise Vite ; la production n'utilise QUE ce script.
 import { execSync } from 'node:child_process';
-import { mkdir, copyFile, cp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, copyFile, cp, readFile, rm, writeFile } from 'node:fs/promises';
 import esbuild from 'esbuild';
 
 console.log('Compiling TypeScript...');
 execSync('npx tsc --noEmit', { stdio: 'inherit' });
 
+// dist/ repart de zéro : sinon d'anciennes pages (ex. le prototype /museum/) restent servies en production
+await rm('dist', { recursive: true, force: true });
+
 console.log('Bundling with esbuild API...');
 await mkdir('dist/game', { recursive: true });
 await mkdir('dist/admin', { recursive: true });
 
-await esbuild.build({
-  entryPoints: ['src/game/main.ts'],
+// Variables d'environnement Vite, fixées à la compilation : esbuild élimine le code réservé au développement
+// (par exemple l'accès de test window.__game), au lieu d'un rechercher-remplacer dans le bundle.
+const common = {
   bundle: true,
-  outfile: 'dist/game.bundle.js',
   format: 'esm',
-});
+  minify: true,
+  sourcemap: true,
+  target: 'es2022',
+  define: {
+    'import.meta.env.PROD': 'true',
+    'import.meta.env.DEV': 'false',
+    'import.meta.env.MODE': '"production"',
+    // le jeu et sa page d'accueil sont servis par le même serveur : adresses relatives
+    'import.meta.env.VITE_API_BASE': '""',
+  },
+};
 
-// Patch direct des variables d'environnement Vite non définies dans le navigateur
-let bundle = await readFile('dist/game.bundle.js', 'utf8');
-bundle = bundle.replaceAll('import.meta.env.PROD', 'true').replaceAll('import.meta.env.DEV', 'false');
-await writeFile('dist/game.bundle.js', bundle);
-
-await esbuild.build({
-  entryPoints: ['src/admin/main.ts'],
-  bundle: true,
-  outfile: 'dist/admin.bundle.js',
-  format: 'esm',
-});
-
-let adminBundle = await readFile('dist/admin.bundle.js', 'utf8');
-adminBundle = adminBundle.replaceAll('import.meta.env.PROD', 'true').replaceAll('import.meta.env.DEV', 'false');
-await writeFile('dist/admin.bundle.js', adminBundle);
+await esbuild.build({ ...common, entryPoints: ['src/game/main.ts'], outfile: 'dist/game.bundle.js' });
+await esbuild.build({ ...common, entryPoints: ['src/admin/main.ts'], outfile: 'dist/admin.bundle.js' });
+await esbuild.build({ ...common, entryPoints: ['src/landing/main.ts'], outfile: 'dist/landing.bundle.js' });
 
 console.log('Copying static assets...');
 // Copie public/ SANS écraser les bundles qu'on vient de générer (d'anciens bundles périmés dans public/ les remplaçaient).
 await cp('public', 'dist', {
   recursive: true,
-  filter: (src) => !/(^|[\\/])public[\\/](game|admin)\.bundle\.js$/.test(src),
+  filter: (src) => !/(^|[\\/])public[\\/](game|admin|landing)\.bundle\.js(\.map)?$/.test(src),
 });
 await copyFile('src/shared/theme.css', 'dist/theme.css');
-await copyFile('index.html', 'dist/index.html');
+
+// page d'accueil
+const landingHtml = (await readFile('index.html', 'utf8'))
+  .replace('/src/shared/theme.css', '/theme.css')
+  .replace('/src/landing/main.ts', '/landing.bundle.js');
+await writeFile('dist/index.html', landingHtml);
 
 const gameHtml = (await readFile('game/index.html', 'utf8'))
   .replace('/src/shared/theme.css', '/theme.css')

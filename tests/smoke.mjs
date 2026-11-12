@@ -3,7 +3,6 @@
 // Usage : node tests/smoke.mjs [baseUrl]    (PW_CHANNEL=chrome|msedge, défaut msedge)
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
-import zlib from 'node:zlib';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:5173';
 mkdirSync('tests/shots', { recursive: true });
@@ -38,69 +37,34 @@ async function check(name, path, fn, ctx = context) {
   await page.close();
 }
 const shot = (p, name) => p.screenshot({ path: `tests/shots/${name}.png`, timeout: 120000 });
-const until = (p, fn, arg, timeout = 30000) => p.waitForFunction(fn, arg, { timeout });
+// Rendu logiciel (sans carte graphique) : tout est lent, les délais sont doublés (SMOKE_SLOW pour ajuster).
+const SLOW = Number(process.env.SMOKE_SLOW ?? 2);
+const until = (p, fn, arg, timeout = 30000) => p.waitForFunction(fn, arg, { timeout: timeout * SLOW });
 
-// ================================================================== Memory Museum
-
-function makePng(w = 8, h = 6) {
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type), data]);
-    const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(td));
-    return Buffer.concat([len, td, crc]);
-  };
-  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
-  const raw = Buffer.alloc((w * 3 + 1) * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = 200; raw[o + 1] = 60 + x * 20; raw[o + 2] = 90; }
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
-}
-
-const enter = async (p) => {
-  await p.click('#enter');
-  await until(p, () => document.body.classList.contains('playing'), null, 8000);
-};
-const look = (p, x, z, yaw, pitch = 0) =>
-  p.evaluate(([x, z, yaw, pitch]) => {
-    const c = window.__museum.camera;
-    c.position.set(x, 1.7, z);
-    c.rotation.order = 'YXZ';
-    c.rotation.set(pitch, yaw, 0);
-  }, [x, z, yaw, pitch]);
-const count = (p) => p.evaluate(() => window.__museum.artifacts.size);
-const rooms = (p) => p.evaluate(() => window.__museum.data().rooms.length);
-async function submitModal(p) {
-  await p.click('#form button[type=submit]');
-  await until(p, () => !document.getElementById('modal').classList.contains('open'), null, 10000);
-}
-async function ensurePlaying(p) {
-  await p.waitForTimeout(300);
-  if (!(await p.evaluate(() => document.body.classList.contains('playing')))) await enter(p);
-}
-
-/** Vérifie que la barre live affiche des chiffres venus du serveur. */
+/** Vérifie que la barre live (capsule : en ligne, prochaine vente, musée n°1) affiche des chiffres venus du serveur. */
 async function checkLiveBar(p) {
   await until(p, () => /\d/.test(document.querySelector('#livebar [data-k="online"]')?.textContent ?? ''), null, 15000)
     .catch(() => { throw new Error('barre live : « en ligne » jamais reçu'); });
   const bar = await p.evaluate(() => {
-    const t = (k) => document.querySelector(`#livebar [data-k="${k}"]`).textContent;
-    return { online: Number(t('online').replace(/\s/g, '')), visitors: Number(t('visitors').replace(/\s/g, '')), clock: t('clock'), countdown: t('countdown'), top: t('top') };
+    const t = (k) => document.querySelector(`#livebar [data-k="${k}"]`)?.textContent ?? '';
+    return { online: Number(t('online').replace(/\s/g, '')), countdown: t('countdown'), top: t('top') };
   });
   if (!(bar.online >= 1)) throw new Error('barre live : 0 joueur en ligne alors que la page est ouverte');
-  if (!(bar.visitors >= 1)) throw new Error('barre live : compteur de visiteurs vide');
-  if (!/^\d\d:\d\d:\d\d$/.test(bar.clock)) throw new Error('barre live : heure invalide ' + bar.clock);
   if (!/^(\d\d:\d\d|\d+ min|\d+ h \d\d|maintenant|en direct · lot \d+\/\d+)$/.test(bar.countdown)) throw new Error('barre live : compte à rebours invalide ' + bar.countdown);
   return bar;
 }
 
+// Page d'accueil : la salle rouge, le bouton Jouer, le planning des ventes reçu du serveur.
 await check('hub', '/', async (p) => {
   const bar = await checkLiveBar(p);
   console.log('    barre live :', JSON.stringify(bar));
-  await p.waitForSelector('#salesList .sale', { timeout: 10000 });
-  await shot(p, 'hub-1-hero');
-  await p.waitForSelector('#musees:not([hidden])', { timeout: 8000 });
-  await p.evaluate(() => document.getElementById('ventes').scrollIntoView());
-  await p.waitForTimeout(300);
-  await shot(p, 'hub-2-sections');
+  const play = await p.getAttribute('#playHero', 'href');
+  if (play !== '/game/') throw new Error('bouton Jouer : lien inattendu ' + play);
+  await until(p, () => document.querySelectorAll('#salesList .sale .left').length >= 2, null, 15000)
+    .catch(() => { throw new Error('planning des ventes non reçu'); });
+  const cartel = await p.textContent('[data-work="joconde"] .cartel');
+  if (!/800,0 M pièces/.test(cartel)) throw new Error('cartel de la Joconde sans sa valeur : ' + cartel);
+  await shot(p, 'hub-1-accueil');
   // Un deuxième onglet du même visiteur ne doit pas compter deux fois
   const p2 = await context.newPage();
   await p2.goto(base + '/', { waitUntil: 'load' });
@@ -154,9 +118,12 @@ const apiPost = (p, path, body = {}) =>
   }, [path, body]);
 
 async function newGame(p, name) {
+  // la page vient peut-être de reprendre une session (connexion en cours) : on attend la fin du démarrage,
+  // sinon cette connexion réenregistrerait la session juste après qu'on l'a effacée
+  await until(p, () => document.body.classList.contains('playing') || document.getElementById('welcome')?.classList.contains('open'), null, 120000);
   await p.evaluate(() => localStorage.removeItem('sam-player'));
   await p.reload({ waitUntil: 'load' });
-  await p.waitForSelector('#welcome.open', { timeout: 30000 });
+  await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
   await p.fill('#nameInput', name);
   await p.click('#welcomeForm .go');
   await until(p, (n) => window.__game?.state?.name === n && document.body.classList.contains('playing') && window.__game.myPlot >= 0, name, 30000);
@@ -165,7 +132,7 @@ async function newGame(p, name) {
 await check('game-play', '/game/', async (p) => {
   await p.evaluate(() => localStorage.removeItem('sam-player'));
   await p.reload({ waitUntil: 'load' });
-  await p.waitForSelector('#welcome.open', { timeout: 30000 });
+  await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
   await p.fill('#nameInput', 'Musée Robot');
   await p.click('#colors button:nth-child(3)'); // bleu
   await p.click('#welcomeForm .go');
@@ -182,9 +149,19 @@ await check('game-play', '/game/', async (p) => {
   await devGrant(p, { coins: 200000 });
   if (!(await buyFromConvoy(p, 1))) throw new Error('impossible d’acheter au convoi');
   await shot(p, 'game-2-bought');
-  await until(p, () => window.__game.museum.hiddenUid === null, null, 20000);
+  // L'œuvre est entre les mains du joueur : on l'accroche soi-même à l'emplacement 1 (E devant le mur)
+  if (!(await g(p, () => !!window.__game.carrying))) throw new Error('l’œuvre achetée n’est pas en mains');
+  await g(p, () => {
+    const { p: at, normal } = window.__game.museum.slotWorld(1);
+    window.__game.teleport(at.x + normal.x * 1.2, at.z + normal.z * 1.2);
+  });
+  await until(p, () => /Accrocher/.test(window.__game.prompt), null, 10000)
+    .catch(async () => { throw new Error('pas d’invite pour accrocher : « ' + (await g(p, () => window.__game.prompt)) + ' »'); });
+  await p.keyboard.press('KeyE');
+  await until(p, () => window.__game.museum.hiddenUid === null && !window.__game.carrying, null, 20000)
+    .catch(() => { throw new Error('l’œuvre achetée n’a pas pu être accrochée'); });
   const s1 = await g(p, () => window.__game.state);
-  if (s1.artworks[0].slot !== 0 || !(s1.income > 0)) throw new Error('œuvre achetée mal placée ou sans revenu');
+  if (s1.artworks[0].slot !== 1 || !(s1.income > 0)) throw new Error('œuvre achetée mal placée ou sans revenu (emplacement ' + s1.artworks[0].slot + ')');
 
   // Objectif accompli → récompense
   await p.waitForSelector('#questClaim:not([hidden])', { timeout: 10000 });
@@ -218,7 +195,7 @@ await check('game-play', '/game/', async (p) => {
 
   // Revente (deux appuis sur R pour confirmer)
   await g(p, () => {
-    const { p: at, normal } = window.__game.museum.slotWorld(0);
+    const { p: at, normal } = window.__game.museum.slotWorld(window.__game.state.artworks[0].slot);
     window.__game.teleport(at.x + normal.x * 1.2, at.z + normal.z * 1.2);
   });
   await until(p, () => /Revendre/.test(window.__game.prompt), null, 10000)
@@ -300,7 +277,7 @@ await check('game-security', '/game/', async (p) => {
   await g(p, () => window.__game.state); // état à jour
   // Panneau Sécurité (touche G), achats par les boutons
   await p.keyboard.press('KeyG');
-  await p.waitForSelector('#security.open', { timeout: 5000 });
+  await p.waitForSelector('#security.open', { timeout: 20000 });
   for (const sel of ['[data-item="guards"][data-tier="agent"]', '[data-item="cameras"]', '[data-item="lasers"]', '[data-item="generator"]', '[data-item="vitrine"]']) {
     await p.click(`#secBody button${sel}`);
     await p.waitForTimeout(400);
@@ -317,10 +294,10 @@ await check('game-security', '/game/', async (p) => {
   await p.waitForTimeout(2500);
   await shot(p, 'sec-2-guards');
   // Marché noir : E devant la tente
-  await g(p, () => window.__game.teleport(-60, -9.4));
+  await g(p, () => window.__game.teleport(-40, -9.4)); // tente du marché noir, entre deux musées
   await until(p, () => /Marché noir/.test(window.__game.prompt), null, 10000).catch(async () => { throw new Error('pas d’invite marché noir : ' + (await g(p, () => window.__game.prompt))); });
   await p.keyboard.press('KeyE');
-  await p.waitForSelector('#market.open', { timeout: 5000 });
+  await p.waitForSelector('#market.open', { timeout: 20000 });
   await p.click('#marketBody button[data-tool="brouilleur"]');
   await until(p, () => window.__game.state.tools.brouilleur === 1, null, 10000);
   await p.click('#marketBody button[data-tool="leurre"]');
@@ -406,9 +383,9 @@ await check('game-floors', '/game/', async (p) => {
   await shot(p, 'floors-1');
   await p.keyboard.press('KeyR'); // redescendre
   await until(p, () => window.__game.floor === 0, null, 20000);
-  // classements : 4 onglets
+  // classements : 5 onglets (plus riches, semaine, casses, enchères, nations)
   await p.click('#boardBtn');
-  await until(p, () => document.querySelectorAll('#boardTabs button').length === 4 && document.querySelectorAll('#boardList li').length >= 1, null, 10000);
+  await until(p, () => document.querySelectorAll('#boardTabs button').length === 5 && document.querySelectorAll('#boardList li').length >= 1, null, 10000);
   await p.click('#boardTabs [data-board="weekly"]');
   await until(p, () => document.querySelector('#boardTabs .on')?.dataset.board === 'weekly', null, 20000);
   await shot(p, 'boards-1');
@@ -419,7 +396,7 @@ const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, 
 await check('game-mobile', '/game/', async (p) => {
   await p.evaluate(() => localStorage.removeItem('sam-player'));
   await p.reload({ waitUntil: 'load' });
-  await p.waitForSelector('#welcome.open', { timeout: 30000 });
+  await p.waitForSelector('#welcome.open', { timeout: 30000 * SLOW });
   await p.fill('#nameInput', 'Musée Mobile');
   await p.tap('#welcomeForm .go');
   await until(p, () => window.__game?.state?.name === 'Musée Mobile' && document.body.classList.contains('playing'), null, 20000);
@@ -447,98 +424,6 @@ await check('hub-mobile', '/', async (p) => {
   const overflow = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   if (overflow) throw new Error('défilement horizontal sur mobile');
   await shot(p, 'hub-3-mobile');
-});
-
-await check('museum-own', '/museum/', async (p) => {
-  await p.evaluate(() => localStorage.clear());
-  await p.reload({ waitUntil: 'load' });
-  await checkLiveBar(p);
-  await shot(p, 'museum-1-menu');
-  if ((await rooms(p)) !== 2) throw new Error('2 salles attendues');
-
-  // Agrandir : clic sur un « + » du plan
-  await p.click('.pc.add');
-  if ((await rooms(p)) !== 3) throw new Error('salle non ajoutée');
-  await p.click('[data-theme=futuristic]');
-  await shot(p, 'museum-2-plan');
-
-  await enter(p);
-  await look(p, 0, 4.5, 0);
-  await p.waitForTimeout(500);
-  await shot(p, 'museum-3-entrance');
-  await look(p, 0, -9, Math.PI * 0.85);
-  await p.waitForTimeout(400);
-  await shot(p, 'museum-4-classic');
-
-  const n0 = await count(p);
-  // Sculpture au sol
-  await p.keyboard.press('KeyE');
-  await look(p, 0, 4.8, 0, -0.95);
-  await p.waitForTimeout(300);
-  await p.mouse.click(550, 310);
-  await p.waitForSelector('#modal.open');
-  if ((await p.textContent('#mTitle')) !== 'Nouvelle sculpture') throw new Error('modal sculpture attendu');
-  await p.click('#matChips [data-v=glass]');
-  await p.click('#formChips [data-v=rings]');
-  await p.fill('#title', 'Test sculpture');
-  await submitModal(p);
-  if ((await count(p)) !== n0 + 1) throw new Error('sculpture non ajoutée');
-
-  // Œuvre générée sur un mur
-  await ensurePlaying(p);
-  await look(p, -3, 2.2, Math.PI / 2);
-  await p.waitForTimeout(300);
-  await p.mouse.click(550, 310);
-  await p.waitForSelector('#modal.open');
-  await p.click('#genBtn');
-  await p.fill('#title', 'Test généré');
-  await submitModal(p);
-  // Photo importée
-  await ensurePlaying(p);
-  await look(p, 3, 2.2, -Math.PI / 2);
-  await p.waitForTimeout(300);
-  await p.mouse.click(550, 310);
-  await p.waitForSelector('#modal.open');
-  await p.setInputFiles('#photoFile', { name: 'a.png', mimeType: 'image/png', buffer: makePng() });
-  await submitModal(p);
-  if ((await count(p)) !== n0 + 3) throw new Error('œuvres murales non ajoutées');
-  await ensurePlaying(p);
-  await look(p, 0, 5, 0, -0.15);
-  await p.waitForTimeout(600);
-  await shot(p, 'museum-5-edited');
-
-  // Publication
-  await p.evaluate(() => document.exitPointerLock());
-  await p.waitForSelector('#menu.open');
-  await p.click('[data-tab=publish]');
-  await p.fill('#pubName', 'Musée de test');
-  await p.fill('#pubAuthor', 'Robot');
-  await p.click('#publish');
-  await p.waitForSelector('#shareRow:not([hidden])', { timeout: 15000 });
-
-  // Explorer
-  await p.click('[data-tab=explore]');
-  await until(p, () => document.querySelectorAll('#exploreList .mcard').length >= 4, null, 10000);
-  await shot(p, 'museum-6-explore');
-});
-
-await check('museum-visit', '/museum/?m=demo003', async (p) => {
-  await p.waitForSelector('#visitBar:not([hidden])', { timeout: 60000 });
-  if ((await rooms(p)) !== 5) throw new Error('le musée visité devrait avoir 5 salles');
-  const before = Number(await p.textContent('#likeCount'));
-  await p.click('#likeBtn');
-  await p.waitForSelector('#likeBtn.liked', { timeout: 10000 });
-  // le serveur ne compte qu'un « j'aime » par visiteur : +1 au premier passage, inchangé ensuite
-  if (Number(await p.textContent('#likeCount')) < before) throw new Error('compteur de j’aime incohérent');
-  await enter(p);
-  await p.keyboard.press('KeyE');
-  await p.waitForTimeout(200);
-  if (await p.evaluate(() => document.body.classList.contains('editing'))) throw new Error('édition possible en visite');
-  await look(p, 0, 4.5, 0);
-  await p.waitForTimeout(600);
-  await shot(p, 'museum-7-visit');
-  await look(p, 0, -20, Math.PI);
-  await p.waitForTimeout(400);
 });
 
 await browser.close();

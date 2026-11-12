@@ -1,8 +1,7 @@
 // Économie de Steal a Masterpiece (phase 1, solo) — le serveur fait autorité :
 // argent, caisse, revenus (en ligne / hors ligne), convoi, achats, agrandissement, revente, classement.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { cleanSubscription } from './push.mjs';
 import { clientIp } from './ip.mjs';
 import { createDatabase } from './db.mjs';
@@ -20,9 +19,14 @@ const BEGINNER_VALUE = 100_000; // … tant que le musée vaut moins de 100 000
 const IMMUNE_MS = 15 * 60_000; // immunité après un vol réussi
 const OFFLINE_LOSS_MS = 2 * 3600_000; // hors ligne : au plus une œuvre perdue toutes les 2 h
 const FINE_RATE = 0.1; // amende du voleur arrêté, versée au propriétaire
+const STATUE_SLOT_FROM = 214; // emplacements 214+ : socles du toit-terrasse (tools/gen-layout.mjs)
 const ID_RE = /^[A-Za-z0-9_-]{8,32}$/;
 
 const hash = (s) => createHash('sha256').update(s).digest('hex');
+/** Clé envoyée par le client : seulement une propriété propre de l'objet (jamais __proto__, constructor, toString…). */
+const own = (obj, key) => (typeof key === 'string' || typeof key === 'number') && Object.hasOwn(obj, String(key));
+/** Prix utilisable : un nombre fini et positif (un prix NaN laisserait tout acheter gratuitement). */
+const validPrice = (n) => Number.isFinite(n) && n >= 0;
 
 function seededRandom(seedText) {
   let a = parseInt(hash(seedText).slice(0, 8), 16) >>> 0;
@@ -41,7 +45,7 @@ function cleanName(raw) {
   return name.length >= 2 && name.length <= 24 ? name : null;
 }
 
-export async function createGame({ dataDir, catalogFile, devMode = false, push = null }) {
+export async function createGame({ dataDir, catalogFile, devMode = false, push = null, db: sharedDb = null }) {
   const catalog = JSON.parse(await readFile(catalogFile, 'utf8'));
   const works = new Map(catalog.works.map((w) => [w.id, w]));
   const levels = catalog.levels;
@@ -49,11 +53,20 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   const quests = catalog.quests;
   const colors = catalog.colors;
   const START_COINS = catalog.startCoins ?? 300;
+  const COUNTRY_CODES = new Set((catalog.countries ?? []).map((c) => c.code));
+  /** Code pays du catalogue, ou null (on n'accepte plus n'importe quels 2 caractères). */
+  const cleanCountry = (c) => (typeof c === 'string' && COUNTRY_CODES.has(c.toUpperCase()) ? c.toUpperCase() : null);
+  const DECOR_COST = catalog.decorCost ?? 5000;
+  const UPGRADES = catalog.upgrades ?? {};
+  const REBIRTH = catalog.rebirth ?? { minLevel: 5, baseCost: 50_000_000, growth: 5, incomeBonus: 0.5 };
+  const DAILY = catalog.daily ?? [500];
+  const EVENTS = catalog.events ?? null;
+  const THEMES = catalog.themes ?? ['classic', 'modern', 'futuristic', 'zen'];
   /** Taux de revenu par rareté : les communes se remboursent vite (début de partie), les grandes œuvres lentement. */
   const rateOf = (a) => catalog.rarities[works.get(a.workId).rarity].incomeRate ?? catalog.incomeRate;
   const convoyPool = Object.entries(catalog.rarities).filter(([, r]) => r.convoyWeight > 0);
 
-  const db = await createDatabase({ dataDir, devMode });
+  const db = sharedDb ?? (await createDatabase({ dataDir }));
 
   /** @type {Map<string, any>} */
   const players = await db.loadAllPlayers(migrate);
@@ -75,10 +88,44 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   // une reproduction (marché noir) décore, mais ne vaut rien et ne rapporte rien
   const workValue = (a) => (a.repro ? 0 : works.get(a.workId).price * (frames[a.frame]?.mult ?? 1));
   const levelInfo = (p) => levels[p.level - 1];
+
+  // ---------------------------------------------------------------- boutique, renaissance (améliorations permanentes)
+
+  /** Niveau acheté d'une amélioration (0 = aucun). */
+  const upgLevel = (p, id) => Math.min(p.upgrades?.[id] ?? 0, UPGRADES[id]?.levels.length ?? 0);
+  /** Valeur de l'amélioration au niveau acheté, ou `def` sans achat. */
+  const upgValue = (p, id, def) => {
+    const lvl = upgLevel(p, id);
+    return lvl ? UPGRADES[id].levels[lvl - 1].value : def;
+  };
+  /** Bonus de revenu des renaissances : +50 % par renaissance (cumulatif, permanent). */
+  const incomeMult = (p) => 1 + (p.rebirths ?? 0) * REBIRTH.incomeBonus;
+  const rebirthCost = (p) => Math.round(REBIRTH.baseCost * REBIRTH.growth ** (p.rebirths ?? 0));
+
   // une œuvre décrochée par un voleur (carriedBy) ne rapporte plus rien tant qu'elle n'est pas revenue
-  const income = (p) => p.artworks.reduce((s, a) => s + (a.slot === null || a.carriedBy ? 0 : workValue(a) * rateOf(a)), 0);
+  const income = (p) => incomeMult(p) * p.artworks.reduce((s, a) => s + (a.slot === null || a.carriedBy ? 0 : workValue(a) * rateOf(a)), 0);
   const value = (p) => p.artworks.reduce((s, a) => s + workValue(a), 0);
-  const cashCap = (p) => Math.max(MIN_CASH_CAP, income(p) * CASH_HOURS * 3600);
+  /** Plafond de la caisse : 2 h de revenu, plus avec le coffre-fort de la boutique. */
+  const cashCap = (p) => Math.max(MIN_CASH_CAP, income(p) * upgValue(p, 'vault', CASH_HOURS) * 3600);
+
+  // ---------------------------------------------------------------- événements du convoi (toutes les 15 min, 3 min)
+
+  /** Événement en cours à l'instant `ms` (ou null), et le prochain : identiques pour tous les joueurs. */
+  function eventAt(ms) {
+    if (!EVENTS) return { current: null, next: null };
+    const cycle = EVENTS.cycleMinutes * 60_000;
+    const dur = EVENTS.durationMinutes * 60_000;
+    const kinds = Object.keys(EVENTS.kinds);
+    const make = (k) => {
+      const kind = kinds[parseInt(hash(`event:${k}`).slice(0, 6), 16) % kinds.length];
+      const startsAt = (k + 1) * cycle - dur;
+      return { kind, ...EVENTS.kinds[kind], startsAt, endsAt: startsAt + dur };
+    };
+    const k = Math.floor(ms / cycle);
+    const ev = make(k);
+    if (ms >= ev.startsAt) return { current: ev, next: make(k + 1) };
+    return { current: null, next: ev };
+  }
 
   /** Semaine en cours (elles commencent le lundi à 0 h UTC) : le classement hebdomadaire repart de zéro. */
   const weekKey = (now) => Math.floor((now / 86_400_000 + 3) / 7);
@@ -105,26 +152,43 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     return offline > 0 ? p.cash - afterOnline : 0;
   }
 
+  const isStatueWork = (workId) => works.get(workId)?.kind === 'statue';
+  /** Socles de statues du toit-terrasse (voir tools/gen-layout.mjs) : un tableau ne s'y pose jamais. */
+  const isStatueSlot = (slot) => slot >= STATUE_SLOT_FROM;
+
+  /**
+   * Emplacement libre pour une œuvre : une statue va d'abord sur un socle (toit-terrasse), sinon devant un mur ;
+   * un tableau va seulement sur un mur. null = réserve.
+   */
   function freeSlot(p, workId = null) {
     const used = new Set(p.artworks.map((a) => a.slot).filter((s) => s !== null));
     const totalSlots = levelInfo(p).slots;
-    const isStatue = workId && works.get(workId)?.kind === 'statue';
-    // Si c'est une statue et que le toit-terrasse est débloqué (slots >= 214)
-    if (isStatue && totalSlots > 214) {
-      for (let i = 214; i < totalSlots; i++) if (!used.has(i)) return i;
+    if (workId && isStatueWork(workId)) {
+      for (let i = STATUE_SLOT_FROM; i < totalSlots; i++) if (!used.has(i)) return i;
     }
-    // Pour les tableaux ou si terrasse pleine / non débloquée : slots muraux d'abord
-    const maxWall = Math.min(214, totalSlots);
+    const maxWall = Math.min(STATUE_SLOT_FROM, totalSlots);
     for (let i = 0; i < maxWall; i++) if (!used.has(i)) return i;
-    // Sinon n'importe quel slot disponible
-    for (let i = 0; i < totalSlots; i++) if (!used.has(i)) return i;
     return null;
+  }
+
+  // Anciennes sauvegardes : un tableau posé sur un socle de statue repart sur un mur (ou en réserve).
+  for (const p of players.values()) {
+    for (const a of p.artworks) {
+      if (a.slot !== null && isStatueSlot(a.slot) && !isStatueWork(a.workId)) {
+        a.slot = null;
+        a.slot = freeSlot(p, a.workId);
+        touch(p);
+      }
+    }
   }
 
   // ---------------------------------------------------------------- objectifs (une chaîne, un à la fois)
 
   /** Anciennes sauvegardes : complète les champs ajoutés depuis. */
   function migrate(p) {
+    // un solde corrompu (NaN sauvegardé en null) ne doit jamais contourner les contrôles d'achat
+    if (!Number.isFinite(p.coins)) p.coins = 0;
+    if (!Number.isFinite(p.cash)) p.cash = 0;
     p.stats ??= { collected: 0, rare: 0, epic: 0, framed: 0 };
     p.stats.stolen ??= 0;
     p.questIndex ??= 0;
@@ -146,7 +210,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     s.dogUntil ??= 0;
     p.tools ??= {};
     // phase 4 : enchères et notifications
-    p.escrow ??= 0;
+    if (!Number.isFinite(p.escrow)) p.escrow = 0;
     if (p.escrow > 0) {
       // serveur arrêté pendant une enchère : l'argent bloqué revient au joueur
       p.coins += p.escrow;
@@ -159,6 +223,12 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     p.cashFullNotified ??= false;
     p.guardsNotified ??= 0;
     p.roomThemes ??= {};
+    // boutique, renaissance, récompense quotidienne
+    p.upgrades ??= {};
+    p.rebirths ??= 0;
+    p.daily ??= { day: '', streak: 0 };
+    // code d'invitation à partager (jamais l'identifiant du compte)
+    p.inviteCode ??= randomBytes(5).toString('base64url');
     // une œuvre restée « en cours de vol » (serveur arrêté pendant un vol) revient à son propriétaire
     for (const a of p.artworks) delete a.carriedBy;
     return p;
@@ -290,7 +360,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   /** Bloque `amount` pièces pour une enchère (rendues si le joueur est surenchéri). */
   function hold(p, amount) {
     accrue(p);
-    if (p.coins < amount) return false;
+    if (!validPrice(amount) || !Number.isFinite(p.coins) || p.coins < amount) return false;
     p.coins -= amount;
     p.escrow += amount;
     touch(p);
@@ -329,7 +399,10 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   // ---------------------------------------------------------------- vols (appelés par le gestionnaire de quartiers)
 
   const listeners = [];
-  const changed = (p) => listeners.forEach((fn) => fn(p));
+  const changed = (p) => {
+    rankCache.at = 0; // une valeur de musée a pu changer : le classement est recalculé à la prochaine demande
+    listeners.forEach((fn) => fn(p));
+  };
   const shielded = (p, now = Date.now()) => now - p.createdAt < BEGINNER_MS && value(p) < BEGINNER_VALUE;
 
   /** Raison pour laquelle `thief` ne peut pas voler `victim`, ou null si c'est permis. */
@@ -431,6 +504,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       ticket: ticketPrice(p),
       value: Math.round(value(p)), shielded: shielded(p), immuneUntil: p.immuneUntil,
       sec: publicSecurity(p),
+      rebirths: p.rebirths ?? 0,
     };
   }
 
@@ -492,11 +566,24 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   }
 
   /** Rang du joueur au classement des valeurs (1 = le plus riche). */
+  // Valeurs de tous les musées, triées et recalculées au plus toutes les 2 s :
+  // avant, chaque appel à state() reparcourait tous les joueurs et toutes leurs œuvres.
+  let rankCache = { at: 0, values: /** @type {number[]} */ ([]) };
   function rankOf(p) {
+    const now = Date.now();
+    if (now - rankCache.at > 2000 || rankCache.values.length !== players.size) {
+      rankCache = { at: now, values: [...players.values()].map(value).sort((a, b) => b - a) };
+    }
     const v = value(p);
-    let rank = 1;
-    for (const o of players.values()) if (o !== p && value(o) > v) rank++;
-    return { rank, of: players.size };
+    // nombre de musées strictement plus riches (recherche dichotomique dans la liste décroissante)
+    let lo = 0;
+    let hi = rankCache.values.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (rankCache.values[mid] > v) lo = mid + 1;
+      else hi = mid;
+    }
+    return { rank: lo + 1, of: players.size };
   }
 
   function state(p) {
@@ -516,7 +603,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       roomThemes: p.roomThemes ?? {},
       visitorsCap: levelInfo(p).visitors,
       next: next ? { level: next.level, cost: next.cost, rooms: next.rooms, slots: next.slots, floors: next.floors ?? 1 } : null,
-      artworks: p.artworks,
+      // l'identifiant interne du voleur (carriedBy) ne sort pas du serveur : seulement « en cours de vol »
+      artworks: p.artworks.map(({ carriedBy, ...a }) => (carriedBy ? { ...a, carried: true } : a)),
       cash: Math.floor(p.cash),
       cashCap: Math.floor(cashCap(p)),
       income: income(p),
@@ -538,18 +626,50 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       escrow: p.escrow,
       google: !!p.googleKey,
       push: { devices: p.push?.subs?.length ?? 0, prefs: p.push?.prefs ?? null },
+      // boutique, renaissance, récompense du jour, événement du convoi
+      upgrades: Object.fromEntries(Object.keys(UPGRADES).map((id) => {
+        const lvl = upgLevel(p, id);
+        const next = UPGRADES[id].levels[lvl] ?? null;
+        return [id, { level: lvl, max: UPGRADES[id].levels.length, value: upgValue(p, id, null), next: next ? { price: next.price, value: next.value } : null }];
+      })),
+      rebirths: p.rebirths,
+      incomeMult: incomeMult(p),
+      rebirth: { cost: rebirthCost(p), minLevel: REBIRTH.minLevel, bonus: REBIRTH.incomeBonus, ready: p.level >= REBIRTH.minLevel },
+      daily: dailyInfo(p),
+      event: eventAt(Date.now()),
+      inviteCode: p.inviteCode,
     };
+  }
+
+  // ---------------------------------------------------------------- récompense quotidienne (série de jours)
+
+  const parisDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const dayKey = (ms) => parisDay.format(new Date(ms));
+  /** Récompense du jour : la série continue si l'on revient le lendemain ; montant indexé sur le revenu. */
+  function dailyInfo(p, now = Date.now()) {
+    const today = dayKey(now);
+    const yesterday = dayKey(now - 86_400_000);
+    const claimable = p.daily.day !== today;
+    const streak = claimable ? (p.daily.day === yesterday ? p.daily.streak + 1 : 1) : p.daily.streak;
+    const i = (Math.max(1, streak) - 1) % DAILY.length;
+    // 10 à 40 min de revenu, jamais moins que le barème (pour rester utile en fin de partie)
+    const reward = Math.max(DAILY[i], Math.round(income(p) * 60 * (5 + 5 * (i + 1))));
+    return { claimable, streak, reward, day: i + 1, days: DAILY.length };
   }
 
   // ---------------------------------------------------------------- convoi
 
   function convoyItem(p, window) {
     const rnd = seededRandom(`${p.id}:${window}`);
-    const total = convoyPool.reduce((s, [, r]) => s + r.convoyWeight, 0);
+    // événement en cours au départ du camion, et flair de collectionneur (boutique)
+    const ev = eventAt(window * WINDOW_MS).current?.kind ?? null;
+    const luck = upgValue(p, 'luck', 1) * (ev === 'rare' ? 3 : 1);
+    const weight = (id, r) => r.convoyWeight * (id === 'commun' ? 1 : luck);
+    const total = convoyPool.reduce((s, [id, r]) => s + weight(id, r), 0);
     let roll = rnd() * total;
     let rarity = convoyPool[0][0];
     for (const [id, r] of convoyPool) {
-      roll -= r.convoyWeight;
+      roll -= weight(id, r);
       if (roll < 0) {
         rarity = id;
         break;
@@ -558,10 +678,11 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     const pool = catalog.works.filter((w) => w.rarity === rarity && !w.unique);
     const work = pool[Math.floor(rnd() * pool.length)];
     const f = rnd();
-    const frame = f < frames.diamant.chance ? 'diamant' : f < frames.diamant.chance + frames.dore.chance ? 'dore' : 'normal';
+    const fx = ev === 'golden' ? 4 : 1;
+    const frame = f < frames.diamant.chance * fx ? 'diamant' : f < (frames.diamant.chance + frames.dore.chance) * fx ? 'dore' : 'normal';
     return {
-      window, workId: work.id, frame, rarity,
-      price: Math.round(work.price * frames[frame].mult),
+      window, workId: work.id, frame, rarity, event: ev,
+      price: Math.round(work.price * frames[frame].mult * (ev === 'soldes' ? 0.7 : 1)),
       startsAt: window * WINDOW_MS,
       sold: p.bought.includes(window),
     };
@@ -597,6 +718,11 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   }
 
   const hits = new Map();
+  // purge régulière : sans elle, une entrée par adresse IP s'accumulerait pour toujours
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, list] of hits) if (!list.length || now - list[list.length - 1] > 10 * 60_000) hits.delete(k);
+  }, 5 * 60_000).unref();
   function limited(key, max, windowMs) {
     const now = Date.now();
     const list = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
@@ -615,12 +741,13 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   async function handle(req, res, url) {
     const ip = clientIp(req);
     const route = url.pathname.slice('/api/game/'.length);
-    if (req.method === 'POST' && limited(`${ip}:post`, 240, 60_000)) return json(res, 429, { error: 'Trop de requêtes' });
+    if (req.method === 'POST' && limited(`${ip}:post`, devMode ? 5000 : 240, 60_000)) return json(res, 429, { error: 'Trop de requêtes' });
 
     if (route === 'leaderboard' && req.method === 'GET') {
       const board = url.searchParams.get('board') ?? 'value';
       const country = url.searchParams.get('country') || undefined;
-      return json(res, 200, leaderboard(10, board, country));
+      // « me » : la ligne du joueur qui regarde (repérée par son identifiant, pas par son nom qui peut avoir des homonymes)
+      return json(res, 200, leaderboard(10, board, country, auth(req)));
     }
 
     let body = {};
@@ -649,7 +776,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       const p = migrate({
         id, tokenHash: hash(token), name: cleanName(body.name) ?? `Musée n°${players.size + 1}`,
         color: colors.includes(body.color) ? body.color : colors[0],
-        country: typeof body.country === 'string' && body.country.length === 2 ? body.country.toUpperCase() : 'FR',
+        country: cleanCountry(body.country) ?? 'FR',
         coins: START_COINS, level: 1, artworks: [], cash: 0, lastTick: Date.now(), createdAt: Date.now(), bought: [],
       });
       players.set(id, p);
@@ -689,6 +816,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       }
       const other = [...players.values()].find((x) => x.googleKey === key && x !== p);
       if (other) return json(res, 409, { error: 'Ce compte Google est déjà lié à un autre musée' });
+      if (p.googleKey && p.googleKey !== key) return json(res, 409, { error: 'Ce musée est déjà lié à un autre compte Google' });
       p.googleKey = key;
       touch(p);
       return json(res, 200, { state: state(p) });
@@ -776,10 +904,12 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       if (a.carriedBy) return json(res, 409, { error: 'Cette œuvre est en cours de vol' });
       const slot = Number(body.slot);
       if (!Number.isInteger(slot) || slot < 0 || slot >= levelInfo(p).slots) return json(res, 422, { error: 'Emplacement invalide' });
+      if (isStatueSlot(slot) && !isStatueWork(a.workId)) return json(res, 422, { error: 'Ce socle est réservé aux statues' });
       // Si une œuvre occupe déjà cet emplacement, on intervertit (swap)
       const other = p.artworks.find((x) => x.slot === slot && x.uid !== a.uid);
       if (other) {
         if (other.carriedBy) return json(res, 409, { error: 'L’œuvre ciblée est en cours de vol' });
+        if (a.slot !== null && isStatueSlot(a.slot) && !isStatueWork(other.workId)) return json(res, 422, { error: 'Un tableau ne peut pas aller sur un socle de statue' });
         other.slot = a.slot;
       }
       a.slot = slot;
@@ -793,10 +923,9 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       const totalRooms = (levelInfo(p).floors ?? 1) > 1 ? 9 * Math.min(3, levelInfo(p).floors ?? 1) : levelInfo(p).rooms;
       if (!Number.isInteger(room) || room < 0 || room >= totalRooms) return json(res, 422, { error: 'Salle invalide' });
       const theme = String(body.theme || '');
-      const validThemes = ['classic', 'modern', 'futuristic', 'zen'];
-      if (!validThemes.includes(theme)) return json(res, 422, { error: 'Thème invalide' });
+      if (!THEMES.includes(theme)) return json(res, 422, { error: 'Thème invalide' });
       accrue(p);
-      const COST = 5000;
+      const COST = DECOR_COST;
       if (p.coins < COST) return json(res, 402, { error: `Il vous manque ${Math.ceil(COST - p.coins)} pièces pour relooker la salle` });
       p.coins -= COST;
       p.roomThemes ??= {};
@@ -812,7 +941,11 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       if (body.color !== undefined && !colors.includes(body.color)) return json(res, 422, { error: 'Couleur inconnue' });
       p.name = name;
       if (body.color) p.color = body.color;
-      if (typeof body.country === 'string' && body.country.length === 2) p.country = body.country.toUpperCase();
+      if (body.country !== undefined) {
+        const country = cleanCountry(body.country);
+        if (!country) return json(res, 422, { error: 'Pays inconnu' });
+        p.country = country;
+      }
       touch(p);
       changed(p);
       return json(res, 200, { state: state(p) });
@@ -828,8 +961,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       let label;
       switch (body.item) {
         case 'guards': {
+          if (!own(SEC.guards, body.tier)) return json(res, 422, { error: 'Contrat inconnu' });
           const g = SEC.guards[body.tier];
-          if (!g) return json(res, 422, { error: 'Contrat inconnu' });
           price = offers.guards[body.tier];
           label = `${g.label} : ${g.minutes >= 60 ? `${g.minutes / 60} h` : `${g.minutes} min`}`;
           apply = () => {
@@ -872,8 +1005,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
           apply = () => (s.insuranceUntil = Math.max(now, s.insuranceUntil) + SEC.insurance.hours * 3600_000);
           break;
         case 'vitrine': {
+          if (!Number.isInteger(body.slot) || !own(offers.vitrines, body.slot)) return json(res, 404, { error: 'Aucune œuvre à cet emplacement' });
           const v = offers.vitrines[body.slot];
-          if (!v) return json(res, 404, { error: 'Aucune œuvre à cet emplacement' });
           if (v.price === null) return json(res, 409, { error: 'Vitrine déjà au maximum' });
           price = v.price;
           label = `${SEC.vitrine.label} (×${SEC.vitrine.levels[v.level].mult})`;
@@ -886,6 +1019,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
         default:
           return json(res, 422, { error: 'Protection inconnue' });
       }
+      if (!validPrice(price)) return json(res, 422, { error: 'Prix invalide' });
       if (p.coins < price) return json(res, 402, { error: `Il vous manque ${Math.ceil(price - p.coins)} pièces` });
       p.coins -= price;
       apply();
@@ -896,7 +1030,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
 
     if (route === 'blackmarket' && req.method === 'POST' && body.tool === 'repro') {
       // reproduction d'une Mythique : pour la déco, sans valeur ni revenu
-      const w = works.get(body.workId);
+      const w = typeof body.workId === 'string' ? works.get(body.workId) : null;
       if (!w || !w.unique) return json(res, 422, { error: 'Seules les Mythiques sont reproduites' });
       accrue(p);
       const price = catalog.repro.price;
@@ -910,11 +1044,11 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     }
 
     if (route === 'blackmarket' && req.method === 'POST') {
-      const t = TOOLS[body.tool];
-      if (!t) return json(res, 422, { error: 'Outil inconnu' });
+      if (!own(TOOLS, body.tool)) return json(res, 422, { error: 'Outil inconnu' });
       if ((p.tools[body.tool] ?? 0) >= MAX_TOOLS) return json(res, 409, { error: `Vous en portez déjà ${MAX_TOOLS}` });
       accrue(p);
       const price = toolPrice(p, body.tool);
+      if (!validPrice(price)) return json(res, 422, { error: 'Prix invalide' });
       if (p.coins < price) return json(res, 402, { error: `Il vous manque ${Math.ceil(price - p.coins)} pièces` });
       p.coins -= price;
       p.tools[body.tool] = (p.tools[body.tool] ?? 0) + 1;
@@ -935,6 +1069,64 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     if (route === 'push/prefs' && req.method === 'POST') {
       if (!push) return json(res, 503, { error: 'Notifications indisponibles' });
       push.setPrefs(p, body.prefs);
+      touch(p);
+      return json(res, 200, { state: state(p) });
+    }
+
+    if (route === 'upgrade' && req.method === 'POST') {
+      // boutique : améliorations permanentes, achetées niveau par niveau
+      if (!own(UPGRADES, body.id)) return json(res, 422, { error: 'Amélioration inconnue' });
+      const u = UPGRADES[body.id];
+      const lvl = upgLevel(p, body.id);
+      const next = u.levels[lvl];
+      if (!next) return json(res, 409, { error: `${u.label} : déjà au niveau maximum` });
+      accrue(p);
+      if (!validPrice(next.price)) return json(res, 422, { error: 'Prix invalide' });
+      if (p.coins < next.price) return json(res, 402, { error: `Il vous manque ${Math.ceil(next.price - p.coins)} pièces` });
+      p.coins -= next.price;
+      p.upgrades[body.id] = lvl + 1;
+      touch(p);
+      changed(p);
+      return json(res, 200, { id: body.id, level: lvl + 1, price: next.price, state: state(p) });
+    }
+
+    if (route === 'rebirth' && req.method === 'POST') {
+      // Renaissance : on repart de zéro (musée, œuvres, pièces) contre un bonus de revenu permanent.
+      // Les améliorations de la boutique, les objectifs et les records sont conservés.
+      if (p.level < REBIRTH.minLevel) return json(res, 409, { error: `Renaissance possible à partir du niveau ${REBIRTH.minLevel} (rez-de-chaussée complet)` });
+      if (p.escrow > 0) return json(res, 409, { error: 'Vous avez une enchère en cours : attendez la fin du lot' });
+      if (p.artworks.some((a) => a.carriedBy)) return json(res, 409, { error: 'Une de vos œuvres est en train d’être volée !' });
+      accrue(p);
+      const cost = rebirthCost(p);
+      if (p.coins < cost) return json(res, 402, { error: `Il vous manque ${Math.ceil(cost - p.coins)} pièces pour la Renaissance` });
+      p.rebirths++;
+      p.coins = START_COINS;
+      p.cash = 0;
+      p.level = 1;
+      p.artworks = []; // les Mythiques retournent dans le pool des ventes aux enchères
+      p.security.vitrines = {};
+      p.roomThemes = {};
+      p.bought = [];
+      p.cashFullNotified = false;
+      p.lastTick = Date.now();
+      touch(p);
+      changed(p);
+      return json(res, 200, { rebirths: p.rebirths, incomeMult: incomeMult(p), state: state(p) });
+    }
+
+    if (route === 'daily' && req.method === 'POST') {
+      accrue(p);
+      const d = dailyInfo(p);
+      if (!d.claimable) return json(res, 409, { error: 'Récompense déjà récupérée aujourd’hui : revenez demain !' });
+      p.daily = { day: dayKey(Date.now()), streak: d.streak };
+      p.coins += d.reward;
+      touch(p);
+      return json(res, 200, { reward: d.reward, streak: d.streak, state: state(p) });
+    }
+
+    if (devMode && route === 'dev/yesterday' && req.method === 'POST') {
+      // tests : la dernière récompense quotidienne date d'hier (la série continue)
+      p.daily = { day: dayKey(Date.now() - 86_400_000), streak: p.daily.streak || 1 };
       touch(p);
       return json(res, 200, { state: state(p) });
     }
@@ -997,7 +1189,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
    * Classements : `value` (musées les plus riches, permanent), `weekly` (valeur gagnée depuis lundi),
    * `theft` (plus gros casse), `auction` (plus grosse enchère remportée), `countries` (valeur cumulée par pays).
    */
-  function leaderboard(n, board = 'value', filterCountry) {
+  function leaderboard(n, board = 'value', filterCountry, viewer = null) {
     if (board === 'countries') {
       const countryTotals = new Map();
       for (const p of players.values()) {
@@ -1047,6 +1239,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
           artworks: p.artworks.length,
           country: p.country || 'FR',
           flag: cInfo?.flag ?? '🏳️',
+          ...(viewer && p === viewer ? { me: true } : {}),
         };
       })
       .filter((r) => r.value > 0)
@@ -1055,6 +1248,15 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   }
 
   return {
+    /** Bonus de vitesse (baskets de la boutique) : 0,12 = +12 %. */
+    speedBonus: (p) => upgValue(p, 'speed', 0),
+    /** Durée du verrou des portes (verrou renforcé), en ms. */
+    lockMs: (p) => upgValue(p, 'lock', 60) * 1000,
+    /** Multiplicateur du temps de décrochage (gants de velours). */
+    stealMult: (p) => upgValue(p, 'gloves', 1),
+    eventAt,
+    /** Joueur dont le code d'invitation est `code` (ou null). */
+    byInvite: (code) => (typeof code === 'string' && code ? [...players.values()].find((x) => x.inviteCode === code) ?? null : null),
     handle, leaderboard, authenticate, snapshot, stealBlocker, markCarried, returnCarried, completeTheft, arrest, caughtTrying,
     guardCount, vitrineMult, publicSecurity, useTool, noteAttempt,
     hold, release, award, ownerOf, notify, workValue, catalog, ticketPrice, payTicket, bounty,

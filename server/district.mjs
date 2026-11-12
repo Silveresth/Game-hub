@@ -19,7 +19,6 @@ const LOCK_MS = 60_000;
 const LOCK_COOLDOWN_MS = 180_000;
 const SPEED_MAX = 9.5; // m/s (course 7,5 + marge)
 const CARRY_SPEED_MAX = 6.5;
-const STEAL_SECONDS = { commun: 2.5, rare: 4, epique: 6, legendaire: 9, mythique: 20 };
 const DISGUISE_MS = 60_000;
 const TICKET_MS = 10 * 60_000; // un billet vaut 10 min dans le même musée
 const BOUNDS = { minX: -84, maxX: 84, minZ: -62, maxZ: 62 };
@@ -30,10 +29,25 @@ const SABOTAGE_MS = 10_000;
 const SMOKE_RANGE = 9;
 const TOOL_RANGE = 12;
 const CAUGHT_JAIL_MS = 30_000;
+// Social : discussion du quartier, émotes, voix (signalisation WebRTC), invitations
+const CHAT_MAX = 140;
+const CHAT_LOG = 30;
+const EMOTES = new Set(['wave', 'laugh', 'fire', 'wow', 'clap', 'heart']);
+/** Mots grossiers masqués (filtre simple, en complément du bouton « Masquer » côté joueur). */
+const BAD_WORDS = ['connard', 'connasse', 'salope', 'pute', 'encul[eé]', 'fdp', 'ntm', 'nique ta', 'b[aâ]tard', 'n[eè]gre', 'negro', 'fuck', 'bitch', 'nigg[ae]r?', 'fag'];
+const BAD_RE = new RegExp(`(?<![\\p{L}])(${BAD_WORDS.join('|')})(?![\\p{L}])`, 'giu');
+/** Texte d'un message : sans caractères de contrôle, espaces resserrés, 140 caractères, injures masquées. */
+function cleanChat(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/[\u0000-\u001f\u007f​-‏‪-‮]/g, '').replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX)
+    .replace(BAD_RE, (m) => '*'.repeat(m.length));
+}
 
 export async function attachDistricts(httpServer, game, { layoutFile, devMode = false, auctions = null }) {
   const layout = JSON.parse(await readFile(layoutFile, 'utf8'));
   const CELL = layout.cell;
+  // durées de décrochage : une seule source, le catalogue partagé avec le client
+  const STEAL_SECONDS = game.catalog.stealSeconds ?? { commun: 2.5, rare: 4, epique: 6, legendaire: 9, mythique: 20 };
   const brain = createGuardBrain(CELL, layout.rooms);
   const seedOf = (id) => [...id].reduce((s, ch) => (s * 31 + ch.charCodeAt(0)) % GUARD.CYCLE_MS, 7);
 
@@ -85,6 +99,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       id: nextDistrict++,
       plots: layout.plots.map((pl) => ({ ...pl, ...freshPlotState() })),
       conns: new Map(),
+      chat: [], // derniers messages, envoyés à l'arrivée d'un joueur
     };
     districts.set(d.id, d);
     return d;
@@ -122,6 +137,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       x: Math.round(c.x * 100) / 100, z: Math.round(c.z * 100) / 100, f: c.f ?? 0, ry: Math.round(c.ry * 100) / 100, anim: c.anim,
       carry: c.carrying ? { workId: c.carrying.workId, frame: c.carrying.frame } : null,
       disguised: c.disguiseUntil > Date.now(),
+      voice: !!c.voice,
       stealing: c.stealing ? { plot: c.stealing.plot.index, uid: c.stealing.uid, endsAt: c.stealing.endsAt } : null,
     };
   }
@@ -153,23 +169,25 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
     Object.assign(pl, freshPlotState());
   }
 
-  /** Choisit le quartier et la parcelle d'un joueur qui se connecte. */
-  function assign(p) {
-    // déjà présent (endormi) quelque part : il se réveille sur sa parcelle si le quartier a de la place
+  /**
+   * Choisit le quartier et la parcelle d'un joueur qui se connecte.
+   * `prefer` : quartier d'un ami qui l'a invité (s'il y reste de la place).
+   */
+  function assign(p, prefer = null) {
     const at = placement.get(p.id);
     if (at && !districts.has(at)) placement.delete(p.id);
-    if (at && districts.has(at)) {
-      const d = districts.get(at);
-      const pl = d?.plots.find((x) => x.ownerId === p.id);
-      if (d && pl && d.conns.size < MAX_ONLINE) return { d, pl };
-      if (d && pl) {
-        freePlot(d, pl);
-        broadcast(d, { t: 'plot', plot: plotInfo(pl) });
-      }
+    const home = at && districts.has(at) ? districts.get(at) : null;
+    const homePl = home?.plots.find((x) => x.ownerId === p.id) ?? null;
+    const target = prefer && prefer.conns.size < MAX_ONLINE ? prefer : null;
+    // déjà présent (endormi) quelque part : il se réveille sur sa parcelle si le quartier a de la place
+    if (home && homePl && (!target || target === home) && home.conns.size < MAX_ONLINE) return { d: home, pl: homePl };
+    if (home && homePl) {
+      freePlot(home, homePl);
+      broadcast(home, { t: 'plot', plot: plotInfo(homePl) });
     }
-    // sinon : le quartier le plus peuplé qui a encore de la place (on regroupe les joueurs)
+    // sinon : le quartier de l'ami, ou le plus peuplé qui a encore de la place (on regroupe les joueurs)
     const open = [...districts.values()].filter((d) => d.conns.size < MAX_ONLINE).sort((a, b) => b.conns.size - a.conns.size);
-    const d = open[0] ?? newDistrict();
+    const d = target ?? open[0] ?? newDistrict();
     let pl = d.plots.find((x) => !x.ownerId);
     if (!pl) {
       // on réveille… non : on libère le musée endormi le moins précieux
@@ -184,14 +202,26 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
   const conns = new Map(); // playerId → connexion
   const jailed = new Map(); // playerId → fin de cellule
 
-  function join(ws, p) {
+  function join(ws, p, joinCode = null) {
     const old = conns.get(p.id);
     if (old) {
       send(old.ws, { t: 'kicked', reason: 'Connexion ouverte dans un autre onglet' });
       old.ws.close();
       leave(old);
     }
-    const { d, pl } = assign(p);
+    // invitation : rejoindre le quartier de l'ami qui a partagé son code (s'il est en ligne et qu'il reste de la place)
+    let invite = null;
+    let prefer = null;
+    if (joinCode) {
+      const host = game.byInvite(String(joinCode).slice(0, 16));
+      const hc = host ? conns.get(host.id) : null;
+      invite = { status: !host ? 'unknown' : host.id === p.id ? 'self' : !hc ? 'offline' : 'ok', name: host?.name ?? null };
+      if (invite.status === 'ok') {
+        if (hc.d.conns.size >= MAX_ONLINE) invite.status = 'full';
+        else prefer = hc.d;
+      }
+    }
+    const { d, pl } = assign(p, prefer);
     pl.ownerId = p.id;
     pl.online = true;
     placement.set(p.id, d.id);
@@ -203,9 +233,10 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
     send(ws, {
       t: 'welcome', now: Date.now(), you: { id: p.id, plot: pl.index, jailUntil: c.jailUntil },
       plots: d.plots.map(plotInfo), players: [...d.conns.values()].map(playerInfo), guards: guardsInfo(d), district: d.id,
+      chat: d.chat, invite, max: MAX_ONLINE,
     });
     broadcast(d, { t: 'plot', plot: plotInfo(pl) });
-    broadcast(d, { t: 'join', player: playerInfo(c) });
+    broadcast(d, { t: 'join', player: playerInfo(c), invited: invite?.status === 'ok' ? invite.name : null });
     fillSleeping(d);
     return c;
   }
@@ -249,7 +280,8 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
     if (a.repro) return fail('C’est une reproduction sans valeur : elle ne vaut pas le risque');
     if (!isIn(pl, c) || c.f !== slotFloor(a.slot) || dist(c, slotWorld(pl, a.slot)) > STEAL_RANGE) return fail('Approchez-vous de l’œuvre');
     // vitrine blindée : ×2 ou ×3 ; pied-de-biche : ÷2 (consommé)
-    let ms = (STEAL_SECONDS[game.rarityOf(a.workId)] ?? 3) * 1000 * game.vitrineMult(victim, a.slot);
+    // gants de velours (boutique) : décrochage plus rapide
+    let ms = (STEAL_SECONDS[game.rarityOf(a.workId)] ?? 3) * 1000 * game.vitrineMult(victim, a.slot) * game.stealMult(c.p);
     const crowbar = c.crowbar;
     if (crowbar) {
       ms /= 2;
@@ -526,8 +558,16 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       const { x, z, ry } = msg;
       if (![x, z, ry].every(Number.isFinite)) return;
       if (x < BOUNDS.minX || x > BOUNDS.maxX || z < BOUNDS.minZ || z > BOUNDS.maxZ) return;
-      const dt = Math.max(0.05, (now - c.lastPosAt) / 1000);
-      const max = (c.carrying ? CARRY_SPEED_MAX : SPEED_MAX) * dt + 1.2;
+      // en cellule : le joueur reste au point de détention jusqu'à la fin de sa peine
+      if (c.jailUntil > now) {
+        if (Math.hypot(x - c.x, z - c.z) > 0.5 || (Number.isInteger(msg.f) && msg.f !== c.f)) send(c.ws, { t: 'teleport', x: c.x, z: c.z, f: c.f });
+        c.lastPosAt = now;
+        return;
+      }
+      // dt plafonné à 1 s : se taire longtemps ne donne pas le droit de se téléporter loin
+      const dt = Math.min(1, Math.max(0.05, (now - c.lastPosAt) / 1000));
+      // vitesse maximale, augmentée par les baskets de sprint achetées à la boutique
+      const max = (c.carrying ? CARRY_SPEED_MAX : SPEED_MAX) * (1 + game.speedBonus(c.p)) * dt + 1.2;
       if (!devMode && Math.hypot(x - c.x, z - c.z) > max) {
         // déplacement impossible : on remet le joueur à sa dernière position connue
         send(c.ws, { t: 'teleport', x: c.x, z: c.z, f: c.f });
@@ -549,8 +589,9 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       }
       const prev = { x: c.x, z: c.z };
       Object.assign(c, { x, z, ry, lastPosAt: now, anim: typeof msg.anim === 'string' ? msg.anim.slice(0, 16) : 'Idle' });
-      // verrou laser du musée : bloque les intrus non propriétaires
-      const lockedPlot = c.d.plots.find((pl) => pl.ownerId && pl.ownerId !== c.p.id && pl.lockedUntil > now && isIn(pl, c));
+      // verrou laser du musée : personne (sauf le propriétaire) ne franchit la porte, ni pour entrer ni pour sortir ;
+      // un intrus déjà dedans peut encore se déplacer à l'intérieur (avant, il était figé sur place)
+      const lockedPlot = c.d.plots.find((pl) => pl.ownerId && pl.ownerId !== c.p.id && pl.lockedUntil > now && isIn(pl, c) !== isIn(pl, { ...prev, f: c.f }));
       if (lockedPlot) {
         Object.assign(c, prev);
         send(c.ws, { t: 'teleport', x: c.x, z: c.z, f: c.f });
@@ -589,9 +630,34 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
     } else if (msg.t === 'lock') {
       const pl = c.plot;
       if (now < pl.lockReadyAt) return send(c.ws, { t: 'lock', plot: pl.index, lockedUntil: pl.lockedUntil, lockReadyAt: pl.lockReadyAt, error: 'Verrou en recharge' });
-      pl.lockedUntil = now + LOCK_MS;
-      pl.lockReadyAt = now + LOCK_MS + LOCK_COOLDOWN_MS;
+      // durée allongée par le verrou renforcé de la boutique (60 s de base)
+      const lockMs = game.lockMs(c.p) || LOCK_MS;
+      pl.lockedUntil = now + lockMs;
+      pl.lockReadyAt = now + lockMs + LOCK_COOLDOWN_MS;
       broadcast(c.d, { t: 'lock', plot: pl.index, lockedUntil: pl.lockedUntil, lockReadyAt: pl.lockReadyAt });
+    } else if (msg.t === 'chat') {
+      // discussion du quartier : 4 messages par tranche de 8 s au plus
+      c.chatTimes = (c.chatTimes ?? []).filter((t) => now - t < 8000);
+      if (c.chatTimes.length >= 4) return send(c.ws, { t: 'chat-error', error: 'Doucement : attendez quelques secondes avant de réécrire' });
+      const text = cleanChat(msg.text);
+      if (!text) return;
+      c.chatTimes.push(now);
+      const line = { t: 'chat', id: c.p.id, name: c.p.name, color: c.p.color, text, at: now };
+      c.d.chat = [...c.d.chat.slice(-(CHAT_LOG - 1)), line];
+      broadcast(c.d, line);
+    } else if (msg.t === 'emote') {
+      if (!EMOTES.has(msg.kind) || now - (c.emoteAt ?? 0) < 1000) return;
+      c.emoteAt = now;
+      broadcast(c.d, { t: 'emote', id: c.p.id, kind: msg.kind });
+    } else if (msg.t === 'voice') {
+      // le joueur active ou coupe son micro : les autres le voient dans l'instantané (snap)
+      c.voice = !!msg.on;
+    } else if (msg.t === 'rtc') {
+      // signalisation WebRTC (offre, réponse, candidats) relayée seulement entre deux joueurs du même quartier,
+      // qui ont tous les deux activé la voix ; la voix elle-même passe directement d'un joueur à l'autre
+      const to = conns.get(String(msg.to ?? ''));
+      if (!to || to === c || to.d !== c.d || !c.voice || !to.voice || typeof msg.data !== 'object' || msg.data === null) return;
+      send(to.ws, { t: 'rtc', from: c.p.id, data: msg.data });
     } else if (msg.t === 'refresh') {
       // le client vient d'acheter / vendre : son musée est renvoyé au quartier
       broadcast(c.d, { t: 'plot', plot: plotInfo(c.plot) });
@@ -615,13 +681,33 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
 
   // ---------------------------------------------------------------- serveur WebSocket
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
+  // 16 Ko : une description de session audio WebRTC (SDP) dépasse parfois 4 Ko
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
   httpServer.on('upgrade', (req, socket, head) => {
     if (new URL(req.url ?? '/', 'http://x').pathname !== '/ws') return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
 
+  // Battement de cœur : une connexion morte (réseau coupé sans fermeture) est fermée au bout de 30 à 60 s,
+  // sinon le joueur resterait « en ligne » (règles de vol hors ligne, notifications push faussées).
+  setInterval(() => {
+    for (const ws of wss.clients) {
+      if (ws.alive === false) {
+        ws.terminate();
+        continue;
+      }
+      ws.alive = false;
+      try {
+        ws.ping();
+      } catch {
+        /* socket déjà fermée */
+      }
+    }
+  }, 30_000).unref();
+
   wss.on('connection', (ws) => {
+    ws.alive = true;
+    ws.on('pong', () => (ws.alive = true));
     let c = null;
     const timer = setTimeout(() => !c && ws.close(), 5000); // authentification obligatoire sous 5 s
     let window = Date.now();
@@ -648,7 +734,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
           return ws.close();
         }
         clearTimeout(timer);
-        c = join(ws, p);
+        c = join(ws, p, typeof msg.join === 'string' && msg.join ? msg.join : null);
         return;
       }
       onMessage(c, msg);

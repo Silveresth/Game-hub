@@ -27,7 +27,8 @@ export class Label {
     this.sprite.renderOrder = 10;
   }
 
-  update(lines: LabelLine[], opts: { bg?: string; border?: string } = {}): void {
+  /** `stroke: false` : pas de contour noir autour du texte (texte sombre sur bulle claire). */
+  update(lines: LabelLine[], opts: { bg?: string; border?: string; stroke?: boolean } = {}): void {
     const key = JSON.stringify([lines, opts]);
     if (key === this.key) return;
     this.key = key;
@@ -55,7 +56,7 @@ export class Label {
       g.font = `${l.weight ?? 700} ${size}px 'Segoe UI', system-ui, sans-serif`;
       g.lineWidth = Math.max(4, size / 7);
       g.strokeStyle = 'rgba(0,0,0,.7)';
-      g.strokeText(l.text, w / 2, y + size * 0.09, w - 16);
+      if (opts.stroke !== false) g.strokeText(l.text, w / 2, y + size * 0.09, w - 16);
       g.fillStyle = l.color ?? '#fff';
       g.fillText(l.text, w / 2, y + size * 0.09, w - 16);
       y += size * 1.18;

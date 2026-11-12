@@ -8,6 +8,8 @@ export interface OwnedArtwork {
   slot: number | null;
   /** Reproduction (marché noir) : décorative, sans valeur ni revenu. */
   repro?: boolean;
+  /** Décrochée par un voleur, en cours de transport : elle ne s'affiche plus au mur. */
+  carried?: boolean;
 }
 
 export interface Quest {
@@ -62,6 +64,33 @@ export interface PlayerState {
   /** Musée lié à un compte Google (retrouvable sur un autre appareil). */
   google: boolean;
   push: { devices: number; prefs: PushPrefs | null };
+  /** Boutique : niveau acheté de chaque amélioration et prochain palier. */
+  upgrades: Record<UpgradeId, { level: number; max: number; value: number | null; next: { price: number; value: number } | null }>;
+  rebirths: number;
+  /** Multiplicateur de revenu des renaissances (1 = aucune). */
+  incomeMult: number;
+  rebirth: { cost: number; minLevel: number; bonus: number; ready: boolean };
+  daily: DailyInfo;
+  event: { current: ConvoyEvent | null; next: ConvoyEvent | null };
+  /** Code à partager pour inviter un ami dans son quartier. */
+  inviteCode: string;
+}
+
+export type UpgradeId = 'speed' | 'lock' | 'vault' | 'gloves' | 'luck';
+export interface DailyInfo {
+  claimable: boolean;
+  streak: number;
+  reward: number;
+  day: number;
+  days: number;
+}
+export interface ConvoyEvent {
+  kind: 'golden' | 'rare' | 'soldes';
+  label: string;
+  icon: string;
+  desc: string;
+  startsAt: number;
+  endsAt: number;
 }
 
 export interface PushPrefs {
@@ -112,6 +141,8 @@ export interface ConvoyItem {
   price: number;
   startsAt: number;
   sold: boolean;
+  /** Événement en cours au départ du camion (prix soldé, cadre ou rareté favorisés). */
+  event?: ConvoyEvent['kind'] | null;
 }
 
 const KEY = 'sam-player';
@@ -177,7 +208,10 @@ export const claim = (quest: string) => post<{ reward: number; state: PlayerStat
 export const buySecurity = (item: string, extra: { tier?: GuardTier; slot?: number } = {}) => post<{ label: string; price: number; state: PlayerState }>('security', { item, ...extra });
 export const buyTool = (tool: ToolId) => post<{ tool: ToolId; price: number; state: PlayerState }>('blackmarket', { tool });
 export const buyRepro = (workId: string) => post<{ price: number; state: PlayerState }>('blackmarket', { tool: 'repro', workId });
+export const buyUpgrade = (id: UpgradeId) => post<{ id: UpgradeId; level: number; price: number; state: PlayerState }>('upgrade', { id });
+export const rebirth = () => post<{ rebirths: number; incomeMult: number; state: PlayerState }>('rebirth');
+export const claimDaily = () => post<{ reward: number; streak: number; state: PlayerState }>('daily');
 export const pushSubscribe = (subscription: unknown) => post<{ state: PlayerState }>('push/subscribe', { subscription });
 export const pushPrefs = (prefs: Partial<PushPrefs>) => post<{ state: PlayerState }>('push/prefs', { prefs });
 export type Board = 'value' | 'weekly' | 'theft' | 'auction' | 'countries';
-export const leaderboard = (board: Board = 'value', country?: string) => call<Array<{ name: string; value: number; level: number; artworks: number; country?: string; flag?: string }>>(`leaderboard?board=${board}${country ? `&country=${country}` : ''}`);
+export const leaderboard = (board: Board = 'value', country?: string) => call<Array<{ name: string; value: number; level: number; artworks: number; country?: string; flag?: string; me?: boolean }>>(`leaderboard?board=${board}${country ? `&country=${country}` : ''}`);

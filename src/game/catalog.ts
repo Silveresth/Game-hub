@@ -12,7 +12,8 @@ export interface Work {
   price: number;
   unique?: boolean;
   kind?: 'painting' | 'statue';
-  form?: 'knot' | 'orb' | 'spiral' | 'rings' | 'monolith';
+  /** Forme 3D : figurative pour les statues célèbres (thinker, venus, victory, david), abstraite sinon. */
+  form?: 'knot' | 'orb' | 'spiral' | 'rings' | 'monolith' | 'thinker' | 'venus' | 'victory' | 'david';
   mat?: 'marble' | 'gold' | 'bronze' | 'glass' | 'jade';
 }
 
@@ -36,7 +37,14 @@ export const CATALOG = raw as unknown as {
   };
   tools: Record<'brouilleur' | 'fumigene' | 'pied' | 'leurre' | 'pince' | 'deguisement', { label: string; icon: string; desc: string }>;
   repro: { price: number; label: string };
+  /** Prix pour changer l'ambiance d'une salle (même valeur que le serveur). */
+  decorCost: number;
+  themes: string[];
+  /** Durée de décrochage par rareté, en secondes (même valeur que le serveur). */
+  stealSeconds: Record<RarityId, number>;
   maxTools: number;
+  upgrades: Record<'speed' | 'lock' | 'vault' | 'gloves' | 'luck', { label: string; icon: string; desc: string; unit: string; levels: Array<{ price: number; value: number }> }>;
+  rebirth: { label: string; minLevel: number; baseCost: number; growth: number; incomeBonus: number };
 };
 
 const byId = new Map(CATALOG.works.map((w) => [w.id, w]));

@@ -4,8 +4,24 @@ import { money } from './catalog';
 /** Quartier des musées : place centrale, route du convoi, 7 parcelles de joueurs + l'hôtel des ventes. */
 export const BOUNDS = { minX: -84, maxX: 84, minZ: -62, maxZ: 62 };
 export const ROAD = { z: 0, x0: -72, x1: 72 };
-/** Comptoir du marché noir (devant la tente, côté place). */
-export const BLACK_MARKET = { x: -60, z: -10 };
+/**
+ * Comptoir du marché noir (devant la tente, côté place). Entre deux musées (x = -40) : avant, la tente était
+ * posée sur l'allée et sur le point d'apparition du musée de la parcelle x = -60.
+ */
+export const BLACK_MARKET = { x: -40, z: -10 };
+/** Comptoir de la boutique d'améliorations (symétrique du marché noir). */
+export const BOUTIQUE = { x: 40, z: -10 };
+/** Grand panneau des classements : au sud de la place, entre deux musées, face à la route. */
+export const BOARD_POS = { x: 0, z: 15 };
+/** Bancs : deux autour de la fontaine, deux face au classement. `look` : là où regarde la personne assise. */
+export const BENCHES: Array<{ x: number; z: number; ry: number; look: { x: number; z: number } }> = [
+  { x: -6.6, z: -12, ry: Math.PI / 2, look: { x: 0, z: -12 } },
+  { x: 6.6, z: -12, ry: -Math.PI / 2, look: { x: 0, z: -12 } },
+  { x: -6, z: 11.2, ry: 0, look: { x: -6, z: 15 } },
+  { x: 6, z: 11.2, ry: 0, look: { x: 6, z: 15 } },
+];
+const LAMP_X = [-50, -30, -10, 10, 30, 50];
+const LAMP_Z = 7.3;
 /** Porte de l'hôtel des ventes (au pied des marches). */
 export const AUCTION_DOOR = { x: 60, z: -24.4 };
 
@@ -96,8 +112,8 @@ export class District {
   }
 
   setLeaderboard(
-    rows: Array<{ name: string; value: number }>,
-    myName: string,
+    rows: Array<{ name: string; value: number; me?: boolean }>,
+    _myName: string,
     title = 'LES MUSÉES LES PLUS RICHES',
     subtitle = 'valeur totale des collections',
     empty = 'Achetez votre première œuvre pour entrer au classement',
@@ -119,7 +135,8 @@ export class District {
     const medals = ['#ffd36b', '#d9dde6', '#d08a4a'];
     rows.slice(0, 6).forEach((r, i) => {
       const y = 210 + i * 64;
-      const me = r.name === myName;
+      // le serveur marque la ligne du joueur (« me ») : deux musées homonymes ne sont plus confondus
+      const me = !!r.me;
       if (me) {
         g.fillStyle = 'rgba(232,182,76,.16)';
         g.fillRect(60, y - 44, c.width - 120, 58);
@@ -146,6 +163,16 @@ export class District {
   update(t: number): void {
     const w = this.water.material as THREE.MeshStandardMaterial;
     w.emissiveIntensity = 0.25 + Math.sin(t * 1.5) * 0.08;
+    // gouttes de la fontaine : chacune suit une parabole, du bol central jusqu'au bassin
+    if (this.sprayGeo) {
+      const a = this.sprayGeo.getAttribute('position') as THREE.BufferAttribute;
+      this.sprayPhase.forEach(([ang, ph], i) => {
+        const k = (t * 0.7 + ph) % 1;
+        const r = 0.3 + k * 2.3;
+        a.setXYZ(i, Math.cos(ang) * r, 3.1 + 1.7 * k - 4.0 * k * k, -12 + Math.sin(ang) * r);
+      });
+      a.needsUpdate = true;
+    }
   }
 
   // ---------------------------------------------------------------- construction
@@ -348,12 +375,12 @@ export class District {
     this.group.add(f);
     this.circles.push({ x: 0, z: -12, r: 3.6 });
 
-    // lampadaires élégants disposés le long de la route en évitant strictement l'axe central des musées
-    // Les musées sont situés à x = -60, -20, 20, 60 -> on place les lampadaires aux entre-axes (x = -75, -40, 0, 40, 75)
+    // Lampadaires : sur le bord extérieur des trottoirs (z = ±7.3), jamais sur une allée de musée (x = ±20, ±60),
+    // ni au milieu du trottoir (où l'on attend les camions), ni dans les dépôts (avant : x = ±75, dans les murs).
     const post = std(0x23262e, { metalness: 0.6, roughness: 0.4 });
     const bulb = new THREE.MeshStandardMaterial({ color: 0xfff1cf, emissive: 0xffd58a, emissiveIntensity: 1.4 });
-    for (const x of [-75, -40, 0, 40, 75]) {
-      for (const z of [-5.2, 5.2]) {
+    for (const x of LAMP_X) {
+      for (const z of [-LAMP_Z, LAMP_Z]) {
         const l = new THREE.Group();
         const p = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 4.2, 10), post);
         p.position.y = 2.1;
@@ -371,7 +398,8 @@ export class District {
     const leaf = std(0x4e8f44, { flatShading: true });
     const trunk = std(0x7a5232);
     const planter = std(0xcfc6b2);
-    for (const [x, z] of [[-40, -14], [40, -14], [-40, 14], [-75, 14], [75, 14], [-75, -14], [75, -14]] as const) {
+    // (les coins nord x = ±40 accueillent désormais le marché noir et la boutique)
+    for (const [x, z] of [[-40, 14], [40, 14], [-75, 14], [75, 14], [-75, -14], [75, -14]] as const) {
       const t = new THREE.Group();
       const box = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.8, 2.4), planter);
       box.position.y = 0.4;
@@ -386,6 +414,8 @@ export class District {
       this.group.add(t);
       this.boxes.push({ minX: x - 1.2, maxX: x + 1.2, minZ: z - 1.2, maxZ: z + 1.2 });
     }
+
+    this.buildLiveliness();
 
     // Échoppe discrète et élégante du Marché Noir : comptoir en acajou et tenture pourpre
     const tent = new THREE.Group();
@@ -422,7 +452,141 @@ export class District {
     tent.position.set(BLACK_MARKET.x, 0, BLACK_MARKET.z - 3);
     tent.traverse((o) => ((o as THREE.Mesh).castShadow = true));
     this.group.add(tent);
-    this.boxes.push({ minX: -62.6, maxX: -57.4, minZ: -16.0, maxZ: -10.0 });
+    this.boxes.push({ minX: BLACK_MARKET.x - 2.6, maxX: BLACK_MARKET.x + 2.6, minZ: BLACK_MARKET.z - 6, maxZ: BLACK_MARKET.z });
+
+    this.buildBoutique();
+  }
+
+  /** Vie de la place : guirlandes de fanions, fleurs, bancs, jets de la fontaine. */
+  private buildLiveliness(): void {
+    // 1. guirlandes de fanions multicolores entre les lampadaires (un seul maillage, couleurs par sommet)
+    const COLORS = [0xff5e62, 0xffd36b, 0x3d8bff, 0x4cc38a, 0xb46bff, 0xff9f43].map((c) => new THREE.Color(c));
+    const pos: number[] = [];
+    const col: number[] = [];
+    const line: THREE.Vector3[] = [];
+    let k = 0;
+    for (const z of [-LAMP_Z, LAMP_Z]) {
+      for (let i = 0; i + 1 < LAMP_X.length; i++) {
+        const a = LAMP_X[i];
+        const b = LAMP_X[i + 1];
+        const sag = (t: number) => 4.1 - 1.0 * 4 * t * (1 - t);
+        for (let s = 0; s <= 24; s++) line.push(new THREE.Vector3(a + ((b - a) * s) / 24, sag(s / 24), z), new THREE.Vector3(a + ((b - a) * (s + 1)) / 24, sag((s + 1) / 24), z));
+        line.length -= 2; // dernier segment en trop
+        for (let x = a + 0.6; x < b - 0.4; x += 0.75) {
+          const y = sag((x - a) / (b - a));
+          pos.push(x - 0.22, y, z, x + 0.22, y, z, x, y - 0.48, z);
+          const c = COLORS[k++ % COLORS.length];
+          for (let v = 0; v < 3; v++) col.push(c.r, c.g, c.b);
+        }
+      }
+    }
+    const flagsGeo = new THREE.BufferGeometry();
+    flagsGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    flagsGeo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    flagsGeo.computeVertexNormals();
+    this.group.add(new THREE.Mesh(flagsGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })));
+    this.group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(line), new THREE.LineBasicMaterial({ color: 0x3b3f4a })));
+
+    // 2. fleurs dans les bacs des arbres (un seul maillage instancié)
+    const trees = [[-40, 14], [40, 14], [-75, 14], [75, 14], [-75, -14], [75, -14]];
+    const FLOWER = [0xff5e8a, 0xffd36b, 0xffffff, 0xb46bff, 0xff7a3d, 0x6fd3ff];
+    const flowers = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.17, 0), new THREE.MeshStandardMaterial({ roughness: 0.6 }), trees.length * 14);
+    const m4 = new THREE.Matrix4();
+    let n = 0;
+    for (const [tx, tz] of trees) {
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        m4.makeTranslation(tx + Math.cos(a) * 0.95, 0.88 + Math.random() * 0.1, tz + Math.sin(a) * 0.95);
+        flowers.setMatrixAt(n, m4);
+        flowers.setColorAt(n++, new THREE.Color(FLOWER[(i + Math.abs(tx)) % FLOWER.length]));
+      }
+    }
+    this.group.add(flowers);
+
+    // 3. bancs (bois et fonte), avec collision
+    const wood = std(0x9a6a3a, { roughness: 0.7 });
+    const iron = std(0x23262e, { metalness: 0.6, roughness: 0.4 });
+    for (const b of BENCHES) {
+      const g = new THREE.Group();
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.08, 0.5), wood);
+      seat.position.y = 0.46;
+      const back = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.42, 0.07), wood);
+      back.position.set(0, 0.78, -0.24);
+      g.add(seat, back);
+      for (const sx of [-0.8, 0.8]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.46, 0.5), iron);
+        leg.position.set(sx, 0.23, 0);
+        g.add(leg);
+      }
+      g.position.set(b.x, 0, b.z);
+      g.rotation.y = b.ry;
+      g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+      this.group.add(g);
+      const along = Math.abs(Math.sin(b.ry)) > 0.5; // banc orienté selon z
+      this.boxes.push(along ? { minX: b.x - 0.3, maxX: b.x + 0.3, minZ: b.z - 1, maxZ: b.z + 1 } : { minX: b.x - 1, maxX: b.x + 1, minZ: b.z - 0.3, maxZ: b.z + 0.3 });
+    }
+
+    // 4. jets de la fontaine : gouttes animées en arcs (voir update)
+    const drops = 180;
+    this.sprayGeo = new THREE.BufferGeometry();
+    this.sprayGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(drops * 3), 3));
+    this.sprayPhase = Array.from({ length: drops }, () => [Math.random() * Math.PI * 2, Math.random()]);
+    const spray = new THREE.Points(this.sprayGeo, new THREE.PointsMaterial({ color: 0xbfe6ff, size: 0.13, transparent: true, opacity: 0.85, depthWrite: false }));
+    spray.frustumCulled = false;
+    this.group.add(spray);
+  }
+
+  private sprayGeo: THREE.BufferGeometry | null = null;
+  private sprayPhase: number[][] = [];
+
+  /** Boutique d'améliorations : étal à auvent rayé, vitrine de produits, enseigne lumineuse. */
+  private buildBoutique(): void {
+    const g = new THREE.Group();
+    const wood = std(0x6b4a2e, { roughness: 0.6 });
+    const cream = std(0xf4ecd8, { roughness: 0.7 });
+    // stand
+    const base = new THREE.Mesh(new THREE.BoxGeometry(5.2, 2.2, 4.2), std(0x1f5f8b, { roughness: 0.55 }));
+    base.position.y = 1.1;
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.0, 1.0), wood);
+    counter.position.set(0, 0.5, 2.3);
+    const top = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.1, 1.2), cream);
+    top.position.set(0, 1.05, 2.3);
+    // auvent rayé (bandes alternées)
+    for (let i = 0; i < 8; i++) {
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.08, 2.4), std(i % 2 ? 0xf4ecd8 : 0x2a9df4, { roughness: 0.6 }));
+      stripe.position.set(-2.31 + i * 0.66, 3.05, 2.0);
+      stripe.rotation.x = 0.32;
+      g.add(stripe);
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.3, 4.6), std(0x173f5f, { roughness: 0.5 }));
+    roof.position.y = 2.6;
+    // produits exposés : chaussures dorées, gants, cadenas, sablier
+    const gold = std(0xffc83d, { metalness: 0.8, roughness: 0.25 });
+    const items = [
+      new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.22, 0.24), gold),
+      new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), std(0x7a3ff2, { roughness: 0.4 })),
+      new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.06, 10, 18), std(0xc0c4cc, { metalness: 0.9, roughness: 0.2 })),
+      new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.4, 14), std(0x4cc38a, { roughness: 0.4 })),
+    ];
+    items.forEach((m, i) => {
+      m.position.set(-1.5 + i, 1.3, 2.3);
+      g.add(m);
+    });
+    const tag = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.4, 1.1),
+      new THREE.MeshStandardMaterial({
+        map: textTexture([['BOUTIQUE', '#7fd3ff', 70], ['Améliorations · Renaissance', '#f4ecd8', 40]], 1024, 256, '#0b1d2c'),
+        emissive: 0xffffff, emissiveIntensity: 0.25, roughness: 0.5,
+      }),
+    );
+    tag.material.emissiveMap = tag.material.map;
+    tag.position.set(0, 3.65, 2.15);
+    g.add(base, counter, top, roof, tag);
+    this.occluders.push(base, roof);
+    g.position.set(BOUTIQUE.x, 0, BOUTIQUE.z - 3);
+    g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+    this.group.add(g);
+    this.boxes.push({ minX: BOUTIQUE.x - 2.7, maxX: BOUTIQUE.x + 2.7, minZ: BOUTIQUE.z - 5.2, maxZ: BOUTIQUE.z });
   }
 
   private buildBoard(): void {
@@ -444,10 +608,14 @@ export class District {
       p.position.set(sx, 1.1, -0.17);
       g.add(p);
     }
-    g.position.set(-20, 0, -13);
+    // Au sud de la place, entre les musées x = -20 et x = 20, écran tourné vers la route.
+    // (Avant : x = -20, z = -13, en plein sur l'allée et devant l'entrée du musée de cette parcelle.)
+    g.position.set(BOARD_POS.x, 0, BOARD_POS.z);
+    g.rotation.y = Math.PI;
     g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
     this.group.add(g);
-    this.boxes.push({ minX: -25.3, maxX: -14.7, minZ: -13.5, maxZ: -12.6 });
+    this.occluders.push(back);
+    this.boxes.push({ minX: BOARD_POS.x - 5.3, maxX: BOARD_POS.x + 5.3, minZ: BOARD_POS.z - 0.4, maxZ: BOARD_POS.z + 0.6 });
     this.setLeaderboard([], '');
   }
 

@@ -38,7 +38,22 @@ export interface NetPlayer {
   /** Déguisé en employé (outil du marché noir). */
   disguised?: boolean;
   stealing: { plot: number; uid: string; endsAt: number } | null;
+  /** Micro activé (discussion vocale de proximité). */
+  voice?: boolean;
 }
+
+export interface ChatLine {
+  t: 'chat';
+  id: string;
+  name: string;
+  color: string;
+  text: string;
+  at: number;
+}
+export type EmoteKind = 'wave' | 'laugh' | 'fire' | 'wow' | 'clap' | 'heart';
+export type RtcData =
+  | { type: 'offer' | 'answer'; sdp: string }
+  | { type: 'candidate'; candidate: RTCIceCandidateInit };
 
 export type StealEvent =
   | { t: 'steal'; phase: 'refused'; error: string }
@@ -103,12 +118,19 @@ export type ServerMsg =
   | { t: 'sale'; phase: 'start'; id: string; label: string; kind: string; lots: number; workId: string }
   | { t: 'sale'; phase: 'sold'; label: string; workId: string; frame: FrameId; sold: boolean; price: number; winner: string | null; npc: boolean; winnerId: string | null }
   | { t: 'sale'; phase: 'end'; id: string; label: string }
-  | { t: 'welcome'; now: number; you: { id: string; plot: number; jailUntil: number }; plots: PlotInfo[]; players: NetPlayer[]; guards: NetGuard[]; district: number }
+  | {
+    t: 'welcome'; now: number; you: { id: string; plot: number; jailUntil: number }; plots: PlotInfo[]; players: NetPlayer[]; guards: NetGuard[]; district: number;
+    chat?: ChatLine[]; invite?: { status: 'ok' | 'full' | 'offline' | 'unknown' | 'self'; name: string | null } | null; max?: number;
+  }
+  | ChatLine
+  | { t: 'chat-error'; error: string }
+  | { t: 'emote'; id: string; kind: EmoteKind }
+  | { t: 'rtc'; from: string; data: RtcData }
   | { t: 'snap'; now: number; players: NetPlayer[]; guards: NetGuard[] }
   | { t: 'alarm'; plot: number; thief: string; thiefName: string; reason: 'camera' | 'laser' | 'sabotage' }
   | { t: 'tool'; ok: boolean; tool: string; error?: string; message?: string; plot?: number; tools?: Record<string, number> }
   | { t: 'fx'; kind: 'fumigene' | 'leurre'; plot: number; x: number; z: number; until: number }
-  | { t: 'join'; player: NetPlayer }
+  | { t: 'join'; player: NetPlayer; invited?: string | null }
   | { t: 'leave'; id: string }
   | { t: 'plot'; plot: PlotInfo }
   | { t: 'lock'; plot: number; lockedUntil: number; lockReadyAt: number; error?: string }
@@ -123,6 +145,8 @@ export class Net {
   private retry = 0;
   private closed = false;
   connected = false;
+  /** Code d'invitation d'un ami : envoyé à la première connexion seulement. */
+  joinCode: string | null = null;
   onMessage: (m: ServerMsg) => void = () => undefined;
   onStatus: (connected: boolean) => void = () => undefined;
 
@@ -135,7 +159,8 @@ export class Net {
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     this.ws = ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify({ t: 'auth', id: a.id, token: a.token }));
+      ws.send(JSON.stringify({ t: 'auth', id: a.id, token: a.token, ...(this.joinCode ? { join: this.joinCode } : {}) }));
+      this.joinCode = null; // une reconnexion ramène le joueur chez lui, pas chez l'ami
       this.retry = 0;
     };
     ws.onmessage = (e) => {

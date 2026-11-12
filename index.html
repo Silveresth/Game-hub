@@ -4,16 +4,381 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Steal a Masterpiece — Le casse du siècle</title>
-  <meta name="description" content="Bâtissez le plus grand musée du monde : achetez des chefs-d'œuvre aux enchères, protégez-les des voleurs… et volez ceux des autres. Jeu 3D multijoueur gratuit, dans le navigateur." />
-  <meta name="theme-color" content="#08090f" />
+  <meta name="description" content="Bâtissez le plus grand musée du monde, achetez des chefs-d'œuvre aux enchères, protégez-les… et volez ceux des autres. Jeu 3D multijoueur gratuit, dans le navigateur, sur ordinateur et mobile." />
+  <meta name="theme-color" content="#2c0b14" />
+  <meta property="og:title" content="Steal a Masterpiece — Le casse du siècle" />
+  <meta property="og:description" content="Bâtissez le plus grand musée du monde. Volez celui des autres. Gratuit, dans le navigateur." />
+  <meta property="og:image" content="/icons/icon-512.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-  <script>
-    location.replace('./game/');
-  </script>
+  <link rel="preload" href="/fonts/cinzel-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/bricolage-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/src/shared/theme.css" />
+  <style>
+    /* Polices hébergées sur le site (aucune requête vers un service tiers) */
+    @font-face { font-family: 'Cinzel'; src: url(/fonts/cinzel-latin.woff2) format('woff2'); font-weight: 400 900; font-display: swap; }
+    @font-face { font-family: 'Bricolage Grotesque'; src: url(/fonts/bricolage-latin.woff2) format('woff2'); font-weight: 200 800; font-display: swap; }
+
+    /* Salle rouge, après la fermeture : velours, dorures, ivoire, et un laser */
+    :root {
+      --velvet: #4a1220;
+      --velvet-deep: #2c0b14;
+      --wine: #1a070c;
+      --gilt: #d8a64a;
+      --gilt-hi: #f6dc96;
+      --gilt-lo: #8f5d18;
+      --ivory: #f4ead8;
+      --ivory-dim: #cdbba3;
+      --laser: #ff2d55;
+      --r-commun: #b9c0cc; --r-rare: #4aa3ff; --r-epique: #b46bff; --r-legendaire: #ffb020; --r-mythique: #ff3b4e;
+      --display: 'Cinzel', 'Trajan Pro', Georgia, serif;
+      --text: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+    }
+    html { scroll-behavior: smooth; scroll-padding-top: calc(var(--bar-h) + 20px); }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    body.landing { background: #240a11; color: var(--ivory); font-family: var(--text); font-size: 17px; line-height: 1.6; overflow-x: hidden; }
+    body.landing h1, body.landing h2, body.landing h3 { font-family: var(--display); font-weight: 700; letter-spacing: .02em; line-height: 1.15; }
+    a { color: inherit; }
+    figure { margin: 0; } /* (marges par défaut du navigateur : 40 px de chaque côté) */
+    :focus-visible { outline: 3px solid var(--gilt-hi); outline-offset: 3px; border-radius: 6px; }
+    .wrap { width: min(1120px, 100% - 32px); margin-inline: auto; }
+    .prose { max-width: 62ch; }
+    .muted { color: var(--ivory-dim); }
+
+    /* ---------- bouton doré (plaque de laiton) ---------- */
+    .plaque {
+      display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 15px 30px; border-radius: 4px; border: 1px solid #fff0bd;
+      background: linear-gradient(160deg, var(--gilt-hi), var(--gilt) 45%, var(--gilt-lo) 100%);
+      color: #2a1606; font-family: var(--display); font-weight: 800; font-size: 19px; letter-spacing: .04em; text-decoration: none;
+      box-shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 -2px 0 rgba(0,0,0,.25) inset, 0 10px 30px rgba(0,0,0,.45);
+      cursor: pointer; transition: transform .15s ease, filter .15s ease;
+    }
+    .plaque:hover { transform: translateY(-2px); filter: brightness(1.07); }
+    .plaque:active { transform: translateY(0); }
+    .plaque.quiet { background: transparent; color: var(--gilt-hi); border-color: rgba(246,220,150,.45); box-shadow: none; font-size: 16px; padding: 12px 22px; }
+
+    /* ---------- en-tête ---------- */
+    .masthead { position: absolute; top: calc(var(--bar-h) + 10px); left: 0; right: 0; z-index: 5; }
+    .masthead .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+    .brand img { width: 40px; height: 42px; }
+    .brand span { font-family: var(--display); font-weight: 800; font-size: 17px; letter-spacing: .06em; }
+    .masthead nav { display: flex; gap: 22px; font-size: 15px; }
+    .masthead nav a { text-decoration: none; color: var(--ivory-dim); }
+    .masthead nav a:hover { color: var(--gilt-hi); }
+    @media (max-width: 860px) { .masthead nav { display: none; } }
+    @media (max-width: 560px) { .brand span { display: none; } } /* le grand titre suit juste en dessous */
+
+    /* ---------- la salle rouge (accueil) ---------- */
+    .room {
+      position: relative; isolation: isolate; min-height: 100svh; padding: calc(var(--bar-h) + 90px) 0 64px;
+      background:
+        radial-gradient(ellipse 38% 46% at 50% 30%, rgba(255,214,150,.20), transparent 70%),
+        repeating-linear-gradient(90deg, rgba(0,0,0,.08) 0 2px, transparent 2px 7px),
+        linear-gradient(180deg, var(--velvet) 0%, #3a0e19 62%, var(--velvet-deep) 100%);
+      text-align: center; overflow: hidden;
+    }
+    /* plinthe et parquet de la salle */
+    .room::after { content: ''; position: absolute; inset: auto 0 0 0; height: 70px; z-index: -1;
+      background: linear-gradient(180deg, #1d080d 0 10px, #3b2414 10px, #2a180d 100%); box-shadow: 0 -6px 18px rgba(0,0,0,.45); }
+    .room h1 { font-size: clamp(36px, 6vw, 76px); font-weight: 800; color: var(--gilt-hi); text-shadow: 0 2px 0 #6b3f0c, 0 14px 40px rgba(0,0,0,.6); }
+    .room .lede { margin: 12px auto 0; font-size: clamp(19px, 2.2vw, 24px); line-height: 1.45; color: var(--ivory); }
+    .room .lede span { display: block; }
+
+    .wall { margin: 34px auto 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: clamp(18px, 4vw, 56px); width: min(1180px, 100% - 24px); }
+    .wall .side { display: flex; justify-content: center; }
+    .wall .side.l { justify-content: flex-end; }
+    .wall .side.r { justify-content: flex-start; }
+
+    /* cadre doré générique : moulure + filet intérieur */
+    .frame {
+      position: relative; padding: clamp(10px, 1.6vw, 18px);
+      background: linear-gradient(135deg, var(--gilt-hi) 0%, var(--gilt) 30%, var(--gilt-lo) 58%, #e3b65a 80%, #9a661c 100%);
+      box-shadow: 0 0 0 1px rgba(255,240,190,.5) inset, 0 18px 40px rgba(0,0,0,.55), 0 4px 0 rgba(0,0,0,.2);
+    }
+    .frame::before { content: ''; position: absolute; inset: calc(clamp(10px, 1.6vw, 18px) - 5px); border: 3px solid #f0ca6a; box-shadow: 0 0 0 2px #7a4c10 inset; pointer-events: none; }
+    .frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    /* tableaux du mur : à leurs vraies proportions */
+    .wall .side .frame { width: clamp(150px, 20vw, 260px); }
+    .wall .side .frame img { height: auto; }
+
+    /* le cadre vide : la Joconde a disparu */
+    .empty { width: clamp(240px, 26vw, 340px); aspect-ratio: 13 / 18; padding: clamp(16px, 2vw, 24px); margin-inline: auto; }
+    .canvas .plaque { white-space: nowrap; font-size: clamp(15px, .5vw + 10px, 17px); letter-spacing: .02em; padding: 12px clamp(14px, 1.4vw, 20px); }
+    .empty::before { inset: calc(clamp(16px, 2vw, 24px) - 6px); }
+    .canvas {
+      position: relative; height: 100%; display: grid; place-items: center; overflow: hidden;
+      background: radial-gradient(ellipse 70% 60% at 50% 35%, #5c1626, #2a0910 75%);
+    }
+    /* trace plus claire laissée sur le velours par le tableau décroché */
+    .canvas::before { content: ''; position: absolute; inset: 12% 14%; border: 1px dashed rgba(246,220,150,.22); background: rgba(255,230,200,.035); }
+    .laser { position: absolute; left: -10%; right: -10%; top: 74%; height: 2px; background: #ff8aa0; box-shadow: 0 0 10px 3px rgba(255,45,85,.7); transform: rotate(-7deg); }
+    .canvas .plaque { position: relative; z-index: 1; }
+    .cartel {
+      margin: 22px auto 0; width: max-content; max-width: 92%; padding: 10px 16px; text-align: left;
+      background: #f7f1e4; color: #2b1d12; font-size: 14px; line-height: 1.45; border-radius: 2px; box-shadow: 0 6px 18px rgba(0,0,0,.4);
+    }
+    .cartel b { font-family: var(--display); font-size: 15px; }
+    .cartel .stolen { color: #c0102f; font-weight: 700; }
+    .room .facts { margin-top: 30px; font-size: 15.5px; color: var(--ivory-dim); }
+    .room .facts strong { color: var(--ivory); font-weight: 600; }
+    @media (max-width: 760px) {
+      .wall { grid-template-columns: 1fr; }
+      .wall .side { display: none; }
+    }
+
+    /* moment d'entrée : le projecteur s'allume, le laser balaie une fois */
+    @media (prefers-reduced-motion: no-preference) {
+      .room { animation: lightsOn 1.4s ease-out both; }
+      .laser { animation: sweep 2.2s .6s cubic-bezier(.6,0,.3,1) both; }
+      @keyframes lightsOn { from { filter: brightness(.35); } to { filter: none; } }
+      @keyframes sweep { from { top: 8%; opacity: 0; } 15% { opacity: 1; } to { top: 74%; } }
+    }
+
+    /* ---------- sections ---------- */
+    section.part { padding: clamp(64px, 9vw, 110px) 0; }
+    section.part h2 { font-size: clamp(30px, 4.4vw, 48px); color: var(--gilt-hi); }
+    section.part .intro { margin-top: 14px; font-size: 19px; color: var(--ivory-dim); }
+    .part.alt { background: linear-gradient(180deg, #33101a, #3b121e); }
+
+    /* sens de la visite : 4 salles reliées par un chemin */
+    .visit { margin-top: 48px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; position: relative; list-style: none; }
+    .visit::before { content: ''; position: absolute; top: 27px; left: 6%; right: 6%; border-top: 2px dashed rgba(246,220,150,.35); }
+    .visit li { position: relative; }
+    .visit .room-no { display: inline-grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: var(--wine); border: 2px solid var(--gilt); font-family: var(--display); font-weight: 800; color: var(--gilt-hi); font-size: 15px; line-height: 1.05; text-align: center; }
+    .visit h3 { margin-top: 16px; font-size: 21px; color: var(--ivory); }
+    .visit p { margin-top: 6px; color: var(--ivory-dim); font-size: 16px; }
+    @media (max-width: 860px) {
+      .visit { grid-template-columns: 1fr; gap: 26px; }
+      .visit::before { top: 10px; bottom: 10px; left: 27px; right: auto; border-top: 0; border-left: 2px dashed rgba(246,220,150,.35); }
+      .visit li { padding-left: 76px; }
+      .visit .room-no { position: absolute; left: 0; top: 0; }
+      .visit h3 { margin-top: 0; }
+    }
+
+    /* la collection : un tableau par rareté, avec son cartel */
+    .collection { margin-top: 48px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 26px; align-items: end; }
+    .piece .frame { aspect-ratio: 4 / 5; padding: 9px; }
+    .piece .frame::before { inset: 4px; border-width: 2px; }
+    .piece.mythique .frame { box-shadow: 0 0 0 1px rgba(255,240,190,.5) inset, 0 0 0 4px rgba(255,59,78,.55), 0 18px 40px rgba(0,0,0,.55); }
+    .piece .cartel { margin: 14px 0 0; width: auto; max-width: none; }
+    .piece .rarity { font-weight: 700; }
+    @media (max-width: 960px) { .collection { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 560px) { .collection { grid-template-columns: repeat(2, 1fr); gap: 18px; } .piece .cartel { font-size: 13px; } }
+
+    /* le casse : voler / protéger */
+    .heist { margin-top: 44px; display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid rgba(246,220,150,.25); }
+    .heist > div { padding: clamp(22px, 3vw, 34px); }
+    .heist > div + div { border-left: 1px solid rgba(255,45,85,.6); box-shadow: -8px 0 18px -10px rgba(255,45,85,.6); }
+    .heist h3 { font-size: 23px; color: var(--gilt-hi); }
+    .heist ul { margin-top: 14px; list-style: none; display: flex; flex-direction: column; gap: 11px; }
+    .heist li { display: grid; grid-template-columns: 30px 1fr; gap: 6px; color: var(--ivory-dim); font-size: 16px; }
+    .heist li b { color: var(--ivory); font-weight: 600; }
+    @media (max-width: 760px) { .heist { grid-template-columns: 1fr; } .heist > div + div { border-left: 0; border-top: 1px solid rgba(255,45,85,.6); box-shadow: 0 -8px 18px -10px rgba(255,45,85,.6); } }
+
+    /* ventes aux enchères en direct */
+    .sales { margin-top: 36px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .sale { padding: 18px 20px; border: 1px solid rgba(246,220,150,.3); border-radius: 4px; background: rgba(0,0,0,.18); }
+    .sale .when { font-family: var(--display); font-size: 22px; color: var(--ivory); }
+    .sale .kind { color: var(--gilt-hi); font-weight: 700; }
+    .sale .left { color: var(--ivory-dim); font-size: 15px; }
+    .sale.major { border-color: var(--gilt); background: rgba(216,166,74,.08); }
+    .sale.live { border-color: var(--laser); box-shadow: 0 0 0 1px var(--laser) inset; }
+    .sale.live .left { color: #ff8aa0; font-weight: 700; }
+    .rhythm { margin-top: 26px; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 28px; color: var(--ivory-dim); font-size: 16px; }
+    .rhythm b { color: var(--ivory); }
+
+    /* entre amis */
+    .together { margin-top: 40px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 30px 36px; }
+    .together h3 { font-family: var(--text); font-weight: 700; font-size: 19px; letter-spacing: 0; color: var(--ivory); }
+    .together p { margin-top: 4px; color: var(--ivory-dim); font-size: 16px; }
+    .together .ico { font-size: 26px; display: block; margin-bottom: 6px; }
+
+    /* questions */
+    .faq { margin-top: 34px; max-width: 760px; }
+    .faq details { border-bottom: 1px solid rgba(246,220,150,.22); }
+    .faq summary { cursor: pointer; padding: 18px 0; font-weight: 700; font-size: 18px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+    .faq summary::-webkit-details-marker { display: none; }
+    .faq summary::after { content: '+'; font-family: var(--display); color: var(--gilt-hi); font-size: 24px; line-height: 1; transition: transform .2s; }
+    .faq details[open] summary::after { transform: rotate(45deg); }
+    .faq details p { padding: 0 0 20px; color: var(--ivory-dim); max-width: 64ch; }
+
+    /* dernier appel */
+    .finale { padding: clamp(70px, 10vw, 120px) 0; text-align: center; background: radial-gradient(ellipse 50% 70% at 50% 40%, rgba(255,214,150,.14), transparent 70%), var(--velvet-deep); }
+    .finale h2 { font-size: clamp(30px, 4.6vw, 52px); color: var(--gilt-hi); }
+    .finale p { margin: 14px auto 30px; max-width: 46ch; color: var(--ivory-dim); font-size: 19px; }
+    .finale .actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+    footer.foot { padding: 34px 0 48px; background: var(--wine); color: var(--ivory-dim); font-size: 14px; }
+    footer.foot .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px 30px; align-items: center; }
+    footer.foot nav { display: flex; gap: 20px; flex-wrap: wrap; }
+  </style>
 </head>
-<body>
-  <p>Redirection vers le jeu… <a href="./game/index.html">Cliquez ici</a> si rien ne se passe.</p>
+<body class="has-livebar landing">
+  <div id="livebar" class="livebar"></div>
+
+  <header class="masthead">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Steal a Masterpiece, accueil"><img src="/logo.svg" alt="" /><span>Steal a Masterpiece</span></a>
+      <nav aria-label="Sections">
+        <a href="#visite">Comment jouer</a>
+        <a href="#collection">La collection</a>
+        <a href="#casse">Le casse</a>
+        <a href="#ventes">Les ventes</a>
+        <a href="#amis">Entre amis</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- La salle rouge : la Joconde a disparu -->
+    <section class="room" aria-labelledby="titre">
+      <h1 id="titre">Steal a Masterpiece</h1>
+      <p class="lede"><span>Bâtissez le plus grand musée du monde.</span> <span>Volez celui des autres.</span></p>
+
+      <div class="wall">
+        <div class="side l"><figure class="frame"><img src="/art/nuit-etoilee.jpg" alt="La Nuit étoilée, Vincent van Gogh" width="210" height="262" /></figure></div>
+        <div>
+          <figure class="frame empty">
+            <div class="canvas">
+              <span class="laser" aria-hidden="true"></span>
+              <a class="plaque" href="/game/" id="playHero">Jouer gratuitement</a>
+            </div>
+          </figure>
+          <p class="cartel"><b>La Joconde</b><br />Léonard de Vinci, vers 1503<br /><span class="stolen">Volée cette nuit.</span> Valeur estimée : 800 M pièces</p>
+        </div>
+        <div class="side r"><figure class="frame"><img src="/art/grande-vague.jpg" alt="La Grande Vague de Kanagawa, Hokusai" width="270" height="180" /></figure></div>
+      </div>
+
+      <p class="facts"><strong>Gratuit</strong>, directement dans le navigateur, sur ordinateur et sur mobile. <span id="onlineNow"></span></p>
+    </section>
+
+    <!-- Sens de la visite : la boucle du jeu -->
+    <section class="part" id="visite" aria-labelledby="visite-t">
+      <div class="wrap">
+        <h2 id="visite-t">Comment jouer</h2>
+        <p class="intro prose">Un petit local, 500 pièces, et un convoi de chefs-d’œuvre qui passe devant votre porte. Le reste dépend de vous.</p>
+        <ol class="visit">
+          <li><span class="room-no">Salle<br />1</span><h3>Achetez au convoi</h3><p>Un camion passe toutes les 20 secondes avec une œuvre à vendre. Approchez-vous, appuyez sur E, elle est à vous.</p></li>
+          <li><span class="room-no">Salle<br />2</span><h3>Exposez</h3><p>Accrochez-la au mur de votre musée. Chaque œuvre exposée rapporte des pièces, même quand vous n’êtes pas là.</p></li>
+          <li><span class="room-no">Salle<br />3</span><h3>Agrandissez</h3><p>Encaissez la caisse, ouvrez de nouvelles salles, montez les étages jusqu’au toit-terrasse des statues.</p></li>
+          <li><span class="room-no">Salle<br />4</span><h3>Volez, ou défendez</h3><p>Entrez chez un rival, décrochez son plus beau tableau et ramenez-le chez vous. Lui, il a des gardes.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- La collection : un tableau par rareté -->
+    <section class="part alt" id="collection" aria-labelledby="collection-t">
+      <div class="wrap">
+        <h2 id="collection-t">La collection</h2>
+        <p class="intro prose">45 œuvres réelles du domaine public, de la petite toile à quelques centaines de pièces jusqu’aux trois Mythiques, uniques sur tout le serveur.</p>
+        <div class="collection" id="pieces">
+          <article class="piece commun" data-work="glaneuses"><figure class="frame"><img src="/art/glaneuses.jpg" alt="Des glaneuses, Jean-François Millet" loading="lazy" /></figure><p class="cartel"><b>Des glaneuses</b><br />Millet, 1857<br /><span class="rarity">Commun</span></p></article>
+          <article class="piece rare" data-work="temeraire"><figure class="frame"><img src="/art/temeraire.jpg" alt="Le Dernier Voyage du Téméraire, Turner" loading="lazy" /></figure><p class="cartel"><b>Le Téméraire</b><br />Turner, 1839<br /><span class="rarity">Rare</span></p></article>
+          <article class="piece epique" data-work="tournesols"><figure class="frame"><img src="/art/tournesols.jpg" alt="Les Tournesols, Vincent van Gogh" loading="lazy" /></figure><p class="cartel"><b>Les Tournesols</b><br />Van Gogh, 1888<br /><span class="rarity">Épique</span></p></article>
+          <article class="piece legendaire" data-work="perle"><figure class="frame"><img src="/art/perle.jpg" alt="La Jeune Fille à la perle, Vermeer" loading="lazy" /></figure><p class="cartel"><b>La Jeune Fille à la perle</b><br />Vermeer, 1665<br /><span class="rarity">Légendaire</span></p></article>
+          <article class="piece mythique" data-work="joconde"><figure class="frame"><img src="/art/joconde.jpg" alt="La Joconde, Léonard de Vinci" loading="lazy" /></figure><p class="cartel"><b>La Joconde</b><br />Léonard de Vinci, 1503<br /><span class="rarity">Mythique, unique</span></p></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Le casse -->
+    <section class="part" id="casse" aria-labelledby="casse-t">
+      <div class="wrap">
+        <h2 id="casse-t">Le casse</h2>
+        <p class="intro prose">Tout peut être volé, même quand le propriétaire dort. Chaque protection a sa faille, et chaque outil de cambrioleur a sa parade.</p>
+        <div class="heist">
+          <div>
+            <h3>Pour voler</h3>
+            <ul>
+              <li><span>✋</span><span><b>Maintenez E</b> devant l’œuvre : 2,5 secondes pour une toile commune, 20 pour une Mythique.</span></li>
+              <li><span>🏃</span><span><b>Ramenez-la chez vous</b> sans vous faire toucher par le propriétaire ni par un garde.</span></li>
+              <li><span>🎒</span><span><b>Le marché noir</b> vend brouilleur, fumigène, pied-de-biche, leurre, pince à câbles et déguisement d’employé.</span></li>
+              <li><span>🕵️</span><span><b>Les failles</b> : angles morts entre les salles, relève de la garde toutes les 10 minutes, contrats qui expirent.</span></li>
+            </ul>
+          </div>
+          <div>
+            <h3>Pour protéger</h3>
+            <ul>
+              <li><span>👮</span><span><b>Des gardes</b> font leur ronde. Leur cône de vision est visible au sol : celui qu’ils voient, ils le poursuivent.</span></li>
+              <li><span>📷</span><span><b>Caméras et lasers</b> déclenchent l’alarme. Un générateur les garde allumés pendant une coupure.</span></li>
+              <li><span>🔲</span><span><b>Vitrines blindées</b> : le décrochage prend deux ou trois fois plus de temps.</span></li>
+              <li><span>🔒</span><span><b>Le verrou</b> ferme vos portes pendant une minute. Un voleur pris dedans n’en ressort pas.</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ventes aux enchères -->
+    <section class="part alt" id="ventes" aria-labelledby="ventes-t">
+      <div class="wrap">
+        <h2 id="ventes-t">Les ventes aux enchères</h2>
+        <p class="intro prose">Les Légendaires et les Mythiques ne passent jamais au convoi. Elles se gagnent à l’hôtel des ventes, en direct, contre les autres joueurs et les collectionneurs de la salle.</p>
+        <div class="sales" id="salesList" aria-live="polite">
+          <article class="sale"><span class="kind">Planning</span><div class="when">Chargement…</div></article>
+        </div>
+        <div class="rhythm">
+          <p><b>Vente express</b> toutes les 30 minutes, 3 lots Rares à Épiques.</p>
+          <p><b>Grande vente</b> à 13 h et à 19 h, 6 lots Épiques à Légendaires.</p>
+          <p><b>Vente prestige</b> le dimanche à 20 h, avec une chance de Mythique.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Entre amis -->
+    <section class="part" id="amis" aria-labelledby="amis-t">
+      <div class="wrap">
+        <h2 id="amis-t">Entre amis</h2>
+        <p class="intro prose">Sept musées par quartier, des voisins qui vous regardent passer avec vos œuvres sous le bras. Autant les connaître.</p>
+        <div class="together">
+          <div><span class="ico">👥</span><h3>Invitez vos amis</h3><p>Partagez votre lien d’invitation : vos amis arrivent directement dans votre quartier.</p></div>
+          <div><span class="ico">🎙</span><h3>Parlez-vous</h3><p>Discussion écrite, émotes, et voix de proximité : on entend ceux qui sont près de soi.</p></div>
+          <div><span class="ico">🏆</span><h3>Grimpez au classement</h3><p>Musées les plus riches, champions de la semaine, plus gros casses, classement des pays.</p></div>
+          <div><span class="ico">✨</span><h3>Recommencez plus fort</h3><p>Boutique d’améliorations, récompense de chaque jour, et la Renaissance qui multiplie vos revenus.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Questions -->
+    <section class="part alt" id="questions" aria-labelledby="questions-t">
+      <div class="wrap">
+        <h2 id="questions-t">Questions</h2>
+        <div class="faq">
+          <details><summary>Est-ce vraiment gratuit ?</summary><p>Oui. Il n’y a ni publicité ni achat avec de l’argent réel : tout s’achète avec les pièces gagnées en jeu.</p></details>
+          <details><summary>Faut-il créer un compte ?</summary><p>Non. Choisissez un nom de musée et jouez. Votre musée est retrouvé automatiquement sur cet appareil ; liez-le à un compte Google si vous voulez le retrouver ailleurs.</p></details>
+          <details><summary>Que devient mon musée quand je ne joue pas ?</summary><p>Il reste dans le quartier, endormi. La caisse continue de se remplir à moitié vitesse. On peut vous voler au plus une œuvre toutes les deux heures, et vos gardes travaillent pendant votre absence.</p></details>
+          <details><summary>Ça marche sur téléphone ?</summary><p>Oui, avec un joystick tactile. Vous pouvez aussi installer le jeu sur l’écran d’accueil pour l’ouvrir comme une application.</p></details>
+          <details><summary>Les œuvres sont-elles de vraies œuvres ?</summary><p>Oui : des œuvres du domaine public, photographiées par les musées et partagées sur Wikimedia Commons.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="finale" aria-labelledby="finale-t">
+      <div class="wrap">
+        <h2 id="finale-t">La salle est vide. Le convoi arrive.</h2>
+        <p>Votre musée vous attend sur la place, avec 500 pièces pour commencer.</p>
+        <div class="actions">
+          <a class="plaque" href="/game/">Jouer gratuitement</a>
+          <button class="plaque quiet" type="button" data-install hidden>Installer l’application</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <span>Steal a Masterpiece. Jeu gratuit, sans publicité.</span>
+      <nav aria-label="Informations">
+        <a href="/confidentialite.html">Confidentialité</a>
+        <a href="/art/credits.json">Crédits des œuvres</a>
+        <a href="/game/">Jouer</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/landing/main.ts"></script>
 </body>
 </html>

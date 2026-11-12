@@ -4,6 +4,8 @@ import { Label } from './labels';
 import { artTexture } from './convoy';
 import type { NetPlayer } from './net';
 import { FLOOR_H } from './layout';
+import { EMOTE_ICONS, SpeechBubble } from './chat';
+import type { EmoteKind } from './net';
 
 /** Un autre joueur : personnage à sa couleur, nom au-dessus, œuvre portée au-dessus de la tête. */
 class Remote {
@@ -16,6 +18,10 @@ class Remote {
   carryKey = '';
   wanted = false; // voleur en fuite avec une œuvre du joueur local
   floor = 0;
+  /** Micro activé / en train de parler (discussion vocale). */
+  voice = false;
+  speaking = false;
+  readonly bubble: SpeechBubble;
 
   constructor(scene: THREE.Scene, readonly p: NetPlayer) {
     this.ch = new Character(parseInt(p.color.slice(1), 16));
@@ -23,6 +29,7 @@ class Remote {
     this.target.set(p.x, 0, p.z);
     this.ch.root.add(this.label.sprite);
     this.label.sprite.position.y = 2.75;
+    this.bubble = new SpeechBubble(this.ch.root, 3.45);
     scene.add(this.ch.root);
     this.refreshLabel();
   }
@@ -31,10 +38,14 @@ class Remote {
 
   refreshLabel(): void {
     // un déguisement trompe les gardes, pas les joueurs : le badge « employé » le trahit
-    const text = this.wanted ? `⚠ ${this.p.name}` : this.disguised ? `🥸 ${this.p.name} · « employé »` : this.p.name;
+    const mic = this.speaking ? '🔊 ' : this.voice ? '🎙 ' : '';
+    const text = this.wanted ? `⚠ ${this.p.name}` : this.disguised ? `🥸 ${mic}${this.p.name} · « employé »` : `${mic}${this.p.name}`;
     this.label.update(
       [{ text, color: this.wanted ? '#ff6b6b' : this.disguised ? '#ffd36b' : '#fff', size: 52, weight: 900 }],
-      { bg: this.wanted ? 'rgba(80,0,10,.8)' : 'rgba(0,0,0,.55)', border: this.wanted ? '#ff4d6d' : this.disguised ? '#ffd36b' : 'rgba(255,255,255,.2)' },
+      {
+        bg: this.wanted ? 'rgba(80,0,10,.8)' : 'rgba(0,0,0,.55)',
+        border: this.wanted ? '#ff4d6d' : this.speaking ? '#7dff9a' : this.disguised ? '#ffd36b' : this.p.color,
+      },
     );
   }
 
@@ -92,8 +103,9 @@ export class RemotePlayers {
       r.ry = p.ry;
       r.anim = p.anim;
       r.setCarry(p.carry);
-      if (r.disguised !== !!p.disguised) {
+      if (r.disguised !== !!p.disguised || r.voice !== !!p.voice) {
         r.disguised = !!p.disguised;
+        r.voice = !!p.voice;
         r.refreshLabel();
       }
     }
@@ -105,7 +117,34 @@ export class RemotePlayers {
     if (!r) return;
     r.ch.dispose();
     r.label.dispose();
+    r.bubble.dispose();
     this.map.delete(id);
+  }
+
+  /** Bulle de dialogue au-dessus d'un joueur. */
+  say(id: string, text: string): void {
+    const r = this.map.get(id);
+    r?.bubble.say(text, r.p.color);
+  }
+
+  /** Émote : grande icône au-dessus de la tête, et un geste pour les plus expressives. */
+  emote(id: string, kind: EmoteKind): void {
+    const r = this.map.get(id);
+    if (!r) return;
+    r.bubble.emote(EMOTE_ICONS[kind]);
+    if (kind === 'wave' || kind === 'clap' || kind === 'heart') r.ch.gesture('Wave', 'Idle');
+  }
+
+  setSpeaking(id: string, speaking: boolean): void {
+    const r = this.map.get(id);
+    if (!r || r.speaking === speaking) return;
+    r.speaking = speaking;
+    r.refreshLabel();
+  }
+
+  /** Joueurs présents (pour le panneau des joueurs du quartier). */
+  list(): NetPlayer[] {
+    return [...this.map.values()].map((r) => ({ ...r.p, voice: r.voice }));
   }
 
   setWanted(id: string, wanted: boolean): void {
@@ -129,6 +168,7 @@ export class RemotePlayers {
       r.ch.root.visible = !this.hidden(pos.x, pos.z, r.floor);
       r.ch.play(['Idle', 'Walking', 'Running', 'Jump'].includes(r.anim) ? r.anim : 'Idle');
       r.ch.update(dt);
+      r.bubble.update();
       if (r.carry) r.carry.rotation.y = Math.sin(t * 2) * 0.2;
     }
   }

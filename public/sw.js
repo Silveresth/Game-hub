@@ -1,6 +1,7 @@
 // Service worker de Steal a Masterpiece : jeu disponible hors connexion, API jamais mise en cache.
-const VERSION = 'sam-v7';
-const CORE = ['./', './game/', './museum/', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './models/robot.glb'];
+const VERSION = 'sam-v8';
+// Le prototype /museum/ n'existe plus ; le personnage humain est le modèle principal (le robot sert de secours).
+const CORE = ['./', './game/', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './models/human_male.glb', './models/robot.glb'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -34,6 +35,26 @@ async function cacheFirst(request, name = VERSION) {
   const response = await fetch(request);
   if (response.ok || response.type === 'opaque') cache.put(request, response.clone());
   return response;
+}
+
+/**
+ * Cache puis réseau en arrière-plan : réponse immédiate depuis le cache, et la copie est rafraîchie pour la prochaine fois.
+ * Pour les modèles 3D et les œuvres, dont le nom ne change pas quand le fichier change (avant : jamais rafraîchis).
+ */
+async function staleWhileRevalidate(event, request) {
+  const cache = await caches.open(VERSION);
+  const hit = await cache.match(request);
+  const refresh = fetch(request)
+    .then((response) => {
+      if (response.ok) void cache.put(request, response.clone());
+      return response;
+    })
+    .catch(() => null);
+  if (hit) {
+    event.waitUntil(refresh);
+    return hit;
+  }
+  return (await refresh) ?? Response.error();
 }
 
 // Notifications push (vol en cours, œuvre volée, gardes, ventes, caisse pleine)
@@ -83,8 +104,10 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(networkFirst(request));
-  } else if (['/assets/', '/icons/', '/models/', '/art/'].some((p) => url.pathname.includes(p))) {
-    event.respondWith(cacheFirst(request)); // fichiers versionnés ou qui ne changent pas : cache d'abord
+  } else if (url.pathname.includes('/assets/')) {
+    event.respondWith(cacheFirst(request)); // fichiers au nom versionné (hash) : ils ne changent jamais
+  } else if (['/icons/', '/models/', '/art/'].some((p) => url.pathname.includes(p))) {
+    event.respondWith(staleWhileRevalidate(event, request));
   } else {
     event.respondWith(networkFirst(request));
   }

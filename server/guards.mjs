@@ -101,8 +101,16 @@ export function createGuardBrain(CELL, allRooms) {
     return wps;
   }
 
-  /** Ronde : visite de toutes les salles, aller-retour en profondeur depuis l'entrée. */
+  /** Ronde (mémorisée par nombre de salles : elle ne change pas d'un tick à l'autre). */
+  const tours = new Map();
   function tour(n) {
+    let t = tours.get(n);
+    if (!t) tours.set(n, (t = computeTour(n)));
+    return t;
+  }
+
+  /** Ronde : visite de toutes les salles, aller-retour en profondeur depuis l'entrée. */
+  function computeTour(n) {
     const seq = [];
     const seen = new Set();
     const visit = (k) => {
@@ -196,6 +204,7 @@ export function createGuardBrain(CELL, allRooms) {
   function tick(museum, suspects, dt, now) {
     const { guards, rooms, stairs = [4.2, 4.2] } = museum;
     const shiftState = shift(museum.seed, now);
+    let caught = null; // les autres gardes continuent de bouger pendant ce tick
     for (const g of guards) {
       g.floor ??= 0;
       g.home ??= 0;
@@ -251,7 +260,7 @@ export function createGuardBrain(CELL, allRooms) {
           if (Math.hypot(t.x - g.x, t.z - g.z) < GUARD.CATCH) {
             g.s = 'return';
             g.target = null;
-            return t.id;
+            caught ??= t.id;
           }
           continue;
         }
@@ -281,7 +290,7 @@ export function createGuardBrain(CELL, allRooms) {
         } else g.tourIdx++;
       } else if (g.s !== 'return') g.s = 'patrol';
     }
-    return null;
+    return caught;
   }
 
   /** Alerte (caméra, laser, sabotage) : tous les gardes libres accourent. */

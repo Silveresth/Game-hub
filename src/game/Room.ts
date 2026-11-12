@@ -1,8 +1,9 @@
 /**
- * Types et classe pour la construction 3D des musées (salles, murs, sols, plafonds).
- * Remplace l'ancien src/museum/Room.ts — seule l'API utilisée par museumView.ts est conservée.
+ * Construction 3D des salles d'un musée (sols, murs, plinthes, corniches), sur une grille de 12 m.
+ * Les 4 ambiances ont de vraies textures (voir textures.ts), partagées entre toutes les salles.
  */
 import * as THREE from 'three';
+import { boxUvMeters, planeUvMeters, themeMaterials } from './textures';
 
 export type ThemeId = 'modern' | 'classic' | 'futuristic' | 'zen';
 
@@ -29,24 +30,19 @@ const CELL = 12;
 const WALL_H = 5;
 const WALL_T = 0.24;
 const HALF = CELL / 2;
-
-const THEME_COLORS: Record<ThemeId, { wall: number; floor: number; trim: number; wallRoughness?: number; floorRoughness?: number; floorMetalness?: number }> = {
-  modern:      { wall: 0x3a424e, floor: 0x242831, trim: 0x4f5b6d, wallRoughness: 0.5, floorRoughness: 0.25, floorMetalness: 0.1 }, // Béton ciré anthracite moderne, murs contrastés galerie contemporaine
-  classic:     { wall: 0x6e262c, floor: 0x54361c, trim: 0xb89758, wallRoughness: 0.8, floorRoughness: 0.4 }, // Velours rouge rubis impérial, parquet bois noble chaleureux et moulures dorées
-  futuristic:  { wall: 0x121524, floor: 0x0c0f1a, trim: 0x00d2ff, wallRoughness: 0.3, floorRoughness: 0.2, floorMetalness: 0.4 }, // Cyber-galerie sombre néon cyan & reflets tech
-  zen:         { wall: 0x485848, floor: 0xb8aa82, trim: 0x33251a, wallRoughness: 0.85, floorRoughness: 0.6 }, // Bambou vert sauge, nattes tatami sable et boiseries sombres cèdre
-};
-
-const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
-  new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
+/** Plinthe (bas de mur) et corniche (haut de mur, visible d'en haut puisque les salles n'ont pas de toit). */
+const BASE_H = 0.28;
+const BASE_T = 0.06;
+const CAP_H = 0.14;
 
 /**
  * Bâtiment composé de salles sur une grille.
- * Chaque salle est un cube ouvert en haut (roofless) avec 4 murs, percés là où une salle voisine existe.
+ * Chaque salle est un cube ouvert en haut avec 4 murs, percés là où une salle voisine existe (arcade)
+ * ou là où se trouve l'entrée (porte de 3 m).
  */
 export class MuseumBuilding {
   readonly group = new THREE.Group();
-  /** Maillages auxquels des œuvres peuvent être accrochées (murs + sols). */
+  /** Maillages auxquels des œuvres peuvent être accrochées (murs + sols) ; seuls les murs bloquent. */
   hangables: THREE.Mesh[] = [];
 
   constructor(scene: THREE.Scene) {
@@ -55,7 +51,6 @@ export class MuseumBuilding {
 
   /** Construit (ou reconstruit) toutes les salles. */
   build(rooms: RoomDef[], opts: BuildOptions = {}): void {
-    // nettoyage
     for (const c of [...this.group.children]) {
       this.group.remove(c);
       c.traverse((o: THREE.Object3D) => (o as THREE.Mesh).geometry?.dispose());
@@ -69,108 +64,77 @@ export class MuseumBuilding {
     for (const room of rooms) {
       const cx = room.x * CELL;
       const cz = room.z * CELL;
-      const colors = THEME_COLORS[room.theme];
+      const mats = themeMaterials(room.theme);
 
-      // Sol
-      const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(CELL, CELL),
-        std(colors.floor, { roughness: colors.floorRoughness ?? 0.65, metalness: colors.floorMetalness ?? 0 }),
-      );
+      // Sol texturé (le motif garde son échelle : 4 m par répétition)
+      const floor = new THREE.Mesh(planeUvMeters(new THREE.PlaneGeometry(CELL, CELL), CELL, CELL), mats.floor);
       floor.rotation.x = -Math.PI / 2;
-      floor.position.set(cx, 0, cz);
+      floor.position.set(cx, 0.005, cz);
       floor.userData.floor = true;
+      floor.receiveShadow = true;
       this.group.add(floor);
       this.hangables.push(floor);
 
-      // Murs (4 directions)
+      /** Un pan de mur (axe 'z' = mur nord/sud, 'x' = mur ouest/est) avec sa plinthe et sa corniche. */
+      const wallPiece = (axis: 'x' | 'z', len: number, px: number, pz: number) => {
+        const w = axis === 'z' ? len : WALL_T;
+        const d = axis === 'x' ? len : WALL_T;
+        const wall = new THREE.Mesh(boxUvMeters(new THREE.BoxGeometry(w, WALL_H, d), w, WALL_H, d), mats.wall);
+        wall.position.set(px, WALL_H / 2, pz);
+        this.group.add(wall);
+        this.hangables.push(wall);
+        // plinthe : une simple bande au pied du mur (avant : une dalle de 12 × 12 m recouvrait tout le sol)
+        const base = new THREE.Mesh(new THREE.BoxGeometry(w + (axis === 'x' ? BASE_T * 2 : 0), BASE_H, d + (axis === 'z' ? BASE_T * 2 : 0)), mats.trim);
+        base.position.set(px, BASE_H / 2, pz);
+        this.group.add(base);
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.08, CAP_H, d + 0.08), mats.trim);
+        cap.position.set(px, WALL_H + CAP_H / 2, pz);
+        this.group.add(cap);
+      };
+
       const dirs: Array<[number, number, 'x' | 'z', number]> = [
         [0, -1, 'z', -HALF], // nord
-        [0, 1, 'z', HALF],   // sud
+        [0, 1, 'z', HALF], // sud
         [-1, 0, 'x', -HALF], // ouest
-        [1, 0, 'x', HALF],   // est
+        [1, 0, 'x', HALF], // est
       ];
 
       for (const [dx, dz, axis, offset] of dirs) {
         const neighbor = has(room.x + dx, room.z + dz);
-        const isEntrance = entrance && room.x === entrance.x && room.z === entrance.z &&
+        const isEntrance = !!entrance && room.x === entrance.x && room.z === entrance.z &&
           ((entrance.side === 'n' && dx === 0 && dz === -1) ||
            (entrance.side === 's' && dx === 0 && dz === 1) ||
            (entrance.side === 'w' && dx === -1 && dz === 0) ||
            (entrance.side === 'e' && dx === 1 && dz === 0));
+        // position d'un pan décalé de `along` le long du mur
+        const at = (along: number): [number, number] => (axis === 'z' ? [cx + along, cz + offset] : [cx + offset, cz + along]);
 
         if (neighbor) {
-          // Entre deux salles voisines : arcade ouverte avec retombées de mur latérales (largeur d'arche = 4.2m)
-          // Permet aux tableaux accrochés sur les ailes de reposer sur un véritable mur physique !
-          // segW = (12 - 4.2) / 2 = 3.9 m de chaque côté
-          const doorPassage = 4.2;
-          const segW = (CELL - doorPassage) / 2;
-          for (const side of [-1, 1]) {
-            const partitionWall = new THREE.Mesh(
-              new THREE.BoxGeometry(axis === 'z' ? segW : WALL_T, WALL_H, axis === 'x' ? segW : WALL_T),
-              std(colors.wall, { roughness: colors.wallRoughness ?? 0.7 }),
-            );
-            partitionWall.position.set(
-              cx + (axis === 'z' ? side * (segW / 2 + doorPassage / 2) : offset),
-              WALL_H / 2,
-              cz + (axis === 'x' ? side * (segW / 2 + doorPassage / 2) : offset),
-            );
-            this.group.add(partitionWall);
-            this.hangables.push(partitionWall);
-          }
-          // Imposte supérieure au-dessus de l'arcade pour une belle transition architecturale
-          const transom = new THREE.Mesh(
-            new THREE.BoxGeometry(axis === 'z' ? doorPassage : WALL_T, 1.2, axis === 'x' ? doorPassage : WALL_T),
-            std(colors.trim, { roughness: 0.5 }),
-          );
-          transom.position.set(
-            cx + (axis === 'x' ? offset : 0),
-            WALL_H - 0.6,
-            cz + (axis === 'z' ? offset : 0),
-          );
+          // arcade de 4,2 m vers la salle voisine. Chaque salle dessine sa moitié du mur commun ;
+          // on ne la dessine qu'une fois (côté sud / est) pour éviter deux murs superposés qui scintillent.
+          if (dx < 0 || dz < 0) continue;
+          const passage = 4.2;
+          const segW = (CELL - passage) / 2;
+          for (const side of [-1, 1]) wallPiece(axis, segW, ...at(side * (segW / 2 + passage / 2)));
+          const [tx, tz] = at(0);
+          const transom = new THREE.Mesh(new THREE.BoxGeometry(axis === 'z' ? passage : WALL_T, 1.2, axis === 'x' ? passage : WALL_T), mats.trim);
+          transom.position.set(tx, WALL_H - 0.6, tz);
           this.group.add(transom);
           continue;
         }
-
         if (isEntrance) {
-          // mur percé : deux segments de chaque côté de la porte (largeur 3 m)
           const segW = (CELL - 3) / 2;
-          for (const side of [-1, 1]) {
-            const wall = new THREE.Mesh(
-              new THREE.BoxGeometry(axis === 'z' ? segW : WALL_T, WALL_H, axis === 'x' ? segW : WALL_T),
-              std(colors.wall, { roughness: colors.wallRoughness ?? 0.7 }),
-            );
-            wall.position.set(
-              cx + (axis === 'z' ? side * (segW / 2 + 1.5) : offset),
-              WALL_H / 2,
-              cz + (axis === 'x' ? side * (segW / 2 + 1.5) : offset),
-            );
-            this.group.add(wall);
-            this.hangables.push(wall);
-          }
-        } else {
-          // mur plein
-          const wall = new THREE.Mesh(
-            new THREE.BoxGeometry(axis === 'z' ? CELL : WALL_T, WALL_H, axis === 'x' ? CELL : WALL_T),
-            std(colors.wall, { roughness: colors.wallRoughness ?? 0.7 }),
-          );
-          wall.position.set(
-            cx + (axis === 'x' ? offset : 0),
-            WALL_H / 2,
-            cz + (axis === 'z' ? offset : 0),
-          );
-          this.group.add(wall);
-          this.hangables.push(wall);
+          for (const side of [-1, 1]) wallPiece(axis, segW, ...at(side * (segW / 2 + 1.5)));
+          continue;
         }
+        wallPiece(axis, CELL, ...at(0));
       }
-
-      // Plinthes basses (trim)
-      const trim = new THREE.Mesh(
-        new THREE.BoxGeometry(CELL + WALL_T, 0.25, CELL + WALL_T),
-        std(colors.trim, { roughness: 0.5 }),
-      );
-      trim.position.set(cx, 0.125, cz);
-      this.group.add(trim);
     }
+
+    this.group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && !m.userData.floor) m.castShadow = m.receiveShadow = true;
+    });
   }
 
   /** Retourne les obstacles du bâtiment en coordonnées monde. */

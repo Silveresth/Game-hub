@@ -6,8 +6,6 @@
 //  - 6 notifications par jour au maximum ;
 //  - heures calmes de 22 h à 8 h (heure de Paris), sauf « vol en cours » si le joueur l'a activé.
 import webpush from 'web-push';
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 
 export const CATEGORIES = {
   theft: 'Vol en cours',
@@ -36,14 +34,13 @@ export function cleanSubscription(s) {
   return { endpoint: s.endpoint, keys: { p256dh: k.p256dh, auth: k.auth } };
 }
 
-export async function createPush({ dataDir, devMode = false, subject = process.env.SAM_VAPID_SUBJECT || 'https://steal-a-masterpiece.example' }) {
-  const file = join(dataDir, 'vapid.json');
-  let keys;
-  try {
-    keys = JSON.parse(await readFile(file, 'utf8'));
-  } catch {
-    keys = webpush.generateVAPIDKeys(); // premier lancement : clés propres à ce serveur
-    await writeFile(file, JSON.stringify(keys));
+export async function createPush({ db, devMode = false, subject = process.env.SAM_VAPID_SUBJECT || 'https://steal-a-masterpiece.example' }) {
+  // clés propres à ce serveur, créées au premier lancement et conservées (en base avec PostgreSQL) :
+  // si elles changeaient à chaque déploiement, tous les abonnements aux notifications seraient perdus
+  let keys = await db.kvGet('vapid');
+  if (!keys?.publicKey || !keys?.privateKey) {
+    keys = webpush.generateVAPIDKeys();
+    await db.kvSet('vapid', keys);
   }
   webpush.setVapidDetails(subject, keys.publicKey, keys.privateKey);
 

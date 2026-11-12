@@ -35,6 +35,27 @@
     "deguisement": { "label": "Déguisement d’employé", "icon": "🥸", "desc": "60 s : les gardes vous prennent pour un employé (pas le chien)", "base": 900, "valueShare": 0.006 }
   },
   "repro": { "price": 5000, "label": "Reproduction" },
+  "decorCost": 5000,
+  "upgrades": {
+    "speed": { "label": "Baskets de sprint", "icon": "👟", "desc": "Vous marchez et courez plus vite : pratique pour fuir avec une œuvre !", "unit": "vitesse", "levels": [{ "price": 2000, "value": 0.12 }, { "price": 40000, "value": 0.24 }, { "price": 900000, "value": 0.36 }] },
+    "lock": { "label": "Verrou renforcé", "icon": "🔒", "desc": "Vos portes restent verrouillées plus longtemps.", "unit": "s", "levels": [{ "price": 5000, "value": 75 }, { "price": 120000, "value": 90 }, { "price": 3000000, "value": 120 }] },
+    "vault": { "label": "Coffre-fort", "icon": "💰", "desc": "Votre caisse se remplit plus longtemps avant d'être pleine.", "unit": "h", "levels": [{ "price": 3000, "value": 3 }, { "price": 90000, "value": 4 }, { "price": 2500000, "value": 6 }] },
+    "gloves": { "label": "Gants de velours", "icon": "🧤", "desc": "Vous décrochez les œuvres plus vite chez les rivaux.", "unit": "×", "levels": [{ "price": 4000, "value": 0.85 }, { "price": 100000, "value": 0.72 }, { "price": 2500000, "value": 0.6 }] },
+    "luck": { "label": "Flair de collectionneur", "icon": "🍀", "desc": "Plus d'œuvres Rares et Épiques passent au convoi pour vous.", "unit": "×", "levels": [{ "price": 10000, "value": 1.3 }, { "price": 250000, "value": 1.7 }, { "price": 6000000, "value": 2.2 }] }
+  },
+  "rebirth": { "label": "Renaissance", "minLevel": 5, "baseCost": 50000000, "growth": 5, "incomeBonus": 0.5 },
+  "daily": [500, 1000, 2000, 3500, 5000, 8000, 15000],
+  "events": {
+    "cycleMinutes": 15,
+    "durationMinutes": 3,
+    "kinds": {
+      "golden": { "label": "Heure dorée", "icon": "✨", "desc": "Cadres dorés et diamant 4 fois plus fréquents au convoi" },
+      "rare": { "label": "Trésors rares", "icon": "💎", "desc": "Œuvres Rares et Épiques 3 fois plus fréquentes au convoi" },
+      "soldes": { "label": "Soldes au convoi", "icon": "🏷", "desc": "Toutes les œuvres du convoi à −30 %" }
+    }
+  },
+  "themes": ["classic", "modern", "futuristic", "zen"],
+  "stealSeconds": { "commun": 2.5, "rare": 4, "epique": 6, "legendaire": 9, "mythique": 20 },
   "ticket": { "min": 20, "valueShare": 0.0005, "validMinutes": 10 },
   "maxTools": 3,
   "countries": [
@@ -114,10 +135,10 @@
     { "id": "naissance-venus", "title": "La Naissance de Vénus", "artist": "Sandro Botticelli", "year": 1485, "rarity": "mythique", "price": 500000000, "unique": true, "query": "Sandro Botticelli La nascita di Venere Google Art Project" },
     { "id": "creation-adam", "title": "La Création d’Adam", "artist": "Michel-Ange", "year": 1512, "rarity": "mythique", "price": 650000000, "unique": true, "query": "Michelangelo Creation of Adam Sistine Chapel" },
     { "id": "joconde", "title": "La Joconde", "artist": "Léonard de Vinci", "year": 1503, "rarity": "mythique", "price": 800000000, "unique": true, "query": "Mona Lisa by Leonardo da Vinci C2RMF retouched" },
-    { "id": "penseur", "title": "Le Penseur", "artist": "Auguste Rodin", "year": 1904, "rarity": "epique", "price": 800000, "kind": "statue", "form": "knot", "mat": "bronze", "query": "Rodin The Thinker bronze Musée Rodin" },
-    { "id": "venus-milo", "title": "La Vénus de Milo", "artist": "Alexandros d’Antioche", "year": -100, "rarity": "legendaire", "price": 20000000, "kind": "statue", "form": "spiral", "mat": "marble", "query": "Venus de Milo Louvre marble" },
-    { "id": "victoire-samothrace", "title": "La Victoire de Samothrace", "artist": "Inconnu", "year": -190, "rarity": "legendaire", "price": 35000000, "kind": "statue", "form": "rings", "mat": "marble", "query": "Winged Victory of Samothrace Louvre" },
-    { "id": "david", "title": "Le David", "artist": "Michel-Ange", "year": 1504, "rarity": "mythique", "price": 750000000, "unique": true, "kind": "statue", "form": "monolith", "mat": "marble", "query": "Michelangelo's David marble" }
+    { "id": "penseur", "title": "Le Penseur", "artist": "Auguste Rodin", "year": 1904, "rarity": "epique", "price": 800000, "kind": "statue", "form": "thinker", "mat": "bronze", "query": "Rodin The Thinker bronze Musée Rodin" },
+    { "id": "venus-milo", "title": "La Vénus de Milo", "artist": "Alexandros d’Antioche", "year": -100, "rarity": "legendaire", "price": 20000000, "kind": "statue", "form": "venus", "mat": "marble", "query": "Venus de Milo Louvre marble" },
+    { "id": "victoire-samothrace", "title": "La Victoire de Samothrace", "artist": "Inconnu", "year": -190, "rarity": "legendaire", "price": 35000000, "kind": "statue", "form": "victory", "mat": "marble", "query": "Winged Victory of Samothrace Louvre" },
+    { "id": "david", "title": "Le David", "artist": "Michel-Ange", "year": 1504, "rarity": "mythique", "price": 750000000, "unique": true, "kind": "statue", "form": "david", "mat": "marble", "query": "Michelangelo's David marble" }
   ],
   "levels": [
     { "level": 1, "rooms": 1, "floors": 1, "slots": 4, "visitors": 5, "cost": 0 },

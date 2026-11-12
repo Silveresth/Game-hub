@@ -4,6 +4,8 @@
 
 FROM node:22.12.0-alpine AS build
 WORKDIR /app
+# Playwright ne sert qu'aux tests : pas de téléchargement de navigateurs pendant le build
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
@@ -13,6 +15,7 @@ FROM node:22.12.0-alpine
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001
 COPY package.json package-lock.json ./
+# (le pilote PostgreSQL « pg » fait partie des dépendances : il suffit de définir DATABASE_URL)
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY server ./server

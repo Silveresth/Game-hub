@@ -1,8 +1,8 @@
 /**
- * Œuvre d'art 3D (tableau accroché au mur, ou sculpture posée au sol).
- * Remplace l'ancien src/museum/Artifact.ts — seule l'API utilisée par museumView.ts est conservée.
+ * Œuvre d'art 3D : tableau accroché au mur (aux vraies proportions de l'image) ou sculpture posée au sol.
  */
 import * as THREE from 'three';
+import { artTextureByUrl, aspectOf } from './textures';
 
 export interface ArtifactConfig {
   id: string;
@@ -22,13 +22,12 @@ const FRAME_COLORS: Record<string, number> = {
   normal: 0x3b2a15,
   dore: 0xe8b64c,
   diamant: 0x9fd0ff,
-  obsidienne: 0x1a1a2e,
 };
 
 const SCULPT_COLORS: Record<string, number> = {
-  marble: 0xe9e2d0,
+  marble: 0xeee8da,
   gold: 0xffc83d,
-  bronze: 0x8b6914,
+  bronze: 0x7a5a2a,
   glass: 0xb8d4e8,
   jade: 0x4a9e6a,
 };
@@ -36,97 +35,111 @@ const SCULPT_COLORS: Record<string, number> = {
 const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
 
-/**
- * Un objet 3D représentant une œuvre d'art dans le musée.
- */
+/** Dimensions maximales d'une toile (m) avant le facteur d'échelle de l'œuvre. */
+const MAX_W = 1.75;
+const MAX_H = 1.35;
+const FRAME_BORDER = 0.11;
+
 export class Artifact {
   readonly group = new THREE.Group();
-  private bobY = 0;
   private isSculpt: boolean;
+  /** Partie animée d'une sculpture (lévitation douce des formes abstraites) et sa hauteur de repos. */
+  private floatPart: THREE.Object3D | null = null;
+  private floatBase = 0;
+  private disposed = false;
 
   constructor(config: ArtifactConfig, _audio: THREE.AudioListener | null) {
     this.isSculpt = config.type === 'SCULPTURE';
     const [px, py, pz] = config.position;
     const [rx, ry, rz] = config.rotation;
-
     this.group.position.set(px, py, pz);
     this.group.rotation.set(rx, ry, rz);
-
-    if (this.isSculpt) {
-      this.buildSculpture(config);
-    } else {
-      this.buildPainting(config);
-    }
+    if (this.isSculpt) this.buildSculpture(config);
+    else this.buildPainting(config);
   }
+
+  // ---------------------------------------------------------------- tableaux
 
   private buildPainting(config: ArtifactConfig): void {
     const s = config.scale;
-    const frameColor = FRAME_COLORS[config.frameStyle ?? 'normal'] ?? 0x3b2a15;
-
-    // cadre
+    const frameColor = FRAME_COLORS[config.frameStyle ?? 'normal'] ?? FRAME_COLORS.normal;
+    const metal = config.frameStyle === 'dore' || config.frameStyle === 'diamant';
+    // géométries unitaires, mises à l'échelle selon les proportions de l'image une fois chargée
     const frame = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6 * s, 1.2 * s, 0.08),
-      std(frameColor, { roughness: 0.35, metalness: frameColor === 0xe8b64c ? 0.8 : 0.2 }),
+      new THREE.BoxGeometry(1, 1, 0.08),
+      std(frameColor, { roughness: metal ? 0.22 : 0.45, metalness: metal ? 0.85 : 0.15 }),
     );
     frame.castShadow = true;
     frame.receiveShadow = true;
-
-    // toile (intérieur du cadre)
-    const canvas = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.4 * s, 1.0 * s),
-      this.canvasMaterial(config),
-    );
+    const canvasMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.6 });
+    const canvas = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), canvasMat);
     canvas.position.z = 0.045;
-
-    // spot lumineux
-    if (config.spot) {
-      const spot = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.6 * s, 1.2 * s),
-        new THREE.MeshBasicMaterial({ color: 0xfff8e0, transparent: true, opacity: 0.08, depthWrite: false }),
-      );
-      spot.position.z = 0.05;
-      this.group.add(spot);
-    }
-
     this.group.add(frame, canvas);
-  }
-
-  private canvasMaterial(config: ArtifactConfig): THREE.Material {
-    // Pour les url procédurales (gen:...) ou data-url, on génère une couleur d'après le seed
-    if (config.url.startsWith('gen:') || config.url.startsWith('data:')) {
-      const parts = config.url.split(':');
-      const seed = parseInt(parts[2] ?? '0', 10) || 0;
-      const hue = (seed * 137.5) % 360;
-      const color = new THREE.Color().setHSL(hue / 360, 0.45, 0.5);
-      return new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+    let glow: THREE.Mesh | null = null;
+    if (config.spot) {
+      // halo du projecteur, au-dessus du tableau
+      glow = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({ color: 0xfff1c8, transparent: true, opacity: 0.12, depthWrite: false }),
+      );
+      glow.position.z = 0.02;
+      this.group.add(glow);
     }
-
-    // URL réelle (art du catalogue) → tentative de chargement de texture
-    const loader = new THREE.TextureLoader();
-    const mat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.6 });
-    loader.load(
-      config.url,
-      (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        mat.map = tex;
-        mat.color.set(0xffffff);
-        mat.needsUpdate = true;
-      },
-      undefined,
-      () => { /* silently ignore load errors */ },
-    );
-    return mat;
+    const fit = (aspect: number) => {
+      let w = MAX_W * s;
+      let h = w / aspect;
+      if (h > MAX_H * s) {
+        h = MAX_H * s;
+        w = h * aspect;
+      }
+      canvas.scale.set(w, h, 1);
+      frame.scale.set(w + FRAME_BORDER * 2, h + FRAME_BORDER * 2, 1);
+      if (glow) {
+        glow.scale.set(w * 1.6, h * 1.5, 1);
+        glow.position.y = h * 0.12;
+      }
+    };
+    fit(4 / 3);
+    if (config.url.startsWith('gen:') || config.url.startsWith('data:')) {
+      const seed = parseInt(config.url.split(':')[2] ?? '0', 10) || 0;
+      canvasMat.color.setHSL(((seed * 137.5) % 360) / 360, 0.45, 0.5);
+      return;
+    }
+    const { tex, ready } = artTextureByUrl(config.url);
+    const apply = (t: THREE.Texture) => {
+      if (this.disposed) return;
+      canvasMat.map = t;
+      canvasMat.color.set(0xffffff);
+      canvasMat.needsUpdate = true;
+      fit(aspectOf(t));
+    };
+    if ((tex.image as HTMLImageElement | undefined)?.complete) apply(tex);
+    else void ready.then(apply);
   }
+
+  // ---------------------------------------------------------------- sculptures
 
   private buildSculpture(config: ArtifactConfig): void {
     const s = config.scale;
-    const color = SCULPT_COLORS[config.material ?? 'marble'] ?? 0xe9e2d0;
+    const color = SCULPT_COLORS[config.material ?? 'marble'] ?? SCULPT_COLORS.marble;
     const mat = std(color, {
-      roughness: config.material === 'glass' ? 0.1 : config.material === 'gold' ? 0.25 : 0.4,
-      metalness: config.material === 'gold' || config.material === 'bronze' ? 0.8 : 0.1,
+      roughness: config.material === 'glass' ? 0.1 : config.material === 'gold' ? 0.25 : config.material === 'bronze' ? 0.35 : 0.45,
+      metalness: config.material === 'gold' || config.material === 'bronze' ? 0.75 : 0.05,
     });
+    const figure = buildFigure(config.form ?? '', mat, s);
+    if (figure) {
+      // statue figurative sur un socle en pierre (pas de lévitation : elle repose sur son socle)
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(1.0 * s, 0.9, 1.0 * s), std(0xd8d2c4, { roughness: 0.6 }));
+      plinth.position.y = 0.45;
+      const plinthCap = new THREE.Mesh(new THREE.BoxGeometry(1.1 * s, 0.08, 1.1 * s), std(0xc9c2b2, { roughness: 0.5 }));
+      plinthCap.position.y = 0.94;
+      figure.position.y = 0.98;
+      this.group.add(plinth, plinthCap, figure);
+      this.group.traverse((o) => ((o as THREE.Mesh).castShadow = (o as THREE.Mesh).receiveShadow = true));
+      return;
+    }
 
-    let mesh: THREE.Mesh;
+    let mesh: THREE.Object3D;
     switch (config.form) {
       case 'orb':
         mesh = new THREE.Mesh(new THREE.SphereGeometry(0.6 * s, 32, 24), mat);
@@ -140,6 +153,7 @@ export class Artifact {
           }),
         );
         mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, 0.08 * s, 12), mat);
+        mesh.position.y = 0.25;
         break;
       }
       case 'rings': {
@@ -150,62 +164,153 @@ export class Artifact {
           ring.rotation.x = (i * Math.PI) / 3;
           g.add(ring);
         }
-        this.group.add(g);
-        // piédestal
-        this.addPedestal(s, color);
-        return;
+        mesh = g;
+        break;
       }
       case 'monolith':
         mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 1.8 * s, 0.3 * s), mat);
-        mesh.position.y = 0.9 * s;
+        mesh.position.y = 0.9 * s + 0.25;
         break;
       default: // knot
         mesh = new THREE.Mesh(new THREE.TorusKnotGeometry(0.4 * s, 0.12 * s, 80, 16), mat);
         mesh.position.y = 1.0 * s;
         break;
     }
-
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
     this.group.add(mesh);
-
-    // piédestal
-    this.addPedestal(s, color);
-  }
-
-  private addPedestal(s: number, color: number): void {
-    const ped = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.35 * s, 0.4 * s, 0.25, 24),
-      std(color, { roughness: 0.3 }),
-    );
+    this.floatPart = mesh;
+    this.floatBase = mesh.position.y;
+    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.35 * s, 0.4 * s, 0.25, 24), std(color, { roughness: 0.3 }));
     ped.position.y = 0.125;
-    ped.castShadow = true;
-    ped.receiveShadow = true;
     this.group.add(ped);
+    this.group.traverse((o) => ((o as THREE.Mesh).castShadow = (o as THREE.Mesh).receiveShadow = true));
   }
 
-  /** Met à jour l'animation (léger balancement des sculptures). */
+  /** Animation : légère lévitation des formes abstraites, AUTOUR de leur hauteur de repos (plus de dérive). */
   update(t: number, _dt: number): void {
-    if (this.isSculpt) {
-      this.bobY = Math.sin(t * 2) * 0.02;
-      // on ne modifie que la position y relative du premier enfant sculpture
-      const child = this.group.children[0];
-      if (child && !child.userData.floor) {
-        child.position.y += this.bobY;
-      }
-    }
+    if (this.floatPart) this.floatPart.position.y = this.floatBase + Math.sin(t * 2 + this.group.position.x) * 0.04;
   }
 
-  /** Libère la géométrie et les matériaux. */
+  /** Libère géométries et matériaux (les textures d'œuvres sont partagées : elles restent en cache). */
   dispose(): void {
+    this.disposed = true;
     this.group.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh) {
-        m.geometry?.dispose();
-        const mat = m.material;
-        if (Array.isArray(mat)) mat.forEach((mm) => mm.dispose());
-        else mat?.dispose();
-      }
+      if (!m.isMesh) return;
+      m.geometry?.dispose();
+      const mat = m.material;
+      if (Array.isArray(mat)) mat.forEach((mm) => mm.dispose());
+      else mat?.dispose();
     });
   }
+}
+
+// ------------------------------------------------------------------ statues figuratives (stylisées)
+
+/** Membre : cylindre de `len` m orienté de `from` vers `to`. */
+function limb(mat: THREE.Material, from: THREE.Vector3, to: THREE.Vector3, r1: number, r2 = r1): THREE.Mesh {
+  const dir = to.clone().sub(from);
+  const len = dir.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, len, 12), mat);
+  m.position.copy(from).addScaledVector(dir, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  return m;
+}
+
+const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+
+/**
+ * Statue figurative stylisée (formes du catalogue : thinker, venus, victory, david), ou null pour une forme abstraite.
+ * Repère : pieds à y = 0, face vers +z.
+ */
+function buildFigure(form: string, mat: THREE.Material, s: number): THREE.Group | null {
+  if (!['thinker', 'venus', 'victory', 'david'].includes(form)) return null;
+  const g = new THREE.Group();
+  const head = (at: THREE.Vector3) => {
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.13, 18, 14), mat);
+    h.position.copy(at);
+    h.scale.set(0.9, 1.1, 1);
+    g.add(h);
+  };
+  const torso = (hip: THREE.Vector3, chest: THREE.Vector3) => g.add(limb(mat, hip, chest, 0.17, 0.21));
+  const drape = (top: number, bottom: number, rTop: number, rBottom: number) => {
+    const d = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBottom, top - bottom, 18, 1, true), mat);
+    (d.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+    d.position.y = (top + bottom) / 2;
+    g.add(d);
+  };
+
+  switch (form) {
+    case 'thinker': {
+      // assis sur un rocher, penché en avant, le menton sur la main
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.42, 0), mat);
+      rock.position.set(0, 0.3, -0.1);
+      rock.scale.set(1.1, 0.75, 1);
+      g.add(rock);
+      const hip = v(0, 0.62, -0.1);
+      const chest = v(0, 1.12, 0.12);
+      torso(hip, chest);
+      head(v(0, 1.33, 0.26));
+      for (const sx of [-1, 1]) {
+        const knee = v(sx * 0.16, 0.66, 0.38);
+        g.add(limb(mat, v(sx * 0.12, 0.6, -0.05), knee, 0.09, 0.075));
+        g.add(limb(mat, knee, v(sx * 0.16, 0.05, 0.42), 0.07, 0.055));
+      }
+      // bras droit : coude sur le genou, main sous le menton
+      g.add(limb(mat, v(0.2, 1.08, 0.1), v(0.14, 0.72, 0.36), 0.06));
+      g.add(limb(mat, v(0.14, 0.72, 0.36), v(0.03, 1.2, 0.3), 0.055));
+      // bras gauche posé sur la cuisse
+      g.add(limb(mat, v(-0.2, 1.08, 0.1), v(-0.2, 0.76, 0.3), 0.06));
+      g.add(limb(mat, v(-0.2, 0.76, 0.3), v(-0.12, 0.7, 0.55), 0.055));
+      break;
+    }
+    case 'venus': {
+      // debout, sans bras, drapé sur les hanches
+      drape(1.0, 0.0, 0.2, 0.32);
+      const hip = v(0, 0.95, 0);
+      const chest = v(0.03, 1.45, 0);
+      torso(hip, chest);
+      head(v(0.05, 1.66, 0.02));
+      // moignons d'épaules
+      for (const sx of [-1, 1]) g.add(limb(mat, v(sx * 0.18, 1.42, 0), v(sx * 0.22, 1.3, 0), 0.07, 0.06));
+      break;
+    }
+    case 'victory': {
+      // sans tête, grandes ailes déployées, drapé au vent
+      drape(1.05, 0.0, 0.2, 0.36);
+      const hip = v(0, 0.98, 0);
+      const chest = v(0, 1.48, 0.05);
+      torso(hip, chest);
+      for (const sx of [-1, 1]) {
+        const wing = new THREE.Shape();
+        wing.moveTo(0, 0);
+        wing.quadraticCurveTo(0.5, 0.25, 0.95, 0.9);
+        wing.quadraticCurveTo(0.6, 0.55, 0.45, 0.05);
+        wing.lineTo(0, 0);
+        const w = new THREE.Mesh(new THREE.ExtrudeGeometry(wing, { depth: 0.05, bevelEnabled: false }), mat);
+        w.position.set(sx * 0.1, 1.25, -0.12);
+        w.scale.x = sx;
+        w.rotation.y = sx * -0.5;
+        g.add(w);
+      }
+      break;
+    }
+    case 'david': {
+      // debout en contrapposto, bras gauche levé vers l'épaule
+      const hip = v(0.03, 1.0, 0);
+      const chest = v(0, 1.55, 0);
+      torso(hip, chest);
+      head(v(-0.02, 1.78, 0.02));
+      g.add(limb(mat, v(0.1, 0.98, 0), v(0.13, 0.5, 0.02), 0.09, 0.075));
+      g.add(limb(mat, v(0.13, 0.5, 0.02), v(0.14, 0.04, 0), 0.07, 0.055));
+      g.add(limb(mat, v(-0.1, 0.98, 0), v(-0.2, 0.52, -0.04), 0.09, 0.075));
+      g.add(limb(mat, v(-0.2, 0.52, -0.04), v(-0.26, 0.04, -0.08), 0.07, 0.055));
+      g.add(limb(mat, v(0.21, 1.5, 0), v(0.25, 1.15, 0.02), 0.06));
+      g.add(limb(mat, v(0.25, 1.15, 0.02), v(0.24, 0.85, 0.04), 0.055));
+      g.add(limb(mat, v(-0.21, 1.5, 0), v(-0.3, 1.22, 0.12), 0.06));
+      g.add(limb(mat, v(-0.3, 1.22, 0.12), v(-0.16, 1.5, 0.12), 0.055));
+      break;
+    }
+  }
+  g.scale.setScalar(s);
+  return g;
 }

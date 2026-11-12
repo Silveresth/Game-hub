@@ -22,16 +22,26 @@ const STAIRS = [3, 3]; // loin des emplacements muraux : l'invite de l'escalier 
 // - socles au sol pour la terrasse (étage 3) : 2 socles par salle de terrasse (total 18 socles pour statues).
 const slots = [];
 const r = (n) => Math.round(n * 1000) / 1000;
-for (let floor = 0; floor < 3; floor++) {
-  rooms.forEach(([i, j], k) => {
-    const cx = i * CELL;
-    const cz = j * CELL;
-    for (const o of [-3, 3]) slots.push([r(cx - W), r(cz + o), r(Math.PI / 2), floor]);
-    for (const o of [-3, 3]) slots.push([r(cx + W), r(cz + o), r(-Math.PI / 2), floor]);
-    for (const o of [-3.75, 3.75]) slots.push([r(cx + o), r(cz + W), r(Math.PI), floor]);
-    if (k !== 0 || floor > 0) for (const o of [-3.75, 3.75]) slots.push([r(cx + o), r(cz - W), 0, floor]);
-  });
+/** Emplacements muraux d'une salle, dans l'ordre : mur gauche, mur droit, fond, puis mur avant. */
+function roomSlots(i, j, k, floor) {
+  const cx = i * CELL;
+  const cz = j * CELL;
+  const out = [];
+  for (const o of [-3, 3]) out.push([r(cx - W), r(cz + o), r(Math.PI / 2), floor]);
+  for (const o of [-3, 3]) out.push([r(cx + W), r(cz + o), r(-Math.PI / 2), floor]);
+  for (const o of [-3.75, 3.75]) out.push([r(cx + o), r(cz + W), r(Math.PI), floor]);
+  if (k !== 0 || floor > 0) for (const o of [-3.75, 3.75]) out.push([r(cx + o), r(cz - W), 0, floor]);
+  return out;
 }
+
+// Rez-de-chaussée : l'ordre suit les niveaux du catalogue (4, 10, 22, 34, 52 emplacements pour 1, 2, 4, 6, 9 salles),
+// pour que chaque salle ouverte ait ses emplacements : 4 dans la salle d'entrée, puis 6 dans chaque nouvelle salle.
+// Les emplacements restants (fond de l'entrée, mur avant des autres salles) s'ouvrent avec le 1er étage (niveau 6).
+const ground = rooms.map(([i, j], k) => roomSlots(i, j, k, 0));
+const firstPerRoom = (k) => (k === 0 ? 4 : 6);
+ground.forEach((list, k) => slots.push(...list.slice(0, firstPerRoom(k))));
+ground.forEach((list, k) => slots.push(...list.slice(firstPerRoom(k))));
+for (let floor = 1; floor < 3; floor++) rooms.forEach(([i, j], k) => slots.push(...roomSlots(i, j, k, floor)));
 
 // Étage 3 : Toit-terrasse (socles pour statues au sol)
 // 2 socles par dalle de 12×12 m, orientés vers le sud (rotation 0)

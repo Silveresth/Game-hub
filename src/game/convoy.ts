@@ -3,18 +3,11 @@ import { Label } from './labels';
 import { CATALOG, artUrl, money, perSec, incomeOf, work } from './catalog';
 import { ROAD } from './district';
 import type { ConvoyItem } from './api';
+import { artTextureByUrl, aspectOf } from './textures';
 
-const loader = new THREE.TextureLoader();
-const textures = new Map<string, THREE.Texture>();
+/** Texture d'une œuvre du catalogue (cache partagé avec les tableaux des musées, voir textures.ts). */
 export function artTexture(id: string): THREE.Texture {
-  let t = textures.get(id);
-  if (!t) {
-    t = loader.load(artUrl(id));
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 8;
-    textures.set(id, t);
-  }
-  return t;
+  return artTextureByUrl(artUrl(id)).tex;
 }
 
 const FRAME_COLORS: Record<string, number> = {
@@ -180,6 +173,19 @@ class Truck {
     matBack.map = tex;
     matBack.needsUpdate = true;
 
+    // proportions réelles de l'œuvre dans la vitrine (2,8 × 1,9 m au plus) : plus de toile étirée
+    const fit = (t: THREE.Texture) => {
+      if (this.item !== item) return;
+      const a = aspectOf(t);
+      const w = Math.min(2.8, 1.9 * a);
+      const h = w / a;
+      for (const c of [this.canvasFront, this.canvasBack]) c.scale.set(w / 2.8, h / 1.9, 1);
+      this.frame.scale.set((w + 0.3) / 3.1, (h + 0.3) / 2.2, 1);
+    };
+    const entry = artTextureByUrl(artUrl(item.workId));
+    if ((entry.tex.image as HTMLImageElement | undefined)?.complete) fit(entry.tex);
+    else void entry.ready.then(fit);
+
     const frameMat = this.frame.material as THREE.MeshStandardMaterial;
     frameMat.color.setHex(FRAME_COLORS[item.frame] ?? 0xffd36b);
     frameMat.metalness = item.frame === 'normal' ? 0.3 : 0.95;
@@ -198,7 +204,8 @@ class Truck {
     const item = this.item!;
     const wk = work(item.workId);
     const rar = CATALOG.rarities[item.rarity];
-    const tag = item.frame === 'normal' ? rar.label : `${rar.label} · ${CATALOG.frames[item.frame].label}`;
+    const EVENT_TAG: Record<string, string> = { golden: '✨ HEURE DORÉE', rare: '💎 TRÉSORS RARES', soldes: '🏷 SOLDES −30 %' };
+    const tag = (item.frame === 'normal' ? rar.label : `${rar.label} · ${CATALOG.frames[item.frame].label}`) + (item.event ? ` · ${EVENT_TAG[item.event] ?? ''}` : '');
     const visible = !item.sold;
     this.canvasFront.visible = this.canvasBack.visible = this.frame.visible = visible;
 

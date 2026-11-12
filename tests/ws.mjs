@@ -26,7 +26,7 @@ async function newPlayer(name) {
   return { id: r.id, token: r.token, name };
 }
 
-function connect(auth) {
+function connect(auth, join = null) {
   const ws = new WebSocket(base.replace('http', 'ws') + '/ws');
   const inbox = [];
   const waiters = [];
@@ -43,7 +43,7 @@ function connect(auth) {
     setTimeout(() => rej(new Error(`délai dépassé en attendant ${pred.toString()}`)), ms);
   });
   return new Promise((res) => ws.on('open', () => {
-    ws.send(JSON.stringify({ t: 'auth', id: auth.id, token: auth.token }));
+    ws.send(JSON.stringify({ t: 'auth', id: auth.id, token: auth.token, ...(join ? { join } : {}) }));
     res({ ws, wait, inbox, send: (m) => ws.send(JSON.stringify(m)) });
   }));
 }
@@ -70,6 +70,49 @@ if ((await http('state', null, A)).artworks.length < 2) {
 await http('dev/age', {}, A);
 const stateA = await http('state', null, A);
 ok(stateA.artworks.length >= 2 && !stateA.shielded, `A possède ${stateA.artworks.length} œuvre(s), bouclier levé`);
+
+// --- Régression : une clé spéciale (__proto__, constructor…) ne doit jamais rendre le solde NaN ---
+{
+  const X = await newPlayer('Musée Proto');
+  const tries = [
+    ['security', { item: 'guards', tier: '__proto__' }],
+    ['security', { item: 'guards', tier: 'constructor' }],
+    ['security', { item: 'vitrine', slot: '__proto__' }],
+    ['security', { item: 'vitrine', slot: 'constructor' }],
+    ['blackmarket', { tool: '__proto__' }],
+    ['blackmarket', { tool: 'toString' }],
+    ['blackmarket', { tool: 'repro', workId: '__proto__' }],
+  ];
+  for (const [route, body] of tries) await http(route, body, X);
+  const sx = await http('state', null, X);
+  ok(Number.isFinite(sx.coins) && sx.coins === 500, `clés spéciales refusées, solde intact (${sx.coins})`);
+}
+
+// --- Boutique, récompense du jour, Renaissance, événements du convoi ---
+{
+  const Y = await newPlayer('Musée Boutique');
+  await http('dev/grant', { coins: 1_000_000 }, Y);
+  const u1 = await http('upgrade', { id: 'speed' }, Y);
+  ok(u1.state?.upgrades.speed.level === 1 && u1.state.coins === 1_000_500 - 2000, `boutique : baskets de sprint niveau 1 (${u1.error ?? u1.price})`);
+  const badUp = await http('upgrade', { id: '__proto__' }, Y);
+  ok(/inconnue/.test(badUp.error ?? ''), 'amélioration inconnue refusée');
+  const d1 = await http('daily', {}, Y);
+  ok(d1.reward >= 500 && d1.streak === 1, `récompense du jour : ${d1.reward} (série ${d1.streak})`);
+  const d2 = await http('daily', {}, Y);
+  ok(/déjà/.test(d2.error ?? ''), 'une seule récompense par jour');
+  await http('dev/yesterday', {}, Y);
+  const d3 = await http('daily', {}, Y);
+  ok(d3.streak === 2, `la série continue le lendemain (jour ${d3.streak})`);
+  const rb0 = await http('rebirth', {}, Y);
+  ok(/niveau/.test(rb0.error ?? ''), `Renaissance refusée trop tôt : « ${rb0.error} »`);
+  await http('dev/grant', { coins: 200_000_000 }, Y);
+  for (let i = 0; i < 4; i++) await http('expand', {}, Y);
+  const rb = await http('rebirth', {}, Y);
+  ok(rb.rebirths === 1 && rb.state?.level === 1 && rb.state.coins === 500 && rb.state.incomeMult === 1.5 && rb.state.upgrades.speed.level === 1,
+    `Renaissance : niveau 1, 500 pièces, revenu ×${rb.state?.incomeMult}, améliorations gardées`);
+  const stats = await fetch(base + '/api/stats').then((r) => r.json());
+  ok(!!(stats.event?.current || stats.event?.next), `événement du convoi annoncé (${(stats.event?.current ?? stats.event?.next)?.label})`);
+}
 
 // --- B : petit musée ---
 const B = await newPlayer('Musée Bêta');
@@ -408,16 +451,20 @@ cD2.ws.close();
   await http('dev/grant', { coins: 50_000_000_000 }, H);
   const s8 = (await http('expand', {}, H)).state;
   ok(s8.level === 8 && s8.floors === 4 && s8.slots === 232, `niveau 8 : toit-terrasse débloqué (${s8.floors} étages, ${s8.slots} places)`);
-  // Réorganisation : déplacer l'œuvre sur un socle de terrasse (slot 214)
-  const mvTerrace = await http('move', { uid: art.uid, slot: 214 }, H);
-  ok(mvTerrace.state?.artworks.find((a) => a.uid === art.uid)?.slot === 214, 'œuvre déplacée sur le toit-terrasse (slot 214)');
-  // Achat d'une 2e œuvre et interversion (swap)
+  // Un tableau ne va jamais sur un socle de statue
+  const paintingOnPlinth = await http('move', { uid: art.uid, slot: 214 }, H);
+  ok(/statues/.test(paintingOnPlinth.error ?? ''), 'un tableau est refusé sur un socle de statue');
+  // Achat d'une 2e œuvre et interversion (swap) de deux tableaux
   await http('dev/grant', { coins: 10_000_000 }, H);
   const cv2 = await http('convoy', null, H);
-  const bought2 = await http('buy', { window: cv2.items[0].window }, H);
+  const bought2 = await http('buy', { window: cv2.items.find((i) => !i.sold && i.window <= Math.floor(cv2.serverTime / 20000)).window }, H);
   const art2 = bought2.artwork;
-  const swapped = await http('move', { uid: art2.uid, slot: 214 }, H);
-  ok(swapped.swapped && swapped.state?.artworks.find((a) => a.uid === art2.uid)?.slot === 214, 'interversion (swap) d’œuvres réussie');
+  const swapped = await http('move', { uid: art2.uid, slot: 75 }, H);
+  ok(swapped.swapped && swapped.state?.artworks.find((a) => a.uid === art2.uid)?.slot === 75, 'interversion (swap) d’œuvres réussie');
+  // Une statue va sur un socle du toit-terrasse
+  await http('dev/mythic', { uid: art.uid, workId: 'penseur' }, H);
+  const mvTerrace = await http('move', { uid: art.uid, slot: 214 }, H);
+  ok(mvTerrace.state?.artworks.find((a) => a.uid === art.uid)?.slot === 214, 'statue déplacée sur le toit-terrasse (slot 214)');
 
   // Personnalisation du décor d'une salle (/api/game/decor)
   const decorRes = await http('decor', { room: 0, theme: 'zen' }, H);
@@ -425,10 +472,47 @@ cD2.ws.close();
 
   // Classements par pays et filtrage
   await http('name', { name: 'Musée Tokyo', country: 'JP' }, H);
-  const lbJP = await fetch('http://127.0.0.1:3001/api/game/leaderboard?board=value&country=JP').then((r) => r.json());
+  const lbJP = await fetch(base + '/api/game/leaderboard?board=value&country=JP').then((r) => r.json());
   ok(lbJP.some((x) => x.name === 'Musée Tokyo' && x.country === 'JP' && x.flag === '🇯🇵'), 'classement filtré par pays (JP)');
-  const lbNations = await fetch('http://127.0.0.1:3001/api/game/leaderboard?board=countries').then((r) => r.json());
+  const lbNations = await fetch(base + '/api/game/leaderboard?board=countries').then((r) => r.json());
   ok(lbNations.some((x) => x.country === 'JP' && x.name === 'Japon'), 'classement cumulé des nations');
+}
+
+// --- Social : invitation, discussion, émotes, relais de la voix ---
+{
+  const Ho = await newPlayer('Musée Hôte');
+  const cHo = await connect(Ho);
+  const wHo = await cHo.wait((m) => m.t === 'welcome');
+  const code = (await http('state', null, Ho)).inviteCode;
+  ok(typeof code === 'string' && code.length >= 6, `code d'invitation (${code})`);
+  const Fr = await newPlayer('Musée Ami');
+  const cFr = await connect(Fr, code);
+  const wFr = await cFr.wait((m) => m.t === 'welcome');
+  ok(wFr.district === wHo.district && wFr.invite?.status === 'ok', `invitation : l'ami arrive dans le quartier n°${wFr.district} (${wFr.invite?.status})`);
+  const Lost = await newPlayer('Musée Perdu');
+  const cLost = await connect(Lost, 'inconnu00');
+  ok((await cLost.wait((m) => m.t === 'welcome')).invite?.status === 'unknown', 'code d’invitation inconnu signalé');
+  cLost.ws.close();
+  cFr.send({ t: 'chat', text: '  Salut   connard !  ' });
+  const said = await cHo.wait((m) => m.t === 'chat' && m.id === Fr.id);
+  ok(said.text === 'Salut ******* !' && said.name === 'Musée Ami', `discussion relayée et filtrée : « ${said.text} »`);
+  for (let i = 0; i < 5; i++) cFr.send({ t: 'chat', text: `message ${i}` });
+  ok(!!(await cFr.wait((m) => m.t === 'chat-error', 3000).catch(() => null)), 'anti-spam de la discussion');
+  cFr.send({ t: 'emote', kind: 'wave' });
+  ok((await cHo.wait((m) => m.t === 'emote' && m.id === Fr.id)).kind === 'wave', 'émote relayée');
+  cFr.send({ t: 'rtc', to: Ho.id, data: { type: 'offer', sdp: 'x' } });
+  await sleep(400);
+  ok(!cHo.inbox.some((m) => m.t === 'rtc'), 'voix : rien n’est relayé tant que le micro est coupé');
+  cFr.send({ t: 'voice', on: true });
+  cHo.send({ t: 'voice', on: true });
+  await sleep(200);
+  cFr.send({ t: 'rtc', to: Ho.id, data: { type: 'offer', sdp: 'x' } });
+  const rtc = await cHo.wait((m) => m.t === 'rtc', 3000).catch(() => null);
+  ok(rtc?.from === Fr.id && rtc.data.type === 'offer', 'voix : signalisation relayée entre deux micros actifs');
+  const snapV = await cHo.wait((m) => m.t === 'snap' && m.players.some((p) => p.id === Fr.id && p.voice), 3000).catch(() => null);
+  ok(!!snapV, 'les autres voient qui a le micro activé');
+  cFr.ws.close();
+  cHo.ws.close();
 }
 
 // --- Musée en sommeil : A se déconnecte, son musée reste visible pour B ---

@@ -26,17 +26,9 @@ Caddy obtient le certificat HTTPS tout seul. Le jeu répond ensuite sur `https:/
 
 Ne supprimez jamais `vapid.json` dans le volume : sans lui, tous les abonnements aux notifications sont perdus.
 
-## 2 bis. Variante sans serveur à gérer : Render
+## 2 bis. Variante sans serveur à gérer : Vercel + Render + Neon
 
-Si vous préférez ne pas administrer de VPS, Render (https://render.com) héberge le jeu à partir du `Dockerfile` et du fichier `render.yaml` du projet. Comptez 7 $/mois (palier Starter) : le palier gratuit s'endort après 15 min sans visite et n'a pas de disque persistant, donc il ne convient pas.
-
-1. Mettez le projet sur GitHub (ou GitLab).
-2. Sur Render : *New → Blueprint*, choisissez le dépôt. Render lit `render.yaml` et crée le service avec son disque de 1 Go.
-3. Pendant la création, Render demande les variables marquées « à remplir » : au minimum `SAM_VAPID_SUBJECT` (par exemple `mailto:votre@adresse`). Les autres peuvent rester vides.
-4. Après le premier déploiement (5 à 10 min), le jeu est sur `https://steal-a-masterpiece.onrender.com`. Le jeton admin est généré automatiquement : lisez-le dans *Environment → SAM_ADMIN_TOKEN*.
-5. Pour votre propre domaine : *Settings → Custom Domains*, puis l'enregistrement DNS indiqué. Le HTTPS est automatique.
-
-Chaque `git push` redéploie. Les données restent sur le disque. Pour les sauvegarder : *Disks → Snapshots* (Render en fait automatiquement chaque jour).
+Page d'accueil sur Vercel, jeu et API sur Render, base PostgreSQL sur Neon (aucun disque à gérer) : toutes les étapes sont dans [DEPLOIEMENT.md](DEPLOIEMENT.md).
 
 Ne changez pas `numInstances: 1` : le jeu garde les quartiers et les enchères en mémoire, il ne peut tourner qu'en un seul exemplaire.
 

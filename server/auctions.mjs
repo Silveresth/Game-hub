@@ -7,8 +7,6 @@
 //  - des enchérisseurs PNJ montent jusqu'à 60–95 % de l'estimation ;
 //  - l'œuvre adjugée arrive directement dans le musée du gagnant (ou dans sa réserve).
 import { createHash, randomBytes } from 'node:crypto';
-import { readFile, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 
 const HALF_HOUR = 30 * 60_000;
 export const TIMING = { PRESENT_MS: 5000, BID_MS: 20_000, SNIPE_MS: 10_000, SOLD_MS: 4500, SOON_MS: 15 * 60_000, STALE_MS: 10 * 60_000 };
@@ -49,14 +47,13 @@ function seeded(text) {
   };
 }
 
-export async function createAuctions({ game, dataDir, devMode = false }) {
+export async function createAuctions({ game, db, devMode = false }) {
   const catalog = game.catalog;
-  const file = join(dataDir, 'sales.json');
   let saved = { admin: [], done: [], results: [] };
   try {
-    saved = { ...saved, ...JSON.parse(await readFile(file, 'utf8')) };
-  } catch {
-    /* premier lancement */
+    saved = { ...saved, ...((await db.kvGet('sales')) ?? {}) };
+  } catch (e) {
+    console.error('Lecture des ventes impossible :', e.message);
   }
   /** Ventes admin abuse : { id, kind:'abuse', label, at, lots:[{workId, frame}], announced, createdAt } */
   const admin = saved.admin;
@@ -67,8 +64,11 @@ export async function createAuctions({ game, dataDir, devMode = false }) {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       const data = { admin, done: [...done].slice(-200), results: results.slice(-50) };
-      await writeFile(file + '.tmp', JSON.stringify(data));
-      await rename(file + '.tmp', file);
+      try {
+        await db.kvSet('sales', data);
+      } catch (e) {
+        console.error('Enregistrement des ventes impossible :', e.message);
+      }
     }, 300);
   };
 
@@ -204,6 +204,10 @@ export async function createAuctions({ game, dataDir, devMode = false }) {
       save();
       return;
     }
+    // marquée « faite » dès son lancement : si le serveur redémarre en pleine vente, elle n'est pas rejouée
+    // (les lots déjà adjugés ne repasseraient pas une deuxième fois)
+    done.add(sale.id);
+    save();
     cur = { sale, lots, index: 0 };
     startLot(now);
     io.broadcast({ t: 'sale', phase: 'start', id: sale.id, label: sale.label, kind: sale.kind, lots: lots.length, workId: lots[0].workId });
@@ -264,6 +268,7 @@ export async function createAuctions({ game, dataDir, devMode = false }) {
     cur.phaseEnd = now + TIMING.SOLD_MS;
     if (outcome.sold) {
       results.push({ at: now, sale: cur.sale.label, workId: lot.workId, frame: lot.frame, price: outcome.price, winner: outcome.name, npc: outcome.npc });
+      if (results.length > 50) results.splice(0, results.length - 50); // la mémoire ne grossit plus sans fin
       save();
     }
     io.broadcast({ t: 'sale', phase: 'sold', label: cur.sale.label, workId: lot.workId, frame: lot.frame, sold: outcome.sold, price: outcome.price ?? 0, winner: outcome.name ?? null, npc: !!outcome.npc, winnerId: outcome.id ?? null });

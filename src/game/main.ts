@@ -3,19 +3,22 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { mountLiveBar, setupPwa } from '../shared/live';
 import * as api from './api';
-import type { ConvoyItem, GuardTier, InboxItem, PlayerState, ToolId } from './api';
-import { Character, loadCharacterModel } from './character';
-import { AUCTION_DOOR, BLACK_MARKET, District, type Box, type Circle } from './district';
+import type { ConvoyItem, GuardTier, InboxItem, PlayerState, ToolId, UpgradeId } from './api';
+import { Character, loadCharacterModel, loadCrowdModels } from './character';
+import { AUCTION_DOOR, BLACK_MARKET, BOUTIQUE, District, type Box, type Circle } from './district';
 import { Guards } from './guards';
 import { AuctionHall } from './auction';
 import { PUSH_CATEGORIES, enablePush, pushSupport } from './push';
 import { mountGoogleButton } from './google';
 import { MuseumView } from './museumView';
-import { FLOOR_H, PLOTS, spawnOf } from './layout';
-import { Net, type PlotInfo, type ServerMsg } from './net';
+import { FLOOR_H, PLOTS, ROOMS, spawnOf } from './layout';
+import { Net, type EmoteKind, type PlotInfo, type ServerMsg } from './net';
+import { ChatUI, EMOTE_ICONS, SpeechBubble } from './chat';
+import { Voice } from './voice';
+import { Label } from './labels';
 import { RemotePlayers } from './remote';
 import { Convoy, artTexture } from './convoy';
-import { Visitors } from './visitors';
+import { Pedestrians, Visitors } from './visitors';
 import { Input } from './input';
 import { Sfx } from './sfx';
 import { CATALOG, incomeOf, money, perSec, work } from './catalog';
@@ -79,6 +82,7 @@ $('qualityBtn').onclick = () => {
     /* stockage indisponible */
   }
   applyQuality();
+  pedestrians.setCount(pedestrianCount());
 };
 applyQuality();
 
@@ -111,6 +115,9 @@ addEventListener('resize', () => {
 const district = new District(scene);
 const convoy = new Convoy(scene);
 const visitors = new Visitors(scene);
+const pedestrians = new Pedestrians(scene);
+/** Passants sur la place : moins nombreux en mode Éco. */
+const pedestrianCount = () => (quality === 'high' ? 10 : 5);
 const remotes = new RemotePlayers(scene);
 const guards = new Guards(scene);
 remotes.hidden = (x, z, f) => hiddenAt(x, z, f);
@@ -124,6 +131,87 @@ const views = new Map<number, MuseumView>();
 let myView: MuseumView | null = null;
 let myPlot = -1;
 const net = new Net(() => api.currentSession());
+
+// ================================================================== social : discussion, émotes, voix, invitations
+
+const chat = new ChatUI();
+const voice = new Voice((m) => net.send(m), () => state?.id ?? '');
+voice.onSpeaking = (id, on) => remotes.setSpeaking(id, on);
+/** Bulle au-dessus de votre personnage (suit sa position à chaque image). */
+const selfAnchor = new THREE.Group();
+scene.add(selfAnchor);
+const selfBubble = new SpeechBubble(selfAnchor, 3.45);
+let districtId = 0;
+let districtMax = 7;
+chat.onSend = (text) => {
+  if (!net.connected) return toast('Pas encore connecté au quartier');
+  net.send({ t: 'chat', text });
+};
+chat.onEmote = (kind: EmoteKind) => {
+  if (!net.connected) return;
+  net.send({ t: 'emote', kind });
+};
+chat.onOpenChange = (open) => {
+  if (open) input.enabled = false;
+  else if (!anyOverlayOpen()) input.enabled = true;
+};
+// lien d'invitation : /game/?join=CODE (le paramètre est retiré de l'adresse une fois lu)
+{
+  const params = new URLSearchParams(location.search);
+  const code = params.get('join');
+  if (code && /^[A-Za-z0-9_-]{4,16}$/.test(code)) net.joinCode = code;
+  if (params.has('join')) history.replaceState(null, '', location.pathname);
+}
+
+// ---------------------------------------------------------------- confettis et gains flottants (moments forts)
+
+const CONFETTI_COLORS = [0xffd36b, 0xff5e62, 0x3d8bff, 0x4cc38a, 0xb46bff, 0xff9f43, 0xffffff];
+const confettiGeo = new THREE.PlaneGeometry(0.14, 0.22);
+const confettiMats = CONFETTI_COLORS.map((c) => new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide }));
+const confettiList: Array<{ m: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3; life: number }> = [];
+function confetti(at: THREE.Vector3, n = 70): void {
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(confettiGeo, confettiMats[i % confettiMats.length]);
+    m.position.copy(at).add(new THREE.Vector3(0, 2.2, 0));
+    scene.add(m);
+    const a = Math.random() * Math.PI * 2;
+    const s = 2 + Math.random() * 4;
+    confettiList.push({ m, v: new THREE.Vector3(Math.cos(a) * s, 6 + Math.random() * 5, Math.sin(a) * s), spin: new THREE.Vector3(Math.random() * 10, Math.random() * 10, 0), life: 2.4 + Math.random() });
+  }
+}
+const floaters: Array<{ label: Label; life: number }> = [];
+/** Texte qui s'élève et s'efface (gain encaissé, récompense…). */
+function floatText(at: THREE.Vector3, text: string, color = '#ffd36b'): void {
+  const label = new Label(0.9, 512, 130);
+  label.update([{ text, color, size: 76, weight: 900 }]);
+  label.sprite.position.copy(at);
+  scene.add(label.sprite);
+  floaters.push({ label, life: 1.6 });
+}
+function updateCelebrations(dt: number): void {
+  for (const c of [...confettiList]) {
+    c.life -= dt;
+    c.v.y -= 12 * dt;
+    c.v.multiplyScalar(1 - dt * 0.8); // freinage de l'air : ils flottent en retombant
+    c.m.position.addScaledVector(c.v, dt);
+    c.m.rotation.x += c.spin.x * dt;
+    c.m.rotation.y += c.spin.y * dt;
+    if (c.life <= 0 || c.m.position.y < 0) {
+      c.m.removeFromParent();
+      confettiList.splice(confettiList.indexOf(c), 1);
+    }
+  }
+  for (const f of [...floaters]) {
+    f.life -= dt;
+    f.label.sprite.position.y += dt * 1.1;
+    (f.label.sprite.material as THREE.SpriteMaterial).opacity = Math.min(1, f.life / 0.6);
+    if (f.life <= 0) {
+      f.label.sprite.removeFromParent();
+      f.label.dispose();
+      floaters.splice(floaters.indexOf(f), 1);
+    }
+  }
+}
 
 // ================================================================== état
 
@@ -184,6 +272,9 @@ function applyState(s: PlayerState): void {
   renderToolbar();
   if ($('security').classList.contains('open')) renderSecurity();
   if ($('market').classList.contains('open')) renderMarket();
+  if ($('shop').classList.contains('open')) renderShop();
+  $('dailyBtn').hidden = !s.daily.claimable;
+  $('dailyBtn').title = s.daily.claimable ? `Récompense du jour : +${money(s.daily.reward)} (série ${s.daily.streak})` : '';
 }
 
 /** Caisse affichée : extrapolée entre deux synchros (au rythme « en ligne »). */
@@ -263,6 +354,7 @@ function renderTimers(): void {
   if (guardsWere && guardsLeft <= 0 && playing) banner('Vos gardes sont partis', 'Votre musée n’est plus surveillé : G pour réembaucher');
   guardsWere = guardsLeft > 0;
   $('secBtn').classList.toggle('warn', expiring || (!state.shielded && !parts.length));
+  renderEvent(now);
   // l'objectif se range sous le porte-monnaie, quelle que soit sa hauteur
   $('quest').style.top = `${Math.round($('wallet').getBoundingClientRect().bottom + 10)}px`;
 }
@@ -274,21 +366,237 @@ let crowbarArmed = false;
 
 let decorRoomIndex: number | null = null;
 
-function openOverlay(id: 'security' | 'market' | 'decor'): void {
+/** Panneaux superposés (un seul ouvert à la fois). */
+const OVERLAYS = ['security', 'market', 'help', 'boards', 'decor', 'shop', 'social'] as const;
+const anyOverlayOpen = () => OVERLAYS.some((id) => $(id).classList.contains('open')) || $('welcome').classList.contains('open');
+
+function openOverlay(id: 'security' | 'market' | 'decor' | 'shop' | 'social'): void {
   if (!state) return;
+  if (chat.isOpen) chat.close();
   $(id).classList.add('open');
   input.enabled = false;
   if (id === 'security') renderSecurity();
   else if (id === 'market') renderMarket();
   else if (id === 'decor') renderDecor();
+  else if (id === 'shop') renderShop();
+  else if (id === 'social') renderSocial();
 }
 function closeOverlays(): void {
-  for (const id of ['security', 'market', 'help', 'boards', 'decor']) $(id).classList.remove('open');
+  for (const id of OVERLAYS) $(id).classList.remove('open');
   if (!$('welcome').classList.contains('open')) input.enabled = true;
 }
 document.querySelectorAll<HTMLElement>('[data-close]').forEach((b) => (b.onclick = closeOverlays));
-for (const id of ['security', 'market', 'boards', 'decor']) $(id).addEventListener('pointerdown', (e) => e.target === $(id) && closeOverlays());
+for (const id of ['security', 'market', 'boards', 'decor', 'shop', 'social']) $(id).addEventListener('pointerdown', (e) => e.target === $(id) && closeOverlays());
+
+// ---------------------------------------------------------------- panneau « Amis et quartier »
+
+const inviteLink = () => `${location.origin}/game/?join=${state?.inviteCode ?? ''}`;
+function renderSocial(): void {
+  if (!state) return;
+  const others = remotes.list();
+  $('districtInfo').textContent = districtId ? `Quartier n°${districtId} · ${others.length + 1}/${districtMax} joueurs en ligne` : 'Connexion au quartier…';
+  $('inviteCode').textContent = state.inviteCode;
+  $('shareInvite').hidden = !('share' in navigator);
+  const list = $('playerList');
+  list.innerHTML = '';
+  const row = (name: string, color: string, extra: string, id?: string) => {
+    const li = document.createElement('li');
+    const dot = document.createElement('i');
+    dot.style.background = color;
+    const nm = document.createElement('span');
+    nm.textContent = `${name}${extra}`;
+    li.append(dot, nm);
+    if (id) {
+      // masquer un joueur : on ne voit plus ses messages et on ne l'entend plus
+      const b = document.createElement('button');
+      const muted = chat.blocked.has(id);
+      b.textContent = muted ? 'Masqué' : 'Masquer';
+      b.className = muted ? 'on' : '';
+      b.onclick = () => {
+        if (chat.blocked.has(id)) {
+          chat.blocked.delete(id);
+          voice.blocked.delete(id);
+        } else {
+          chat.blocked.add(id);
+          voice.blocked.add(id);
+        }
+        renderSocial();
+      };
+      li.appendChild(b);
+    }
+    list.appendChild(li);
+  };
+  row(`${state.name} (vous)`, state.color, voice.enabled ? ' 🎙' : '');
+  for (const p of others) row(p.name, p.color, p.voice ? ' 🎙' : '', p.id);
+  $('voiceState').textContent = !Voice.supported() ? 'Non disponible dans ce navigateur' : voice.enabled ? (voice.muted ? 'Micro coupé (V)' : `Micro actif · ${voice.count} joueur${voice.count > 1 ? 's' : ''} entendu${voice.count > 1 ? 's' : ''}`) : 'Micro désactivé';
+  $('voiceToggle').textContent = voice.enabled ? 'Désactiver le micro' : 'Activer le micro';
+}
+$('socialBtn').onclick = () => openOverlay('social');
+$('copyInvite').onclick = () => {
+  void navigator.clipboard?.writeText(inviteLink()).then(
+    () => toast('🔗 Lien d’invitation copié : envoyez-le à un ami !'),
+    () => toast(`Votre lien : ${inviteLink()}`),
+  );
+};
+$('shareInvite').onclick = () => {
+  void (navigator as Navigator & { share?: (d: ShareData) => Promise<void> }).share?.({ title: 'Steal a Masterpiece', text: `Viens dans mon quartier : ${state?.name}`, url: inviteLink() }).catch(() => undefined);
+};
+$('joinForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const raw = $<HTMLInputElement>('joinInput').value.trim();
+  let code = raw;
+  try {
+    code = new URL(raw).searchParams.get('join') ?? raw;
+  } catch {
+    /* pas un lien : c'est le code lui-même */
+  }
+  if (!/^[A-Za-z0-9_-]{4,16}$/.test(code)) return toast('Code d’invitation invalide');
+  if (code === state?.inviteCode) return toast('C’est votre propre code : envoyez-le à un ami !');
+  location.href = `/game/?join=${encodeURIComponent(code)}`;
+});
+
+async function toggleVoice(): Promise<void> {
+  if (!Voice.supported()) return toast('Discussion vocale indisponible dans ce navigateur');
+  if (voice.enabled) {
+    voice.disable();
+    toast('🎙 Discussion vocale désactivée');
+  } else {
+    try {
+      await voice.enable();
+      sfx.whoosh();
+      toast('🎙 Micro activé : les joueurs proches vous entendent (V pour couper)');
+    } catch {
+      sfx.error();
+      toast('Micro refusé ou introuvable : autorisez-le dans les réglages du navigateur');
+    }
+  }
+  renderVoiceBtn();
+  if ($('social').classList.contains('open')) renderSocial();
+}
+function renderVoiceBtn(): void {
+  const b = $('voiceBtn');
+  b.classList.toggle('on', voice.enabled && !voice.muted);
+  b.classList.toggle('muted', voice.enabled && voice.muted);
+  b.textContent = voice.enabled && voice.muted ? '🔇' : '🎙';
+  b.title = voice.enabled ? (voice.muted ? 'Micro coupé (V pour le rétablir)' : 'Micro actif : cliquer pour quitter la discussion vocale') : 'Discussion vocale de proximité : activer le micro';
+}
+$('voiceBtn').onclick = () => void toggleVoice();
+$('voiceToggle').onclick = () => void toggleVoice();
 $('secBtn').onclick = () => openOverlay('security');
+$('shopBtn').onclick = () => openOverlay('shop');
+
+// ---------------------------------------------------------------- boutique, Renaissance, récompense du jour
+
+const UPGRADE_IDS = Object.keys(CATALOG.upgrades) as UpgradeId[];
+/** Valeur lisible d'un palier d'amélioration. */
+function upgradeText(id: UpgradeId, v: number): string {
+  switch (id) {
+    case 'speed': return `+${Math.round(v * 100)} % de vitesse`;
+    case 'lock': return `verrou ${v} s`;
+    case 'vault': return `caisse ${v} h`;
+    case 'gloves': return `décrochage −${Math.round((1 - v) * 100)} %`;
+    case 'luck': return `rares ×${String(v).replace('.', ',')}`;
+  }
+}
+let rebirthArmed = 0;
+
+function renderShop(): void {
+  if (!state) return;
+  const s = state;
+  let html = '<h2>Améliorations</h2>';
+  for (const id of UPGRADE_IDS) {
+    const u = CATALOG.upgrades[id];
+    const cur = s.upgrades[id];
+    const dots = `<span class="lvl">${u.levels.map((_, i) => `<i class="${i < cur.level ? 'on' : ''}"></i>`).join('')}</span>`;
+    const now = cur.value !== null ? ` · actuel : ${upgradeText(id, cur.value)}` : '';
+    const desc = cur.next ? `${u.desc}${now} · prochain : ${upgradeText(id, cur.next.value)}` : `${u.desc}${now} · niveau maximum`;
+    html += offerHtml(`${u.icon} ${u.label}${dots}`, desc, cur.next ? cur.next.price : null, { upgrade: id }, cur.next ? undefined : 'Maximum');
+  }
+  // récompense du jour
+  const d = s.daily;
+  html += `<h2>Récompense du jour <small class="${d.claimable ? '' : 'off'}">série : ${d.streak} jour${d.streak > 1 ? 's' : ''}</small></h2>`;
+  html += offerHtml(`🎁 Jour ${d.day}/${d.days}`, d.claimable ? 'Revenez chaque jour : la récompense grandit avec la série (et avec vos revenus).' : 'Déjà récupérée aujourd’hui : revenez demain pour continuer la série !', d.claimable ? 0 : null, { daily: 1 }, d.claimable ? `+${money(d.reward)}` : 'Demain');
+  // Renaissance
+  const r = s.rebirth;
+  const nextMult = 1 + (s.rebirths + 1) * r.bonus;
+  const armed = performance.now() < rebirthArmed;
+  html += `<div class="rebirth"><b>✨ Renaissance ${s.rebirths ? `· ${s.rebirths} déjà` : ''}</b>
+    <span>Repartez de zéro (musée, œuvres et pièces) et gagnez <strong>revenu ×${String(nextMult).replace('.', ',')}</strong> pour toujours.
+    Vos améliorations de la boutique, vos objectifs et vos records sont conservés.</span>
+    <span class="d">${r.ready ? `Coût : ${money(r.cost)} pièces.` : `Disponible au niveau ${r.minLevel} (rez-de-chaussée complet).`} Revenu actuel ×${String(s.incomeMult).replace('.', ',')}.</span>
+    <button data-rebirth="1" class="${armed ? 'armed' : ''}" ${r.ready && s.coins >= r.cost ? '' : 'disabled'}>${armed ? 'Confirmer : tout recommencer' : `Renaissance · ${money(r.cost)}`}</button></div>`;
+  $('shopBody').innerHTML = html;
+}
+
+$('shopBody').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+  if (!b) return;
+  if (b.dataset.upgrade) {
+    void (async () => {
+      const r = await guarded(() => api.buyUpgrade(b.dataset.upgrade as UpgradeId));
+      if (!r) return;
+      applyState(r.state);
+      sfx.expand();
+      bumpWallet();
+      const u = CATALOG.upgrades[r.id];
+      toast(`${u.icon} ${u.label} niveau ${r.level} : −${money(r.price)} pièces`);
+    })();
+  } else if (b.dataset.daily) void doDaily();
+  else if (b.dataset.rebirth) {
+    if (performance.now() > rebirthArmed) {
+      rebirthArmed = performance.now() + 4000; // deuxième clic pour confirmer
+      renderShop();
+      return;
+    }
+    rebirthArmed = 0;
+    void (async () => {
+      const r = await guarded(() => api.rebirth());
+      if (!r) return;
+      closeOverlays();
+      applyState(r.state);
+      sfx.rare();
+      burstCoins(pos.clone(), 24);
+      confetti(pos, 140);
+      banner(`✨ Renaissance n°${r.rebirths} !`, `Votre revenu est multiplié par ${String(r.incomeMult).replace('.', ',')} pour toujours. À vous de rebâtir !`);
+    })();
+  }
+});
+
+async function doDaily(): Promise<void> {
+  const r = await guarded(() => api.claimDaily());
+  if (!r) return;
+  applyState(r.state);
+  sfx.coin(5);
+  bumpWallet();
+  burstCoins(pos.clone(), 18);
+  confetti(pos, 60);
+  floatText(pos.clone().setY(3.6 + floor * FLOOR_H), `+${money(r.reward)}`);
+  banner(`🎁 +${money(r.reward)} pièces`, `Récompense du jour · série de ${r.streak} jour${r.streak > 1 ? 's' : ''} : revenez demain !`);
+}
+$('dailyBtn').onclick = () => void doDaily();
+
+/** Événement du convoi : affiché dans le porte-monnaie, annoncé au début. */
+let eventSeen = '';
+function renderEvent(now: number): void {
+  if (!state) return;
+  const { current, next } = state.event;
+  const el = $('eventInfo');
+  if (current && current.endsAt > now) {
+    el.textContent = `${current.icon} ${current.label} : encore ${fmtDur(current.endsAt - now)} · ${current.desc}`;
+    el.classList.add('live');
+    const key = `${current.kind}:${current.startsAt}`;
+    if (eventSeen !== key && playing) {
+      eventSeen = key;
+      sfx.rare();
+      banner(`${current.icon} ${current.label} !`, `${current.desc} pendant ${fmtDur(current.endsAt - now)}`);
+    }
+  } else if (next) {
+    el.textContent = `${next.icon} ${next.label} dans ${fmtDur(Math.max(0, next.startsAt - now))}`;
+    el.classList.remove('live');
+    // l'événement vient de commencer : l'état du serveur le confirmera, on le redemande
+    if (next.startsAt <= now) refreshSoon();
+  } else el.textContent = '';
+}
 
 function offerHtml(title: string, desc: string, price: number | null, data: Record<string, string | number>, label?: string): string {
   const attrs = Object.entries(data).map(([k, v]) => `data-${k}="${v}"`).join(' ');
@@ -423,7 +731,8 @@ function renderToolbar(): void {
 function renderDecor(): void {
   if (!state || decorRoomIndex === null) return;
   const currentThemes: Record<string, string> = state.roomThemes ?? {};
-  const currentTheme = currentThemes[decorRoomIndex] ?? 'classic';
+  // sans choix du joueur, chaque salle garde l'ambiance d'origine du plan (layout.json)
+  const currentTheme = currentThemes[decorRoomIndex] ?? ROOMS[decorRoomIndex % ROOMS.length][2];
   $('decorTitle').textContent = `Décor de la salle #${decorRoomIndex + 1}`;
   const themesList: Array<{ id: string; label: string; desc: string }> = [
     { id: 'classic', label: 'Classique', desc: 'Boiseries, tapisseries damas rouge rubis et parquet chevrons traditionnel.' },
@@ -437,7 +746,7 @@ function renderDecor(): void {
     html += offerHtml(
       t.label,
       t.desc,
-      isCurrent ? null : 5000,
+      isCurrent ? null : CATALOG.decorCost,
       { room: decorRoomIndex, theme: t.id },
       isCurrent ? 'Ambiance actuelle' : undefined,
     );
@@ -474,10 +783,20 @@ function useTool(id: ToolId): void {
 addEventListener('keydown', (e) => {
   if (!playing || (e.target as HTMLElement)?.tagName === 'INPUT') return;
   const currentRoom = myView?.contains(pos, floor) ? myView.roomIndexOf(pos, floor) : null;
-  const anyOpen = ['security', 'market', 'welcome', 'help', 'boards', 'decor'].some((id) => $(id).classList.contains('open'));
+  const anyOpen = anyOverlayOpen();
   if (e.code === 'KeyG' && !e.repeat) {
     if ($('security').classList.contains('open')) closeOverlays();
     else if (!anyOpen) openOverlay('security');
+  } else if ((e.code === 'Enter' || e.code === 'NumpadEnter') && !e.repeat && !anyOpen && !hall.active) {
+    e.preventDefault();
+    chat.open();
+  } else if (e.code === 'KeyV' && !e.repeat && voice.enabled) {
+    voice.setMuted(!voice.muted);
+    renderVoiceBtn();
+    toast(voice.muted ? '🔇 Micro coupé (V pour le rétablir)' : '🎙 Micro rétabli');
+  } else if (e.code === 'KeyB' && !e.repeat) {
+    if ($('shop').classList.contains('open')) closeOverlays();
+    else if (!anyOpen) openOverlay('shop');
   } else if (e.code === 'KeyT' && !e.repeat) {
     if ($('decor').classList.contains('open')) closeOverlays();
     else if (!anyOpen && currentRoom !== null) {
@@ -485,8 +804,10 @@ addEventListener('keydown', (e) => {
       openOverlay('decor');
     }
   }
-  const n = /^Digit([1-5])$/.exec(e.code);
-  if (n && !anyOpen && !e.repeat) useTool(TOOL_IDS[Number(n[1]) - 1]);
+  // une touche par outil (1 à 6), pavé numérique compris
+  const n = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  const tool = n ? TOOL_IDS[Number(n[1]) - 1] : undefined;
+  if (tool && !anyOpen && !e.repeat) useTool(tool);
 });
 
 // ---------------------------------------------------------------- effets : fumigène, leurre
@@ -588,6 +909,12 @@ addEventListener('pointerdown', () => sfx.unlock());
 addEventListener('keydown', (e) => {
   sfx.unlock();
   if (e.code === 'Escape') {
+    // 1. un panneau ouvert se ferme d'abord (sans toucher à l'œuvre que l'on tient en mains)
+    if (OVERLAYS.some((id) => $(id).classList.contains('open'))) {
+      closeOverlays();
+      return;
+    }
+    // 2. puis l'œuvre tenue en mains (déplacement ou achat à accrocher)
     if (reorgSelected) {
       if (myView && reorgSelected.uid) myView.hiddenUid = null;
       setCarry(null);
@@ -595,7 +922,15 @@ addEventListener('keydown', (e) => {
       toast('Déplacement annulé');
       return;
     }
-    const anyOpen = ['security', 'market', 'help', 'boards', 'decor'].some((id) => $(id).classList.contains('open'));
+    if (boughtToPlace) {
+      // l'œuvre achetée reste à l'emplacement que le serveur lui a donné
+      if (myView) myView.hiddenUid = null;
+      setCarry(null);
+      boughtToPlace = null;
+      toast('Œuvre laissée à sa place dans votre musée');
+      return;
+    }
+    const anyOpen = OVERLAYS.some((id) => $(id).classList.contains('open'));
     if (!anyOpen && hall.active) leaveHall();
     else closeOverlays();
   }
@@ -620,6 +955,11 @@ async function guarded<T>(fn: () => Promise<T>): Promise<T | null> {
 
 async function doBuy(item: ConvoyItem, _from: THREE.Vector3): Promise<void> {
   if (!state) return;
+  if (boughtToPlace || reorgSelected || heist) {
+    sfx.error();
+    toast('Vos mains sont prises : accrochez d’abord l’œuvre que vous portez (Échap pour la laisser)');
+    return;
+  }
   if (state.coins < item.price) {
     sfx.error();
     toast(`Il vous manque ${money(item.price - state.coins)} pièces`);
@@ -654,7 +994,10 @@ async function doCollect(): Promise<void> {
   if (r.collected > 0) {
     sfx.coin(Math.ceil(Math.log10(r.collected + 1)));
     bumpWallet();
-    if (myView) burstCoins(myView.registerPos, Math.min(24, 6 + Math.round(Math.log2(r.collected + 1))));
+    if (myView) {
+      burstCoins(myView.registerPos, Math.min(24, 6 + Math.round(Math.log2(r.collected + 1))));
+      floatText(myView.registerPos.clone().setY(3.4), `+${money(r.collected)}`);
+    }
     toast(`+${money(r.collected)} pièces encaissées`);
   }
 }
@@ -671,6 +1014,7 @@ async function doExpand(): Promise<void> {
   applyState(r.state);
   sfx.expand();
   player?.gesture('Wave', 'Idle');
+  confetti(pos, 90);
   if (r.state.floors > 1 && r.state.level >= 6) banner(r.state.floors === 2 ? '1er étage construit !' : `${r.state.floors - 1}e étage construit !`, `${r.state.slots} emplacements · l’escalier est dans la salle d’entrée`);
   else banner('Musée agrandi !', `${r.state.rooms} salles · ${r.state.slots} emplacements`);
 }
@@ -684,6 +1028,7 @@ async function doClaim(): Promise<void> {
   sfx.expand();
   bumpWallet();
   burstCoins(pos.clone().add(new THREE.Vector3(0, 0, 1.2)), 16);
+  confetti(pos, 50);
   player?.gesture('Yes', 'Idle');
   banner('Objectif accompli !', `+${money(r.reward)} pièces`);
 }
@@ -752,7 +1097,7 @@ function updateCoins(dt: number): void {
 
 function enterHall(): void {
   if (!state || !net.connected || hall.active) return;
-  if (carrying || stealing) {
+  if (heist || stealing) {
     sfx.error();
     toast('Pas avec une œuvre volée sous le bras !');
     return;
@@ -873,6 +1218,7 @@ function onSale(m: Extract<ServerMsg, { t: 'sale' }>): void {
       if (m.winnerId === state?.id) break; // message « won »
       if (hall.active) sfx.coin(2);
       else if (m.sold) toast(`🔨 « ${work(m.workId).title} » adjugée ${money(m.price)} à ${m.winner}`);
+      if (m.sold) chat.system(`🔨 « ${work(m.workId).title} » adjugée ${money(m.price)} à ${m.winner}`);
       break;
     case 'end':
       if (hall.active) toast(`${m.label} terminée`);
@@ -1030,9 +1376,8 @@ async function renderBoards(): Promise<void> {
     $('boardList').innerHTML = '<li class="muted">Classement indisponible pour l’instant</li>';
     return;
   }
-  const me = state?.name ?? '';
   $('boardList').innerHTML = rows.length
-    ? rows.map((r, i) => `<li class="${r.name === me ? 'me' : ''}"><span class="rk">${i + 1}</span><span class="nm"></span><b>${money(r.value)}</b></li>`).join('')
+    ? rows.map((r, i) => `<li class="${r.me ? 'me' : ''}"><span class="rk">${i + 1}</span><span class="nm"></span><b>${money(r.value)}</b></li>`).join('')
     : `<li class="muted">${b.empty}</li>`;
   // noms des joueurs ou pays insérés avec leur drapeau
   $('boardList').querySelectorAll('.nm').forEach((el, i) => {
@@ -1056,7 +1401,10 @@ $('boardTabs').addEventListener('click', (e) => {
 
 /** Vol en cours côté joueur local. */
 let stealing: { plot: number; uid: string; workId: string; endsAt: number; total: number } | null = null;
+/** Œuvre tenue en mains (affichage) : volée, achetée ou en cours de déplacement. */
 let carrying: { workId: string; frame: string } | null = null;
+/** Vrai seulement quand l'œuvre portée est volée (le serveur suit alors le casse). */
+let heist = false;
 let carryPlot = -1; // musée d'où vient l'œuvre portée (lasers à la sortie)
 let carryMesh: THREE.Mesh | null = null;
 let jailUntil = 0;
@@ -1130,6 +1478,26 @@ function onWelcome(m: Extract<ServerMsg, { t: 'welcome' }>): void {
   guards.sync(m.guards ?? []);
   jailUntil = Math.max(jailUntil, m.you.jailUntil ?? 0);
   $('netStatus').hidden = true;
+  // social : historique de la discussion, quartier, micro (après une reconnexion, le serveur l'a oublié)
+  districtId = m.district;
+  districtMax = m.max ?? 7;
+  chat.clear();
+  for (const line of m.chat ?? []) if (!chat.blocked.has(line.id)) chat.add({ ...line, me: line.id === state?.id });
+  chat.system(`Quartier n°${m.district} · ${m.players.length}/${districtMax} joueurs · Entrée pour écrire, 👥 pour inviter un ami`);
+  if (voice.enabled) net.send({ t: 'voice', on: true });
+  const inv = m.invite;
+  if (inv) {
+    const msg = {
+      ok: `🎉 Bienvenue dans le quartier de ${inv.name} !`,
+      full: `Le quartier de ${inv.name} est plein (${districtMax} joueurs) : vous êtes dans un autre quartier`,
+      offline: `${inv.name} n’est pas en ligne : vous êtes dans un autre quartier`,
+      unknown: 'Code d’invitation inconnu',
+      self: 'C’est votre propre code d’invitation',
+    }[inv.status];
+    if (inv.status === 'ok') banner(msg, 'Écrivez-lui avec Entrée, ou activez le micro 🎙');
+    else toast(msg);
+    chat.system(msg);
+  }
 }
 
 const ALARM_TEXT: Record<string, [string, string]> = {
@@ -1212,6 +1580,7 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
       if (m.thief === me) {
         stealing = null;
         carryPlot = m.plot;
+        heist = true;
         setCarry({ workId: m.workId, frame: m.frame });
         sfx.rare();
         banner('Vous l’avez !', 'Ramenez-la dans votre musée sans vous faire toucher par le propriétaire ni par un garde');
@@ -1225,6 +1594,7 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
     case 'delivered':
       remotes.setWanted(m.thief, false);
       if (m.thief === me) {
+        heist = false;
         setCarry(null);
         sfx.expand();
         player?.gesture('Wave', 'Idle');
@@ -1236,10 +1606,13 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
         banner('On vous a volé…', m.refund > 0 ? `${m.thiefName} est reparti avec « ${title} ». Assurance : +${money(m.refund)} pièces` : `${m.thiefName} est reparti avec « ${title} ». Protégez-vous : G`);
         refreshSoon();
       } else toast(`${m.thiefName} a volé « ${title} » au ${m.victimName}`);
+      chat.system(`🦹 ${m.thiefName} a volé « ${title} » au ${m.victimName}`);
+      if (m.thief === me) confetti(pos, 80);
       break;
     case 'arrested':
       remotes.setWanted(m.thief, false);
       if (m.thief === me) {
+        heist = false;
         setCarry(null);
         jailUntil = m.jailUntil;
         sfx.error();
@@ -1258,10 +1631,12 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
         else banner('Voleur arrêté !', `« ${title} » est revenue · +${money(m.fine)} pièces d’amende`);
         refreshSoon();
       } else toast(`${m.byName} a arrêté ${m.thiefName} !`);
+      chat.system(`👮 ${m.byName} a arrêté ${m.thiefName}`);
       break;
     case 'returned':
       remotes.setWanted(m.thief, false);
       if (m.thief === me) {
+        heist = false;
         setCarry(null);
         toast(m.message);
       }
@@ -1280,6 +1655,29 @@ net.onMessage = (m) => {
       offset = m.now - Date.now();
       remotes.sync(m.players, state?.id ?? '');
       guards.sync(m.guards ?? []);
+      voice.sync(m.players);
+      break;
+    case 'chat':
+      if (m.id === state?.id) {
+        chat.add({ ...m, me: true });
+        selfBubble.say(m.text, m.color);
+      } else if (!chat.blocked.has(m.id)) {
+        chat.add(m);
+        remotes.say(m.id, m.text);
+        sfx.coin(1);
+      }
+      break;
+    case 'chat-error':
+      toast(m.error);
+      break;
+    case 'emote':
+      if (m.id === state?.id) {
+        selfBubble.emote(EMOTE_ICONS[m.kind]);
+        if (m.kind === 'wave' || m.kind === 'clap' || m.kind === 'heart') player?.gesture('Wave', 'Idle');
+      } else if (!chat.blocked.has(m.id)) remotes.emote(m.id, m.kind);
+      break;
+    case 'rtc':
+      void voice.onSignal(m.from, m.data);
       break;
     case 'alarm': onAlarm(m); break;
     case 'hall':
@@ -1299,6 +1697,8 @@ net.onMessage = (m) => {
       break;
     case 'won':
       sfx.expand();
+      if (!hall.active) confetti(pos, 90);
+      chat.system(`🔨 Vous remportez « ${work(m.workId).title} » pour ${money(m.price)} !`);
       banner('Adjugé !', `« ${work(m.workId).title} » est à vous pour ${money(m.price)} pièces : direction votre musée`);
       refreshSoon();
       break;
@@ -1310,6 +1710,7 @@ net.onMessage = (m) => {
         banner(`« ${title} » est en train d’être volée !`, `${m.thiefName} cambriole le ${m.victimName}. Touchez-le pour l’arrêter : prime de 1 % de sa valeur !`);
       } else if (m.phase === 'saved') toast(`🏆 ${m.byName} a sauvé « ${title} » et empoche ${money(m.bounty)} de prime`);
       else if (m.phase === 'stolen') toast(`😱 ${m.thiefName} a volé « ${title} » au ${m.victimName}`);
+      chat.system(m.phase === 'start' ? `🚨 ${m.thiefName} vole « ${title} » chez ${m.victimName} !` : m.phase === 'saved' ? `🏆 ${m.byName} a sauvé « ${title} »` : `😱 « ${title} » volée par ${m.thiefName}`);
       break;
     }
     case 'ticket':
@@ -1327,9 +1728,17 @@ net.onMessage = (m) => {
     case 'tool': onTool(m); break;
     case 'fx': spawnFx(m.kind, m.x, m.z, m.until); break;
     case 'join':
-      if (m.player.id !== state?.id) toast(`${m.player.name} entre dans le quartier`);
+      if (m.player.id !== state?.id) {
+        toast(`${m.player.name} entre dans le quartier`);
+        chat.system(m.invited ? `👋 ${m.player.name} arrive, invité par ${m.invited}` : `👋 ${m.player.name} entre dans le quartier`);
+      }
       break;
-    case 'leave': remotes.remove(m.id); break;
+    case 'leave': {
+      const who = remotes.list().find((p) => p.id === m.id);
+      if (who) chat.system(`🚪 ${who.name} quitte le quartier`);
+      remotes.remove(m.id);
+      break;
+    }
     case 'plot': applyPlot(m.plot); break;
     case 'lock':
       views.get(m.plot)?.setLock(m.lockedUntil, m.lockReadyAt);
@@ -1364,15 +1773,24 @@ setInterval(() => {
 
 // ================================================================== démarrage
 
+let started = false;
 async function start(name?: string, color?: string, country?: string, pre?: Awaited<ReturnType<typeof api.login>>): Promise<void> {
+  if (!(await modelReady)) return; // personnage introuvable : le message reste affiché
   let r: Awaited<ReturnType<typeof api.login>>;
   try {
     r = pre ?? (await api.login(name, color, country));
   } catch (e) {
     toast(`Connexion impossible : ${(e as Error).message}. Nouvel essai…`);
-    setTimeout(() => void start(name, color), 4000);
+    setTimeout(() => void start(name, color, country), 4000);
     return;
   }
+  if (started) {
+    // déjà en jeu et nouvelle session (connexion Google après coup) : on repart proprement avec la session enregistrée,
+    // plutôt que de garder le quartier de l'ancien compte et de doubler les minuteries
+    location.reload();
+    return;
+  }
+  started = true;
   applyState(r.state);
   // entrée dans un quartier multijoueur (le serveur attribue la parcelle)
   net.connect();
@@ -1403,6 +1821,7 @@ async function start(name?: string, color?: string, country?: string, pre?: Awai
   } else if (r.created) banner('Bienvenue dans le quartier !', 'Approchez-vous d’un camion du convoi et appuyez sur E pour acheter');
   else if (r.offlineGain > 0) banner('Bon retour !', `Votre caisse a gagné ${money(r.offlineGain)} pièces en votre absence`);
   else banner(`Bon retour, ${r.state.name}`);
+  if (r.state.daily.claimable) setTimeout(() => toast(`🎁 Récompense du jour : +${money(r.state.daily.reward)} (bouton 🎁 ou boutique)`), 3600);
   setInterval(() => void refreshConvoy(), 5000);
   setInterval(() => void refreshState(), 15000);
   setInterval(() => void refreshBoard(), 10000);
@@ -1516,7 +1935,10 @@ async function mountGoogle(rename: boolean): Promise<void> {
   wrap.hidden = !ok;
 }
 
-async function boot(): Promise<void> {
+/** Personnage principal chargé (false : échec). Le formulaire du nom s'affiche sans l'attendre. */
+let modelReady: Promise<boolean> = Promise.resolve(false);
+
+async function loadModels(): Promise<boolean> {
   try {
     await loadCharacterModel('/models/human_male.glb');
   } catch {
@@ -1524,15 +1946,33 @@ async function boot(): Promise<void> {
       await loadCharacterModel('/models/robot.glb');
     } catch {
       $('loading').textContent = 'Impossible de charger le personnage. Vérifiez votre connexion et rechargez la page.';
-      return;
+      $('loading').hidden = false;
+      return false;
     }
   }
   player = new Character();
   player.root.position.copy(pos);
   scene.add(player.root);
   $('loading').remove();
-  if (api.hasSavedSession()) void start();
-  else openNameSheet(false);
+  // tenues de la foule en arrière-plan, puis les passants de la place
+  void loadCrowdModels().finally(() => pedestrians.setCount(pedestrianCount()));
+  return true;
+}
+
+async function boot(): Promise<void> {
+  modelReady = loadModels();
+  if (api.hasSavedSession()) {
+    // connexion lancée tout de suite, en parallèle du téléchargement du personnage (démarrage plus rapide) ;
+    // en cas d'échec réseau, start() réessaie lui-même
+    void api.login().then(
+      (r) => start(undefined, undefined, undefined, r),
+      () => start(),
+    );
+    return;
+  }
+  // nouveau joueur : on choisit son nom pendant que le personnage (≈ 1 Mo) se télécharge
+  $('loading').hidden = true;
+  openNameSheet(false);
 }
 
 // ================================================================== joueur & interactions
@@ -1570,7 +2010,10 @@ function updatePlayer(dt: number): void {
   const dz = fwd.x * a.x + fwd.z * a.y;
   const mag = Math.min(1, Math.hypot(dx, dz));
   // Déplacement réactif style Roblox : réponse nette aux touches et arrêt franc
-  const speed = (input.running() ? 8.0 : 4.8) * (carrying ? 0.72 : 1) * (stealing ? 0 : 1);
+  const jailed = jailUntil > serverNow();
+  // baskets de sprint (boutique) : même bonus que celui que le serveur autorise
+  const boost = 1 + (state?.upgrades.speed.value ?? 0);
+  const speed = (input.running() ? 8.0 : 4.8) * boost * (heist ? 0.72 : 1) * (stealing || jailed ? 0 : 1);
   const responsiveness = mag > 0.05 ? 26 : 18;
   const k = 1 - Math.exp(-responsiveness * dt);
   vel.x += ((mag > 0.05 ? (dx / mag) * speed * mag : 0) - vel.x) * k;
@@ -1645,7 +2088,7 @@ function protection(v: MuseumView, now: number): string | null {
 /** Vol : maintenir E devant une œuvre d'un musée rival. Renvoie true si une invite de vol est affichée. */
 function theftInteractions(items: Array<{ key: string; text: string; poor?: boolean }>): boolean {
   const now = serverNow();
-  if (carrying) {
+  if (heist && carrying) {
     const home = myView ? spawnOf(myView.plot) : pos;
     items.push({ key: '⇢', text: `Ramenez « ${work(carrying.workId).title} » dans votre musée ! (${Math.round(pos.distanceTo(home))} m)` });
     const src = views.get(carryPlot);
@@ -1664,6 +2107,8 @@ function theftInteractions(items: Array<{ key: string; text: string; poor?: bool
     return true;
   }
   if (!input.holdingAction()) stealRequested = false;
+  // mains déjà prises par une de vos œuvres (achat ou déplacement) : pas de vol possible
+  if (boughtToPlace || reorgSelected) return false;
   const rival = [...views.values()].find((v) => v !== myView && v.contains(pos, floor));
   if (!rival) return false;
   const art = rival.nearestArtwork(pos, 1.8, floor);
@@ -1694,16 +2139,22 @@ function theftInteractions(items: Array<{ key: string; text: string; poor?: bool
   return true;
 }
 
-const STEAL_TIME: Record<string, number> = { commun: 2.5, rare: 4, epique: 6, legendaire: 9, mythique: 20 };
+const STEAL_TIME: Record<string, number> = CATALOG.stealSeconds;
 
 let lastCollect = 0;
 function interactions(): void {
   if (!state || busy || !myView) return;
   const museum = myView;
+  // en cellule : le serveur retient le joueur, aucune autre action possible
+  const jailLeft = jailUntil - serverNow();
+  if (jailLeft > 0) {
+    setPrompt([{ key: '⛓', text: `En cellule encore ${Math.ceil(jailLeft / 1000)} s` }]);
+    return;
+  }
   const items: Array<{ key: string; text: string; poor?: boolean }> = [];
   // escalier d'abord (on peut le prendre avec une œuvre volée sous le bras)
   if (stairsInteraction(items)) {
-    if (carrying) theftInteractions(items);
+    if (heist) theftInteractions(items);
     setPrompt(items);
     return;
   }
@@ -1719,6 +2170,7 @@ function interactions(): void {
   const art = !truck && signD > 1.6 && lockD > 1.2 && museum.contains(pos, floor) ? museum.nearestArtwork(pos, 1.6, floor) : null;
   const now = serverNow();
   const marketD = Math.hypot(pos.x - BLACK_MARKET.x, pos.z - BLACK_MARKET.z);
+  const shopD = Math.hypot(pos.x - BOUTIQUE.x, pos.z - BOUTIQUE.z);
 
   const hallD = Math.hypot(pos.x - AUCTION_DOOR.x, pos.z - AUCTION_DOOR.z);
 
@@ -1726,13 +2178,16 @@ function interactions(): void {
     items.push({ key: 'E', text: 'Entrer dans l’hôtel des ventes (enchères)' });
     if (input.consume('action')) enterHall();
   } else if (marketD < 2.8) {
-    items.push({ key: 'E', text: 'Marché noir : brouilleur, fumigène, pied-de-biche, leurre, pince' });
+    items.push({ key: 'E', text: 'Marché noir : brouilleur, fumigène, pied-de-biche, leurre, pince, déguisement' });
     if (input.consume('action')) openOverlay('market');
+  } else if (shopD < 2.8) {
+    items.push({ key: 'E', text: 'Boutique : améliorations permanentes, récompense du jour, Renaissance' });
+    if (input.consume('action')) openOverlay('shop');
   } else if (lockD < 1.2) {
     if (museum.isLocked(now)) items.push({ key: '🔒', text: `Portes verrouillées encore ${Math.ceil((museum.lockedUntil - now) / 1000)} s` });
     else if (now < museum.lockReadyAt) items.push({ key: '…', text: `Verrou en recharge : ${Math.ceil((museum.lockReadyAt - now) / 1000)} s` });
     else {
-      items.push({ key: 'E', text: 'Verrouiller les portes 60 s (personne ne peut entrer ni sortir)' });
+      items.push({ key: 'E', text: `Verrouiller les portes ${state.upgrades.lock.value ?? 60} s (personne ne peut entrer ni sortir)` });
       if (input.consume('action')) net.send({ t: 'lock' });
     }
   } else if (truck) {
@@ -1745,7 +2200,7 @@ function interactions(): void {
       if (input.consume('action')) void doExpand();
     } else items.push({ key: '✓', text: 'Votre musée est au maximum de cette version' });
   } else if (reorgSelected) {
-    const nearSlot = museum.nearestSlot(pos, 2.0, floor, state.slots);
+    const nearSlot = museum.nearestSlot(pos, 2.0, floor, state.slots, work(reorgSelected.workId).kind === 'statue');
     if (nearSlot !== null && nearSlot !== reorgSelected.slot) {
       const occupant = state.artworks.find((a) => a.slot === nearSlot);
       if (occupant) {
@@ -1759,7 +2214,7 @@ function interactions(): void {
     }
     items.push({ key: 'Échap', text: 'Annuler le déplacement' });
   } else if (boughtToPlace) {
-    const nearSlot = museum.nearestSlot(pos, 2.2, floor, state.slots);
+    const nearSlot = museum.nearestSlot(pos, 2.2, floor, state.slots, work(boughtToPlace.workId).kind === 'statue');
     if (nearSlot !== null) {
       const occupant = state.artworks.find((a) => a.slot === nearSlot && a.uid !== boughtToPlace?.uid);
       if (occupant) {
@@ -1775,7 +2230,7 @@ function interactions(): void {
     const gain = art.repro ? 0 : Math.floor(work(art.workId).price * CATALOG.frames[art.frame].mult * 0.5);
     items.push({ key: 'E', text: `Déplacer « ${work(art.workId).title} » (porter en mains)` });
     items.push({ key: 'R', text: art.repro ? `Retirer la reproduction « ${work(art.workId).title} »` : `Revendre « ${work(art.workId).title} » : +${money(gain)}` });
-    if (input.consume('action')) {
+    if (input.consume('action') && !heist) {
       reorgSelected = { uid: art.uid, workId: art.workId, slot: art.slot };
       if (myView) myView.hiddenUid = art.uid;
       setCarry({ workId: art.workId, frame: art.frame });
@@ -1784,7 +2239,8 @@ function interactions(): void {
   } else {
     const currentRoom = museum.contains(pos, floor) ? museum.roomIndexOf(pos, floor) : null;
     if (currentRoom !== null) {
-      items.push({ key: 'T', text: `Décor de la salle #${currentRoom + 1} (ambiance)` });
+      // R (bouton tactile R) ou T au clavier : les deux ouvrent le décor
+      items.push({ key: 'R', text: `Décor de la salle #${currentRoom + 1} (ambiance) · touche T aussi` });
       if (input.consume('alt')) {
         decorRoomIndex = currentRoom;
         openOverlay('decor');
@@ -1847,6 +2303,8 @@ function updateCamera(dt: number): void {
 // ================================================================== boucle
 
 const clock = new THREE.Clock();
+/** Tests visuels (mode développement) : caméra placée à la main, la boucle ne la déplace plus. */
+let camFrozen = false;
 /**
  * Performance mobile : si le jeu tourne sous 26 images/s en qualité haute, on passe en Éco
  * (une seule fois, et seulement si le joueur n'a pas choisi lui-même).
@@ -1865,6 +2323,7 @@ function probeFps(): void {
   if (quality === 'high' && fps < 26) {
     quality = 'low';
     applyQuality();
+    pedestrians.setCount(pedestrianCount());
     toast(`Mode Éco activé pour la fluidité (${Math.round(fps)} images/s). Bouton HD pour revenir.`);
   }
 }
@@ -1897,7 +2356,16 @@ renderer.setAnimationLoop(() => {
   for (const v of views.values()) v.update(t, dt, now, camera.position, pos);
   if (state && myView) myView.setRegister(cashNow(), state.cashCap, t);
   visitors.update(dt);
+  pedestrians.update(dt);
   remotes.update(dt, t);
+  // social : bulle du joueur, volume des voix selon la distance, niveau du micro sur le bouton
+  if (player) selfAnchor.position.copy(player.root.position);
+  selfBubble.update();
+  if (voice.enabled) {
+    voice.update((id) => remotes.positionOf(id), pos);
+    $('voiceBtn').style.setProperty('--mic', voice.micLevel().toFixed(2));
+  }
+  updateCelebrations(dt);
   guards.update(dt, t);
   updateFx(t);
   district.update(t);
@@ -1908,13 +2376,14 @@ renderer.setAnimationLoop(() => {
     renderTimers();
   }
   updateCoins(dt);
-  updateCamera(dt);
+  if (!camFrozen) updateCamera(dt);
   input.endFrame();
   renderer.render(scene, camera);
 });
 
-// Accès de test (jamais inclus dans le build de production)
-if (false as boolean) {
+// Accès de test pour tests/smoke.mjs : actif avec le serveur de développement Vite, retiré du build de production
+// (build.mjs définit import.meta.env.DEV à false, esbuild élimine alors ce bloc).
+if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__game = {
     get state() { return state; },
     get pos() { return pos.clone(); },
@@ -1940,6 +2409,28 @@ if (false as boolean) {
     hall,
     enterHall,
     leaveHall,
+    pedestrians,
+    /** Caméra fixe pour une capture : position (x, y, z) et point visé. `null` rend la main à la caméra du jeu. */
+    shoot(at: [number, number, number] | null, look: [number, number, number] = [0, 0, 0]) {
+      camFrozen = !!at;
+      if (!at) return;
+      camera.position.set(...at);
+      camera.lookAt(...look);
+    },
+    /** Personnage de test (foule) posé en (x, z), assis ou debout. */
+    testCharacter(x: number, z: number, sit = false, ry = 0) {
+      const c = new Character(undefined, { crowd: true });
+      c.root.position.set(x, 0, z);
+      c.root.rotation.y = ry;
+      if (sit) c.play('Sitting', 0);
+      scene.add(c.root);
+      const tick = () => {
+        c.update(1 / 60);
+        requestAnimationFrame(tick);
+      };
+      tick();
+      return true;
+    },
   };
 }
 

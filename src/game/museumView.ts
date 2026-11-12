@@ -26,6 +26,8 @@ export interface MuseumSnap {
   themes?: Record<string, string>;
   /** Nombre d'étages (1 = rez-de-chaussée seul). */
   floors?: number;
+  /** Renaissances du propriétaire (badge ⭐ au-dessus du musée). */
+  rebirths?: number;
 }
 
 const NO_SEC: PublicSecurity = { guards: 0, cameras: false, lasers: false, generator: false, insured: false, vitrines: {}, dog: false };
@@ -89,8 +91,16 @@ export class MuseumView {
   private barrier: THREE.Mesh;
   private wallColliders: { boxes: Box[]; circles: Circle[] } = { boxes: [], circles: [] };
   private facadeCircles: Circle[] = [];
+  /** Pans du mur du portique (de part et d'autre de la porte) : on ne passe plus au travers. */
+  private facadeBoxes: Box[] = [];
   private wallOcc: THREE.Object3D[] = [];
   private facadeOcc: THREE.Object3D[] = [];
+  /** Haut du portique (entablement, fronton, toit, enseigne) : masqué quand le joueur est dedans ou dessous. */
+  private facadeTop = new THREE.Group();
+  private facadeTopMerged: THREE.Group | null = null;
+  private facadeTopOcc: THREE.Object3D[] = [];
+  private porch: Box | null = null;
+  private topShown = true;
 
   // étages (phase 5)
   floors = 1;
@@ -116,7 +126,7 @@ export class MuseumView {
 
   /** Volumes qui peuvent masquer le joueur (pour la caméra), étages masqués exclus. */
   get occluders(): THREE.Object3D[] {
-    return [...this.wallOcc, ...this.upperOcc.filter((_, i) => i + 1 <= this.cut).flat(), ...this.facadeOcc];
+    return [...this.wallOcc, ...this.upperOcc.filter((_, i) => i + 1 <= this.cut).flat(), ...this.facadeOcc, ...(this.topShown ? this.facadeTopOcc : [])];
   }
 
   // votre musée
@@ -132,7 +142,7 @@ export class MuseumView {
   private themesSig = '';
 
   constructor(private scene: THREE.Scene, readonly plot: Plot, readonly own: boolean) {
-    scene.add(this.facade, this.extras);
+    scene.add(this.facade, this.facadeTop, this.extras);
     this.registerPos = toWorld(plot, -3.4, 0, -3.4);
     this.signPos = toWorld(plot, 3.4, 0, -3.4);
     this.lockPos = toWorld(plot, 0, 0, -4.2);
@@ -527,6 +537,20 @@ export class MuseumView {
     return slotWorld(this.plot, slot);
   }
 
+  /**
+   * Position réelle d'une œuvre : un tableau est au mur ; une statue est au sol, sur son socle,
+   * ou posée devant le mur quand elle occupe un emplacement mural (avant le toit-terrasse).
+   */
+  placement(slot: number, workId: string): { p: THREE.Vector3; ry: number; normal: THREE.Vector3; floor: number; sculpt: boolean } {
+    const s = this.slotWorld(slot);
+    const sculpt = s.isStatue || work(workId).kind === 'statue';
+    if (sculpt && !s.isStatue) {
+      const p = s.p.clone().addScaledVector(s.normal, 1.0).setY(s.floor * FLOOR_H);
+      return { p, ry: s.ry, normal: s.normal, floor: s.floor, sculpt };
+    }
+    return { p: s.p, ry: s.ry, normal: s.normal, floor: s.floor, sculpt };
+  }
+
   /** Dans les salles du musée, à l'étage donné. */
   contains(p: THREE.Vector3, floor = 0): boolean {
     return !!this.owner && inside(this.plot, this.rooms, p, floor, this.floors);
@@ -560,17 +584,16 @@ export class MuseumView {
     // Statues au sol (obstacles circulaires)
     const statueCircles: Circle[] = [];
     for (const s of this.shown.values()) {
-      if (slotFloor(s.slot) === floor && (isStatueSlot(s.slot) || work(s.workId).kind === 'statue')) {
-        const { p } = this.slotWorld(s.slot);
-        statueCircles.push({ x: p.x, z: p.z, r: 0.7 });
-      }
+      if (slotFloor(s.slot) !== floor) continue;
+      const pl = this.placement(s.slot, s.workId);
+      if (pl.sculpt) statueCircles.push({ x: pl.p.x, z: pl.p.z, r: 0.7 });
     }
     if (floor > 0) {
       // à l'étage : seulement les murs de cet étage (et le poteau de l'escalier + statues)
       const u = this.upperColliders[floor - 1];
       return u ? { boxes: [...u.boxes], circles: [...u.circles, ...pole, ...statueCircles] } : { boxes: [], circles: statueCircles };
     }
-    const boxes = [...this.wallColliders.boxes];
+    const boxes = [...this.wallColliders.boxes, ...this.facadeBoxes];
     const circles = [...this.wallColliders.circles, ...this.facadeCircles, ...this.secCircles, ...pole, ...statueCircles];
     if (this.own) circles.push({ x: this.registerPos.x, z: this.registerPos.z - this.plot.f * 1.2, r: 0.85 }, { x: this.signPos.x, z: this.signPos.z - this.plot.f * 1.2, r: 0.35 });
     if (!forOwner && this.isLocked(now)) {
@@ -586,10 +609,10 @@ export class MuseumView {
     let bd = maxDist;
     for (const s of this.shown.values()) {
       if (slotFloor(s.slot) !== floor) continue;
-      const { p, normal, isStatue } = this.slotWorld(s.slot);
-      const isSculpt = isStatue || work(s.workId).kind === 'statue';
-      const d = isSculpt
-        ? p.clone().setY(0).distanceTo(pos.clone().setY(0))
+      const { p, normal, sculpt } = this.placement(s.slot, s.workId);
+      // une statue se vole en se tenant à côté d'elle ; un tableau, en se tenant devant le mur
+      const d = sculpt
+        ? Math.max(0, p.clone().setY(0).distanceTo(pos.clone().setY(0)) - 0.8)
         : p.clone().addScaledVector(normal, 1.2).setY(0).distanceTo(pos.clone().setY(0));
       if (d < bd) {
         bd = d;
@@ -604,11 +627,12 @@ export class MuseumView {
   }
 
   /** Emplacement libre ou occupé le plus proche (pour la réorganisation). */
-  nearestSlot(pos: THREE.Vector3, maxDist: number, floor = 0, totalSlots = 232): number | null {
+  nearestSlot(pos: THREE.Vector3, maxDist: number, floor = 0, totalSlots = 232, forStatue = false): number | null {
     let best: number | null = null;
     let bd = maxDist;
     for (let slot = 0; slot < totalSlots; slot++) {
       if (slotFloor(slot) !== floor) continue;
+      if (!forStatue && isStatueSlot(slot)) continue; // les socles n'accueillent que des statues
       const { p, normal, isStatue } = this.slotWorld(slot);
       const d = isStatue
         ? p.clone().setY(0).distanceTo(pos.clone().setY(0))
@@ -646,9 +670,8 @@ export class MuseumView {
     }
     for (const a of wanted.values()) {
       if (this.shown.has(a.uid) || slotFloor(a.slot) >= this.floors) continue;
-      const { p, ry, normal, isStatue } = this.slotWorld(a.slot);
+      const { p, ry, normal, sculpt: isSculpt } = this.placement(a.slot, a.workId);
       const wk = work(a.workId);
-      const isSculpt = isStatue || wk.kind === 'statue';
       const art = new Artifact(
         {
           id: a.uid,
@@ -676,7 +699,8 @@ export class MuseumView {
               { text: a.frame === 'normal' ? rar.label : `${rar.label} · ${CATALOG.frames[a.frame].label}`, color: a.frame === 'normal' ? rar.color : '#ffd36b', size: 40, weight: 800 },
             ],
       );
-      const labelY = isSculpt ? 2.5 + slotFloor(a.slot) * FLOOR_H : 3.75 + slotFloor(a.slot) * FLOOR_H;
+      // au-dessus de la statue (socle 0,9 m + figure) ou du tableau
+      const labelY = isSculpt ? 3.4 + slotFloor(a.slot) * FLOOR_H : 3.75 + slotFloor(a.slot) * FLOOR_H;
       label.sprite.position.copy(p).addScaledVector(normal, isSculpt ? 0.2 : 1.1).setY(labelY);
       this.scene.add(label.sprite);
       this.shown.set(a.uid, { art, label, uid: a.uid, slot: a.slot, workId: a.workId, frame: a.frame, repro: a.repro });
@@ -696,6 +720,15 @@ export class MuseumView {
   private clearFacade(): void {
     disposeMerged(this.facadeMerged);
     this.facadeMerged = null;
+    disposeMerged(this.facadeTopMerged);
+    this.facadeTopMerged = null;
+    for (const c of [...this.facadeTop.children]) {
+      this.facadeTop.remove(c);
+      c.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    }
+    this.facadeBoxes = [];
+    this.facadeTopOcc = [];
+    this.porch = null;
     if (this.leftDoorGroup) {
       this.leftDoorGroup.removeFromParent();
       this.leftDoorGroup = null;
@@ -742,8 +775,9 @@ export class MuseumView {
     const colZ = wallZ + d * 2.8;
     const x0 = this.plot.x;
 
-    // Colonnes cannelées classiques en pierre de taille avec base et chapiteaux sculptés dorés
-    for (const sx of [-9, -5.4, -1.8, 1.8, 5.4, 9]) {
+    // Colonnes cannelées classiques en pierre de taille avec base et chapiteaux sculptés dorés.
+    // Travée centrale large (6,8 m) : la porte reste bien visible et dégagée depuis la place.
+    for (const sx of [-9.8, -6.6, -3.4, 3.4, 6.6, 9.8]) {
       const col = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.58, 6.4, 16), stoneMat);
       col.position.set(x0 + sx, 3.2, colZ);
       const ringBot = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.4, 1.3), stoneDark);
@@ -754,10 +788,24 @@ export class MuseumView {
       this.facadeCircles.push({ x: x0 + sx, z: colZ, r: 0.6 });
     }
 
-    // Portique et mur de fondation avec grande arche d'entrée
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(20, 6.2, 0.8), stoneDark);
-    backWall.position.set(x0, 3.1, wallZ + d * 0.4);
-    this.facade.add(backWall);
+    // Mur du portique, PERCÉ d'une vraie porte (3,4 m × 4,2 m) : deux pans + un linteau.
+    // Avant : un mur plein de 20 m barrait l'entrée (on le traversait comme un fantôme).
+    const DOOR_W = 3.4;
+    const DOOR_H = 4.2;
+    const pan = (20 - DOOR_W) / 2;
+    const wallBoxes: THREE.Mesh[] = [];
+    for (const side of [-1, 1]) {
+      const w = new THREE.Mesh(new THREE.BoxGeometry(pan, 6.2, 0.8), stoneDark);
+      w.position.set(x0 + side * (DOOR_W / 2 + pan / 2), 3.1, wallZ + d * 0.4);
+      wallBoxes.push(w);
+      this.facadeBoxes.push({
+        minX: x0 + side * (DOOR_W / 2 + pan / 2) - pan / 2, maxX: x0 + side * (DOOR_W / 2 + pan / 2) + pan / 2,
+        minZ: Math.min(wallZ, wallZ + d * 0.8), maxZ: Math.max(wallZ, wallZ + d * 0.8),
+      });
+    }
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(DOOR_W, 6.2 - DOOR_H, 0.8), stoneDark);
+    lintel.position.set(x0, DOOR_H + (6.2 - DOOR_H) / 2, wallZ + d * 0.4);
+    this.facade.add(...wallBoxes, lintel);
 
     // Entablement monumental en pierre
     const entab = new THREE.Mesh(new THREE.BoxGeometry(22, 1.4, 4.2), stoneMat);
@@ -791,11 +839,13 @@ export class MuseumView {
     const roof = new THREE.Mesh(new THREE.BoxGeometry(22.6, 0.6, 4.6), roofSlate);
     roof.position.set(x0, 7.9, wallZ + d * 1.6);
 
-    // Grand perron et marches monumentales d'accueil
-    const steps = new THREE.Mesh(new THREE.BoxGeometry(22.0, 0.4, 5.6), stoneDark);
-    steps.position.set(x0, 0.2, wallZ + d * 2.5);
+    // Parvis dallé (bas : on marche dessus sans s'y enfoncer)
+    const steps = new THREE.Mesh(new THREE.BoxGeometry(22.0, 0.12, 5.6), stoneDark);
+    steps.position.set(x0, 0.06, wallZ + d * 2.5);
 
-    this.facade.add(entab, pediment, goldMedallion, roof, steps);
+    this.facade.add(steps);
+    // le haut du portique est à part : on le masque quand le joueur est dedans ou dessous (il cachait la vue)
+    this.facadeTop.add(entab, pediment, goldMedallion, roof);
 
     // Portes battantes d'apparat en bois noble avec vitres et garnitures dorées
     const doorWood = std(0x2a1a12, { roughness: 0.5 });
@@ -847,23 +897,32 @@ export class MuseumView {
 
     this.facade.add(runway, borderGoldL, borderGoldR);
 
-    this.facade.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh && m !== runway) m.castShadow = m.receiveShadow = true;
-    });
+    for (const grp of [this.facade, this.facadeTop]) {
+      grp.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh && m !== runway) m.castShadow = m.receiveShadow = true;
+      });
+    }
 
-    // Enseigne classique prestigieuse au nom du musée
+    // Enseigne classique prestigieuse au nom du musée (lumineuse : lisible de loin)
     this.signMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(8.0, 1.8),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, emissive: 0xffffff, emissiveIntensity: 0.35 }),
     );
-    this.signMesh.position.set(x0, 7.1, wallZ + d * 3.75);
+    // devant le bord du toit du portique (qui s'avance jusqu'à 3,9 m) : l'enseigne n'est plus rognée
+    this.signMesh.position.set(x0, 6.95, wallZ + d * 3.98);
     this.signMesh.rotation.y = d === -1 ? Math.PI : 0;
-    this.facade.add(this.signMesh);
+    this.facadeTop.add(this.signMesh);
 
-    this.facadeOcc = [entab, roof, backWall];
+    this.facadeOcc = [...wallBoxes, lintel];
+    this.facadeTopOcc = [entab, roof];
+    // zone couverte par le toit du portique (pour masquer le haut quand on passe dessous)
+    this.porch = { minX: x0 - 11.5, maxX: x0 + 11.5, minZ: Math.min(wallZ, wallZ + d * 4.8), maxZ: Math.max(wallZ, wallZ + d * 4.8) };
     this.facadeMerged = mergeStatic(this.facade);
     this.scene.add(this.facadeMerged);
+    this.facadeTopMerged = mergeStatic(this.facadeTop);
+    this.facadeTopMerged.visible = this.topShown;
+    this.scene.add(this.facadeTopMerged);
   }
 
   private buildOwnExtras(): void {
@@ -951,7 +1010,7 @@ export class MuseumView {
         : this.isLocked(now) ? '🔒 Verrouillé'
         : this.online ? '● Propriétaire présent' : '☾ Propriétaire absent';
       lines = [
-        { text: o.name, color: '#fff', size: 52, weight: 900 },
+        { text: o.rebirths ? `${o.name} · ⭐${o.rebirths}` : o.name, color: '#fff', size: 52, weight: 900 },
         { text: `${money(o.value)} · ${tag}`, color: o.shielded || o.immuneUntil > now ? '#9fe3ff' : this.online ? '#7dff9a' : '#ffb3c1', size: 40, weight: 800 },
       ];
       const prot = this.protectionText(now);
@@ -970,6 +1029,14 @@ export class MuseumView {
     for (const [uid, s] of this.shown) {
       s.art.group.visible = s.label.sprite.visible = !this.far && uid !== this.hiddenUid && slotFloor(s.slot) <= this.cut;
       if (!this.far) s.art.update(t, dt);
+    }
+    // Haut du portique : masqué quand le joueur est dans ce musée (cut ≠ 99) ou sous le toit du portique,
+    // sinon il recouvrait la moitié de l'écran (caméra en hauteur au-dessus des murs).
+    const underPorch = !!playerPos && !!this.porch && playerPos.x > this.porch.minX && playerPos.x < this.porch.maxX && playerPos.z > this.porch.minZ && playerPos.z < this.porch.maxZ;
+    const showTop = this.cut === 99 && !underPorch;
+    if (showTop !== this.topShown) {
+      this.topShown = showTop;
+      if (this.facadeTopMerged) this.facadeTopMerged.visible = showTop;
     }
     const locked = this.isLocked(now);
     this.barrier.visible = locked;

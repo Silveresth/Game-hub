@@ -94,25 +94,36 @@ ok(/pas ouvertes/.test(early.error), `enchère refusée pendant la présentation
 const bidding = await cP.wait((m) => m.t === 'hall' && m.lot?.phase === 'bidding', 9000, true);
 ok(bidding.lot.price === est * 0.5, `mise à prix 50 % de l’estimation (${bidding.lot.price})`);
 
+/**
+ * Enchérit d'après le DERNIER état de la salle, et recommence si un PNJ a enchéri entre-temps
+ * (les PNJ enchérissent à des moments aléatoires : un minimum lu trop tôt peut être dépassé).
+ */
+async function bidAsLeader(c, who, amountOf) {
+  for (let i = 0; i < 8; i++) {
+    const last = [...c.inbox].reverse().find((m) => m.t === 'hall' && m.lot?.phase === 'bidding');
+    const amount = amountOf(last.lot);
+    c.send({ t: 'bid', amount });
+    const r = await c.wait((m) => (m.t === 'hall' && m.lot?.leader?.id === who.id && m.lot.price === amount) || m.t === 'hall-error', 5000, true);
+    if (r.t === 'hall') return amount;
+  }
+  throw new Error(`${who.name} : enchère jamais acceptée`);
+}
+
 // Q enchérit au minimum : son argent est bloqué
 const coinsQ0 = (await http('state', null, Q)).coins;
-const minNow = (await cQ.wait((m) => m.t === 'hall' && m.lot?.phase === 'bidding', 3000)).lot.min;
-cQ.send({ t: 'bid', amount: minNow + 40000 });
-await cQ.wait((m) => m.t === 'hall' && m.lot?.leader?.id === Q.id, 5000, true);
+const bidQ = await bidAsLeader(cQ, Q, (lot) => lot.min);
 const sQ1 = await http('state', null, Q);
-ok(sQ1.coins === coinsQ0 - (minNow + 40000) && sQ1.escrow === minNow + 40000, `argent de Q bloqué (${sQ1.escrow})`);
-cQ.send({ t: 'bid', amount: minNow + 999999 });
+ok(sQ1.coins === coinsQ0 - bidQ && sQ1.escrow === bidQ, `argent de Q bloqué (${sQ1.escrow})`);
+cQ.send({ t: 'bid', amount: bidQ + 999999 });
 const self = await cQ.wait((m) => m.t === 'hall-error' && /déjà/.test(m.error), 3000);
 ok(!!self, 'on ne surenchérit pas sur soi-même');
-const tooLow = (minNow + 40000) + 1;
+const tooLow = bidQ + 1; // moins que l'enchère de Q + un pas de 5 %
 cP.send({ t: 'bid', amount: tooLow });
 const low = await cP.wait((m) => m.t === 'hall-error' && /minimale/.test(m.error), 3000);
 ok(!!low, `enchère trop basse refusée : « ${low.error} »`);
 
-// P met 97 % de l'estimation : aucun PNJ ne peut suivre (ils s'arrêtent entre 60 et 95 %)
-const big = Math.round(est * 0.97);
-cP.send({ t: 'bid', amount: big });
-await cP.wait((m) => m.t === 'hall' && m.lot?.leader?.id === P.id && m.lot.price === big, 5000, true);
+// P met au moins 97 % de l'estimation : aucun PNJ ne peut suivre (ils s'arrêtent entre 60 et 95 %)
+const big = await bidAsLeader(cP, P, (lot) => Math.max(Math.round(est * 0.97), lot.min));
 const sQ2 = await http('state', null, Q);
 ok(sQ2.coins === coinsQ0 && sQ2.escrow === 0, 'Q surenchéri : son argent lui est rendu');
 const won = await cP.wait((m) => m.t === 'won', 40000);
@@ -122,7 +133,8 @@ ok(sP.artworks.some((a) => a.workId === 'grande-vague' && a.slot !== null) && sP
 const boardA = await http('leaderboard?board=auction');
 ok(boardA.some((r) => r.name === 'Musée Enchérisseur' && r.value === big), 'classement « plus grosses enchères » à jour');
 const boardW = await http('leaderboard?board=weekly');
-ok(boardW.some((r) => r.name === 'Musée Enchérisseur'), 'classement de la semaine à jour');
+// (sur une base déjà bien remplie, le gagnant peut être légitimement hors du top 10 de la semaine)
+ok(boardW.some((r) => r.name === 'Musée Enchérisseur') || (boardW.length === 10 && boardW[9].value >= est), 'classement de la semaine à jour');
 const sold = await cQ.wait((m) => m.t === 'sale' && m.phase === 'sold');
 ok(sold.winner === 'Musée Enchérisseur', 'la vente est annoncée à tous');
 const end = await cP.wait((m) => m.t === 'sale' && m.phase === 'end' && m.id === created.sale.id, 10000);
