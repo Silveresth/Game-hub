@@ -90,6 +90,12 @@ orbit.minDistance = 4;
 orbit.maxDistance = 24;
 orbit.minPolarAngle = 0.35;
 orbit.maxPolarAngle = 1.32;
+// Contrôle caméra style Roblox / jeu d'exploration : clic droit pour pivoter, molette pour zoomer
+orbit.mouseButtons = {
+  LEFT: null,
+  MIDDLE: THREE.MOUSE.DOLLY,
+  RIGHT: THREE.MOUSE.ROTATE,
+};
 
 const hall = new AuctionHall();
 hall.resize(innerWidth, innerHeight);
@@ -1576,9 +1582,10 @@ function updatePlayer(dt: number): void {
   const dx = -fwd.z * a.x + fwd.x * a.y;
   const dz = fwd.x * a.x + fwd.z * a.y;
   const mag = Math.min(1, Math.hypot(dx, dz));
-  // une œuvre sous le bras ralentit de 30 % ; pendant le décrochage, on ne bouge pas
-  const speed = (input.running() ? 7.5 : 4.4) * (carrying ? 0.7 : 1) * (stealing ? 0 : 1);
-  const k = 1 - Math.exp(-12 * dt);
+  // Déplacement réactif style Roblox : réponse nette aux touches et arrêt franc
+  const speed = (input.running() ? 8.0 : 4.8) * (carrying ? 0.72 : 1) * (stealing ? 0 : 1);
+  const responsiveness = mag > 0.05 ? 26 : 18;
+  const k = 1 - Math.exp(-responsiveness * dt);
   vel.x += ((mag > 0.05 ? (dx / mag) * speed * mag : 0) - vel.x) * k;
   vel.y += ((mag > 0.05 ? (dz / mag) * speed * mag : 0) - vel.y) * k;
 
@@ -1596,22 +1603,23 @@ function updatePlayer(dt: number): void {
   } else vel.set(0, 0);
 
   if (input.consume('jump') && pos.y <= 0.001) {
-    vy = 6.2;
+    vy = 6.8;
     sfx.jump();
     player.gesture('Jump', 'Idle');
   }
-  vy -= 18 * dt;
+  vy -= 20 * dt;
   pos.y = Math.max(0, pos.y + vy * dt);
   if (pos.y === 0) vy = 0;
 
   const sp = vel.length();
-  if (sp > 0.3) {
+  if (sp > 0.25) {
+    // Orientation rapide et nette vers la direction de course
     const want = Math.atan2(vel.x, vel.y);
     let d = want - facing;
     d = Math.atan2(Math.sin(d), Math.cos(d));
-    facing += d * Math.min(1, dt * 12);
+    facing += d * Math.min(1, dt * 20);
   }
-  player.play(sp > 5.6 ? 'Running' : sp > 0.3 ? 'Walking' : 'Idle');
+  player.play(sp > 5.8 ? 'Running' : sp > 0.25 ? 'Walking' : 'Idle');
   player.root.position.copy(pos);
   player.root.position.y += floor * FLOOR_H;
   player.root.rotation.y = facing;
