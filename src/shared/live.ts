@@ -79,15 +79,12 @@ export function mountLiveBar(opts: { gameHref?: string } = {}): { onStats: (fn: 
   bar.setAttribute('aria-label', 'Infos en direct');
   bar.innerHTML = `
     <div class="lb-track">
-      <span class="lb-item lb-online" title="Joueurs connectés en ce moment">${ICONS.online}<b data-k="online">—</b><span class="lb-l">en ligne</span></span>
-      <span class="lb-item" title="Visiteurs uniques depuis le lancement">${ICONS.visitors}<b data-k="visitors">—</b><span class="lb-l">visiteurs depuis le lancement</span></span>
-      <span class="lb-item" title="Heure de Paris (heure du serveur)">${ICONS.clock}<span class="lb-l">Paris</span><b data-k="clock">--:--:--</b></span>
-      <span class="lb-item lb-sale" data-k="saleBox" title="Prochaine vente aux enchères">${ICONS.gavel}<span class="lb-l" data-k="saleLabel">Prochaine vente</span><span class="lb-l" data-k="saleIn">dans</span><b data-k="countdown">--:--</b></span>
-      <span class="lb-item lb-major" title="Prochaine grande vente">${ICONS.gavel}<span class="lb-l" data-k="majorLabel">Grande vente</span><b data-k="major">—</b></span>
-      <span class="lb-item lb-top" title="Musée le plus populaire">${ICONS.crown}<span class="lb-l">N°1</span><b data-k="top">—</b></span>
+      <span class="lb-item lb-online" title="Joueurs connectés">${ICONS.online}<b data-k="online">—</b><span class="lb-l">en ligne</span></span>
+      <span class="lb-item lb-sale" data-k="saleBox" title="Vente aux enchères">${ICONS.gavel}<span class="lb-l" data-k="saleLabel">Vente</span><span class="lb-l" data-k="saleIn">dans</span><b data-k="countdown">--:--</b></span>
+      <span class="lb-item lb-top" title="Musée en tête">${ICONS.crown}<span class="lb-l">N°1</span><b data-k="top">—</b></span>
       ${opts.gameHref ? `<a class="lb-play" href="${opts.gameHref}">Jouer</a>` : ''}
     </div>`;
-  const $ = (k: string) => bar.querySelector<HTMLElement>(`[data-k="${k}"]`)!;
+  const $ = (k: string) => bar.querySelector<HTMLElement>(`[data-k="${k}"]`);
 
   let stats: LiveStats | null = null;
   let offset = 0; // horloge serveur - horloge locale
@@ -95,34 +92,43 @@ export function mountLiveBar(opts: { gameHref?: string } = {}): { onStats: (fn: 
 
   const render = () => {
     const now = Date.now() + offset;
-    $('clock').textContent = clockFmt.format(now);
+    const clockEl = $('clock');
+    if (clockEl) clockEl.textContent = clockFmt.format(now);
     if (!stats) return;
     const next = stats.sales.find((s) => s.at > now - 1000) ?? stats.sales[0];
+    const saleLabel = $('saleLabel');
+    const countdown = $('countdown');
+    const saleIn = $('saleIn');
+    const saleBox = $('saleBox');
     if (stats.liveSale) {
-      // vente en direct : la barre l'affiche à la place du compte à rebours
-      $('saleLabel').textContent = `🔴 ${stats.liveSale.label}`;
-      $('countdown').textContent = `en direct · lot ${stats.liveSale.index + 1}/${stats.liveSale.count}`;
-      $('saleIn').hidden = true;
-      $('saleBox').classList.add('soon');
+      if (saleLabel) saleLabel.textContent = `🔴 ${stats.liveSale.label}`;
+      if (countdown) countdown.textContent = `en direct · lot ${stats.liveSale.index + 1}/${stats.liveSale.count}`;
+      if (saleIn) saleIn.hidden = true;
+      if (saleBox) saleBox.classList.add('soon');
     } else if (next) {
-      $('saleIn').hidden = false;
+      if (saleIn) saleIn.hidden = false;
       const left = next.at - now;
-      $('saleLabel').textContent = next.label;
-      $('countdown').textContent = formatCountdown(left);
-      $('saleBox').classList.toggle('soon', left < 15 * 60 * 1000);
+      if (saleLabel) saleLabel.textContent = next.label;
+      if (countdown) countdown.textContent = formatCountdown(left);
+      if (saleBox) saleBox.classList.toggle('soon', left < 15 * 60 * 1000);
     }
+    const majorLabel = $('majorLabel');
+    const major = $('major');
     if (stats.nextMajor) {
-      $('majorLabel').textContent = stats.nextMajor.label;
-      $('major').textContent = parisTime.format(stats.nextMajor.at);
+      if (majorLabel) majorLabel.textContent = stats.nextMajor.label;
+      if (major) major.textContent = parisTime.format(stats.nextMajor.at);
     }
   };
 
   const apply = (s: LiveStats) => {
     stats = s;
     offset = s.serverTime - Date.now();
-    $('online').textContent = nf.format(s.online);
-    $('visitors').textContent = nf.format(s.visitors);
-    $('top').textContent = s.top ? `${s.top.name}` : '—';
+    const onlineEl = $('online');
+    if (onlineEl) onlineEl.textContent = nf.format(s.online);
+    const visitorsEl = $('visitors');
+    if (visitorsEl) visitorsEl.textContent = nf.format(s.visitors);
+    const topEl = $('top');
+    if (topEl) topEl.textContent = s.top ? `${s.top.name}` : '—';
     bar.classList.toggle('offline', !connected);
     render();
     listeners.forEach((fn) => fn(s));
