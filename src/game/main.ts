@@ -3,8 +3,10 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { mountLiveBar, setupPwa } from '../shared/live';
 import * as api from './api';
-import type { ConvoyItem, GuardTier, InboxItem, PlayerState, ToolId, UpgradeId } from './api';
-import { Character, loadCharacterModel, loadCrowdModels } from './character';
+import type { ConvoyEvent, ConvoyItem, GuardTier, InboxItem, PlayerState, ToolId, UpgradeId } from './api';
+import { Character, hasOutfit, loadCharacterModel, loadCrowdModels } from './character';
+import { Coins, burst, dust, initFx, updateFx as updateParticles } from './fx';
+import { updateRainbow } from './textures';
 import { AUCTION_DOOR, BLACK_MARKET, BOUTIQUE, District, type Box, type Circle } from './district';
 import { Guards } from './guards';
 import { AuctionHall } from './auction';
@@ -12,7 +14,7 @@ import { PUSH_CATEGORIES, enablePush, pushSupport } from './push';
 import { mountGoogleButton } from './google';
 import { MuseumView } from './museumView';
 import { FLOOR_H, PLOTS, ROOMS, spawnOf } from './layout';
-import { Net, type EmoteKind, type PlotInfo, type ServerMsg } from './net';
+import { Net, type EmoteKind, type LiveEvent, type PlotInfo, type ServerMsg } from './net';
 import { ChatUI, EMOTE_ICONS, SpeechBubble } from './chat';
 import { Voice } from './voice';
 import { Label } from './labels';
@@ -239,8 +241,23 @@ function hiddenAt(x: number, z: number, f: number): boolean {
   return !!v && f > v.currentCut;
 }
 
-let playerColor = '';
+let playerLook = '';
 let questDoneSeen = '';
+
+/** Personnage du joueur à sa couleur et dans sa tenue (reconstruit si l'une change, ou quand la tenue finit de charger). */
+function rebuildPlayer(): void {
+  if (!player || !state) return;
+  const skin = state.skin ?? 0;
+  const look = `${state.color}:${skin}:${hasOutfit(skin)}`;
+  if (look === playerLook) return;
+  playerLook = look;
+  const fresh = new Character(parseInt(state.color.slice(1), 16), { skin });
+  fresh.root.position.copy(player.root.position);
+  fresh.root.rotation.copy(player.root.rotation);
+  player.dispose();
+  player = fresh;
+  scene.add(player.root);
+}
 
 function applyState(s: PlayerState): void {
   // objectif qui vient d'être atteint : on le signale une seule fois
@@ -251,17 +268,8 @@ function applyState(s: PlayerState): void {
       toast(`Objectif atteint : récupérez ${money(s.quest.reward)} pièces !`);
     }
   }
-  // couleur du personnage choisie par le joueur
-  if (player && s.color !== playerColor) {
-    playerColor = s.color;
-    const fresh = new Character(parseInt(s.color.slice(1), 16));
-    fresh.root.position.copy(player.root.position);
-    fresh.root.rotation.copy(player.root.rotation);
-    player.dispose();
-    player = fresh;
-    scene.add(player.root);
-  }
   state = s;
+  rebuildPlayer();
   stateAt = performance.now();
   offset = s.serverTime - Date.now();
   myView?.applyOwn(s);
@@ -599,16 +607,36 @@ function renderEvent(now: number): void {
     const key = `${current.kind}:${current.startsAt}`;
     if (eventSeen !== key && playing) {
       eventSeen = key;
-      sfx.rare();
-      banner(`${current.icon} ${current.label} !`, `${current.desc} pendant ${fmtDur(current.endsAt - now)}`);
+      if (current.admin) {
+        // « admin abuse » : fanfare, confettis, bannière et message dans la discussion
+        sfx.fanfare();
+        confetti(pos, 90);
+        banner(`${current.icon} ${current.label.toUpperCase()} !`, `${current.desc} · encore ${fmtDur(current.endsAt - now)}`);
+        chat.system(`${current.icon} Événement en direct : ${current.label} (${fmtDur(current.endsAt - now)})`);
+      } else {
+        sfx.rare();
+        banner(`${current.icon} ${current.label} !`, `${current.desc} pendant ${fmtDur(current.endsAt - now)}`);
+      }
+      district.setSkyEvent(current.kind);
     }
+    document.body.dataset.event = current.kind;
   } else if (next) {
+    if (document.body.dataset.event) {
+      delete document.body.dataset.event;
+      district.setSkyEvent(null);
+    }
     el.textContent = `${next.icon} ${next.label} dans ${fmtDur(Math.max(0, next.startsAt - now))}`;
     el.title = next.desc;
     el.classList.remove('live');
     // l'événement vient de commencer : l'état du serveur le confirmera, on le redemande
     if (next.startsAt <= now) refreshSoon();
-  } else el.textContent = '';
+  } else {
+    el.textContent = '';
+    if (document.body.dataset.event) {
+      delete document.body.dataset.event;
+      district.setSkyEvent(null);
+    }
+  }
 }
 
 function offerHtml(title: string, desc: string, price: number | null, data: Record<string, string | number>, label?: string): string {
@@ -807,6 +835,8 @@ addEventListener('keydown', (e) => {
     voice.setMuted(!voice.muted);
     renderVoiceBtn();
     toast(voice.muted ? '🔇 Micro coupé (V pour le rétablir)' : '🎙 Micro rétabli');
+  } else if (e.code === 'KeyF' && !e.repeat && !anyOpen) {
+    doBonk();
   } else if (e.code === 'KeyB' && !e.repeat) {
     if ($('shop').classList.contains('open')) closeOverlays();
     else if (!anyOpen) openOverlay('shop');
@@ -996,6 +1026,12 @@ async function doBuy(item: ConvoyItem, _from: THREE.Vector3): Promise<void> {
   bumpWallet();
   setCarry({ workId: item.workId, frame: item.frame });
   if (item.rarity !== 'commun' || item.frame !== 'normal') sfx.rare();
+  if (item.frame === 'arcenciel' || item.rarity === 'mythique') {
+    // jackpot : grosse fête (confettis, onde de choc, message dans la discussion)
+    confetti(pos, 120);
+    burst(pos.clone(), 0xff8fd8, true);
+    chat.system(`🌈 Vous décrochez « ${wk.title} » ${item.frame === 'arcenciel' ? 'en cadre arc-en-ciel (×10) !' : ', une Mythique !'}`);
+  }
   banner(wk.title, `Œuvre entre vos mains ! Entrez dans votre musée et appuyez sur E devant un emplacement pour l'accrocher.`);
   maybeAskPush();
 }
@@ -1104,6 +1140,99 @@ function updateCoins(dt: number): void {
       flyingCoins.splice(flyingCoins.indexOf(c), 1);
     }
   }
+}
+
+// ================================================================== coup de parapluie, pluie d'or, événements en direct
+
+const BONK = (CATALOG as unknown as { bonk?: { range: number; cooldownMs: number; stunMs: number } }).bonk ?? { range: 2.6, cooldownMs: 2500, stunMs: 1100 };
+initFx(scene);
+const rainCoins = new Coins(scene);
+/** Sonné par un coup de parapluie jusqu'à (horloge locale). */
+let stunUntil = 0;
+let bonkAt = 0;
+/** Secousse de la caméra (s), appliquée juste avant le rendu puis retirée. */
+let shake = 0;
+const shakeOff = new THREE.Vector3();
+
+/** Événement en cours (convoi ou « admin abuse »), ou null. */
+function liveKind(): string | null {
+  const c = state?.event.current;
+  return c && c.endsAt > serverNow() ? c.kind : null;
+}
+
+function doBonk(): void {
+  if (!playing || !player || !net.connected || anyOverlayOpen() || hall.active || stealing) return;
+  const now = performance.now();
+  if (now < stunUntil || jailUntil > serverNow() || now - bonkAt < BONK.cooldownMs) return;
+  bonkAt = now;
+  net.send({ t: 'bonk' });
+  player.gesture('Punch', 'Idle');
+  sfx.whoosh();
+  const b = $('tB');
+  b.classList.add('cool');
+  setTimeout(() => b.classList.remove('cool'), BONK.cooldownMs);
+}
+$('tB').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  doBonk();
+});
+
+function onBonk(m: Extract<ServerMsg, { t: 'bonk' }>): void {
+  const me = state?.id;
+  const from = new THREE.Vector3(m.x, 0, m.z);
+  // geste du frappeur (s'il n'est pas vous) et projection de la cible (si ce n'est pas vous)
+  remotes.bonk(m.from, m.to === me ? null : m.to, from, m.stunMs);
+  if (!m.to) return; // coup dans le vide
+  const at = m.to === me ? pos.clone().setY(floor * FLOOR_H) : remotes.positionOf(m.to)?.clone();
+  if (!at || at.distanceTo(pos) > 45) return; // trop loin pour voir l'effet
+  burst(at, 0xb48cff, m.dropped);
+  floatText(at.clone().setY(at.y + 2.9), m.dropped ? 'BONK ! 🖼💨' : 'BONK !', '#d2b4ff');
+  sfx.bonk();
+  if (m.to === me) {
+    // projeté en arrière (les murs arrêtent la glissade), petit saut, étourdi
+    stunUntil = performance.now() + m.stunMs;
+    const away = new THREE.Vector2(pos.x - m.x, pos.z - m.z);
+    if (away.lengthSq() < 1e-4) away.set(Math.sin(facing), Math.cos(facing));
+    vel.copy(away.normalize().multiplyScalar(9));
+    vy = 5;
+    shake = 0.35;
+    selfBubble.emote('💫');
+    if (stealing) stealing = null;
+  } else if (m.from === me && m.dropped) {
+    sfx.coin(3);
+    toast('☂ En plein dans le mille : le voleur lâche l’œuvre !');
+  }
+}
+
+function onCoins(m: Extract<ServerMsg, { t: 'coins' }>): void {
+  if (m.add?.length) rainCoins.add(m.add);
+  if (m.del?.length) {
+    const gone = rainCoins.remove(m.del);
+    // une pièce ramassée par quelqu'un d'autre : petit éclat doré
+    if (m.by && m.by !== state?.id) for (const p of gone) if (p.distanceTo(pos) < 30) burst(p.setY(0), 0xffc93c);
+  }
+}
+
+function onCoinGot(m: Extract<ServerMsg, { t: 'coin-got' }>): void {
+  if (!state) return;
+  state.coins += m.amount;
+  renderHud();
+  bumpWallet();
+  sfx.pickup();
+  burst(pos.clone(), 0xffc93c);
+  floatText(pos.clone().setY(3.1), `+${money(m.amount)}`);
+}
+
+function onLiveEvent(ev: LiveEvent | null): void {
+  if (!state) return;
+  if (ev) state.event = { ...state.event, current: ev as unknown as ConvoyEvent };
+  else {
+    if (state.event.current?.admin) state.event = { ...state.event, current: null };
+    rainCoins.clear();
+    refreshSoon(); // un événement du convoi reprend peut-être la main
+  }
+  renderEvent(serverNow());
+  district.setSkyEvent(liveKind());
 }
 
 // ================================================================== hôtel des ventes (phase 4)
@@ -1489,6 +1618,8 @@ function onWelcome(m: Extract<ServerMsg, { t: 'welcome' }>): void {
   for (const info of m.plots) applyPlot(info);
   remotes.sync(m.players, state?.id ?? '');
   guards.sync(m.guards ?? []);
+  rainCoins.clear();
+  if (m.coins?.length) rainCoins.add(m.coins);
   jailUntil = Math.max(jailUntil, m.you.jailUntil ?? 0);
   $('netStatus').hidden = true;
   // social : historique de la discussion, quartier, micro (après une reconnexion, le serveur l'a oublié)
@@ -1770,6 +1901,10 @@ net.onMessage = (m) => {
       playing = false;
       break;
     case 'steal': onSteal(m); break;
+    case 'bonk': onBonk(m); break;
+    case 'coins': onCoins(m); break;
+    case 'coin-got': onCoinGot(m); break;
+    case 'live-event': onLiveEvent(m.event); break;
     default: break;
   }
 };
@@ -1787,14 +1922,14 @@ setInterval(() => {
 // ================================================================== démarrage
 
 let started = false;
-async function start(name?: string, color?: string, country?: string, pre?: Awaited<ReturnType<typeof api.login>>): Promise<void> {
+async function start(name?: string, color?: string, country?: string, pre?: Awaited<ReturnType<typeof api.login>>, skin?: number): Promise<void> {
   if (!(await modelReady)) return; // personnage introuvable : le message reste affiché
   let r: Awaited<ReturnType<typeof api.login>>;
   try {
-    r = pre ?? (await api.login(name, color, country));
+    r = pre ?? (await api.login(name, color, country, skin));
   } catch (e) {
     toast(`Connexion impossible : ${(e as Error).message}. Nouvel essai…`);
-    setTimeout(() => void start(name, color, country), 4000);
+    setTimeout(() => void start(name, color, country, undefined, skin), 4000);
     return;
   }
   if (started) {
@@ -1835,6 +1970,16 @@ async function start(name?: string, color?: string, country?: string, pre?: Awai
   else if (r.offlineGain > 0) banner('Bon retour !', `Votre caisse a gagné ${money(r.offlineGain)} pièces en votre absence`);
   else banner(`Bon retour, ${r.state.name}`);
   if (r.state.daily.claimable) setTimeout(() => toast(`🎁 Récompense du jour : +${money(r.state.daily.reward)} (bouton 🎁 ou boutique)`), 3600);
+  // nouveautés expliquées une seule fois : parapluie et double saut
+  try {
+    if (!localStorage.getItem('sam-tip-bonk')) {
+      localStorage.setItem('sam-tip-bonk', '1');
+      const touch = document.body.classList.contains('touch');
+      setTimeout(() => toast(touch ? '☂ Bouton violet : coup de parapluie ! Un voleur touché lâche son butin.' : '☂ Touche F : coup de parapluie ! Un voleur touché lâche son butin. Espace deux fois : double saut.'), 7500);
+    }
+  } catch {
+    /* stockage indisponible */
+  }
   setInterval(() => void refreshConvoy(), 5000);
   setInterval(() => void refreshState(), 15000);
   setInterval(() => void refreshBoard(), 10000);
@@ -1855,6 +2000,23 @@ for (const c of CATALOG.colors) {
 function markColor(c: string): void {
   chosenColor = c;
   colorsEl.querySelectorAll<HTMLElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.c === c));
+}
+
+// Choix de la tenue (skin), visible par tous les joueurs
+const SKIN_ICONS = ['🤵', '👩‍💼', '🧑', '👩'];
+let chosenSkin = 0;
+const skinsEl = $('skins');
+for (const s of (CATALOG as unknown as { skins?: Array<{ id: number; label: string }> }).skins ?? []) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.dataset.s = String(s.id);
+  b.innerHTML = `<span>${SKIN_ICONS[s.id] ?? '🙂'}</span>${s.label}`;
+  b.onclick = () => markSkin(s.id);
+  skinsEl.appendChild(b);
+}
+function markSkin(s: number): void {
+  chosenSkin = s;
+  skinsEl.querySelectorAll<HTMLElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.s === String(s)));
 }
 
 // Choix du pays du joueur
@@ -1937,9 +2099,11 @@ function openAuth(mode: AuthMode): void {
     nameInput.value = state.name;
     markColor(state.color);
     markCountry(state.country ?? 'FR');
+    markSkin(state.skin ?? 0);
   } else if (mode === 'signup') {
     markColor(CATALOG.colors[0]);
     markCountry('FR');
+    markSkin(0);
   }
   $('welcome').classList.add('open');
   input.enabled = false;
@@ -1986,7 +2150,7 @@ $('welcomeForm').addEventListener('submit', async (e) => {
   if (authMode === 'login' && !pass) return authMsg('Entrez votre mot de passe', true);
   switch (authMode) {
     case 'signup': {
-      const r = await authCall(() => api.register(name, email, pass, chosenColor, chosenCountry));
+      const r = await authCall(() => api.register(name, email, pass, chosenColor, chosenCountry, chosenSkin));
       if (r) enterWith(r);
       break;
     }
@@ -2010,7 +2174,7 @@ $('welcomeForm').addEventListener('submit', async (e) => {
       break;
     }
     case 'account': {
-      const r = await authCall(() => api.rename(name, chosenColor, chosenCountry));
+      const r = await authCall(() => api.rename(name, chosenColor, chosenCountry, chosenSkin));
       if (!r) return;
       applyState(r.state);
       void refreshBoard();
@@ -2031,7 +2195,7 @@ $('guestLink').onclick = () => {
   const name = nameInput.value.trim();
   if (name && (name.length < 2 || name.length > 24)) return authMsg('Nom du musée : 2 à 24 caractères', true);
   closeAuth();
-  void start(name || undefined, chosenColor, chosenCountry);
+  void start(name || undefined, chosenColor, chosenCountry, undefined, chosenSkin);
 };
 // un invité transforme son musée en compte : il garde tout (œuvres, pièces, niveau)
 $('saveGo').onclick = async () => {
@@ -2039,7 +2203,7 @@ $('saveGo').onclick = async () => {
   const email = emailInput.value.trim();
   if (!/^\S+@\S+\.\S+$/.test(email)) return authMsg('Adresse e-mail invalide', true);
   if (passInput.value.length < 8) return authMsg('Mot de passe : 8 caractères au moins', true);
-  const r = await authCall(() => api.register(name, email, passInput.value, chosenColor, chosenCountry));
+  const r = await authCall(() => api.register(name, email, passInput.value, chosenColor, chosenCountry, chosenSkin));
   if (!r) return;
   applyState(r.state);
   sfx.expand();
@@ -2109,7 +2273,10 @@ async function loadModels(): Promise<boolean> {
   scene.add(player.root);
   $('loading').remove();
   // tenues de la foule en arrière-plan, puis les passants de la place
-  void loadCrowdModels().finally(() => pedestrians.setCount(pedestrianCount()));
+  void loadCrowdModels().finally(() => {
+    pedestrians.setCount(pedestrianCount());
+    rebuildPlayer(); // votre tenue est maintenant disponible
+  });
   return true;
 }
 
@@ -2163,9 +2330,15 @@ function canMove(x: number, z: number): boolean {
   return !district.blocked(x, z, RADIUS, frameBoxes, frameCircles);
 }
 
+/** Sauts depuis le dernier contact avec le sol (2 = double saut utilisé). */
+let jumps = 0;
+let dustAcc = 0;
+let airborne = false;
+
 function updatePlayer(dt: number): void {
   if (!player) return;
-  const a = input.axis();
+  const stunned = performance.now() < stunUntil;
+  const a = stunned ? { x: 0, y: 0 } : input.axis();
   camera.getWorldDirection(fwd);
   fwd.y = 0;
   fwd.normalize();
@@ -2174,10 +2347,11 @@ function updatePlayer(dt: number): void {
   const mag = Math.min(1, Math.hypot(dx, dz));
   // Déplacement réactif style Roblox : réponse nette aux touches et arrêt franc
   const jailed = jailUntil > serverNow();
-  // baskets de sprint (boutique) : même bonus que celui que le serveur autorise
-  const boost = 1 + (state?.upgrades.speed.value ?? 0);
-  const speed = (input.running() ? 8.0 : 4.8) * boost * (heist ? 0.72 : 1) * (stealing || jailed ? 0 : 1);
-  const responsiveness = mag > 0.05 ? 26 : 18;
+  // baskets de sprint (boutique) et « super vitesse » : mêmes bonus que ceux que le serveur autorise
+  const boost = (1 + (state?.upgrades.speed.value ?? 0)) * (liveKind() === 'vitesse' ? 1.6 : 1);
+  const speed = (input.running() ? 8.6 : 5.4) * boost * (heist ? 0.72 : 1) * (stealing || jailed ? 0 : 1);
+  // sonné : on glisse sur l'élan du coup reçu, sans pouvoir se diriger
+  const responsiveness = stunned ? 3 : mag > 0.05 ? 26 : 18;
   const k = 1 - Math.exp(-responsiveness * dt);
   vel.x += ((mag > 0.05 ? (dx / mag) * speed * mag : 0) - vel.x) * k;
   vel.y += ((mag > 0.05 ? (dz / mag) * speed * mag : 0) - vel.y) * k;
@@ -2195,17 +2369,43 @@ function updatePlayer(dt: number): void {
     vel.x = 0;
   } else vel.set(0, 0);
 
-  if (input.consume('jump') && pos.y <= 0.001) {
-    vy = 6.8;
-    sfx.jump();
-    player.gesture('Jump', 'Idle');
+  // saut, puis double saut en l'air (petit nuage sous les pieds)
+  if (input.consume('jump') && !stunned && !stealing && !jailed) {
+    if (pos.y <= 0.001) {
+      vy = 7.2;
+      jumps = 1;
+      sfx.jump();
+      player.gesture('Jump', 'Idle');
+    } else if (jumps === 1) {
+      vy = 6.6;
+      jumps = 2;
+      sfx.jump2();
+      dust(pos.clone().setY(floor * FLOOR_H + pos.y), 5, 0.6);
+      player.gesture('Jump', 'Idle');
+    }
   }
   vy -= 20 * dt;
   pos.y = Math.max(0, pos.y + vy * dt);
-  if (pos.y === 0) vy = 0;
+  if (pos.y > 0.05) airborne = true;
+  if (pos.y === 0) {
+    if (airborne && vy < -4) dust(pos.clone().setY(floor * FLOOR_H), 6, 0.7); // atterrissage
+    airborne = false;
+    vy = 0;
+    jumps = 0;
+  }
 
   const sp = vel.length();
-  if (sp > 0.25) {
+  // poussière de course
+  if (sp > 6.4 && pos.y === 0) {
+    dustAcc += dt;
+    if (dustAcc > 0.09) {
+      dustAcc = 0;
+      dust(pos.clone().setY(floor * FLOOR_H).addScaledVector(new THREE.Vector3(vel.x, 0, vel.y).normalize(), -0.3));
+    }
+  }
+  // sonné : il titube
+  player.root.rotation.z = stunned ? Math.sin(performance.now() / 55) * 0.12 : 0;
+  if (sp > 0.25 && !stunned) {
     // Orientation rapide et nette vers la direction de course
     const want = Math.atan2(vel.x, vel.y);
     let d = want - facing;
@@ -2531,6 +2731,9 @@ renderer.setAnimationLoop(() => {
   updateCelebrations(dt);
   guards.update(dt, t);
   updateFx(t);
+  updateParticles(t, dt);
+  updateRainbow(t);
+  rainCoins.update(t);
   district.update(t);
   const alarmOn = performance.now() < alarmUntil;
   $('alert').classList.toggle('on', alarmOn);
@@ -2541,7 +2744,12 @@ renderer.setAnimationLoop(() => {
   updateCoins(dt);
   if (!camFrozen) updateCamera(dt);
   input.endFrame();
+  // secousse (coup reçu) : décalage ajouté le temps du rendu seulement, pour ne pas dériver
+  shake = Math.max(0, shake - dt);
+  shakeOff.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+  camera.position.add(shakeOff);
   renderer.render(scene, camera);
+  camera.position.sub(shakeOff);
 });
 
 // Accès de test pour tests/smoke.mjs : actif avec le serveur de développement Vite, retiré du build de production

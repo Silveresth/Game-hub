@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MuseumBuilding, type ThemeId } from './Room';
 import { Artifact } from './Artifact';
+import { Sparkles } from './fx';
 import { Label } from './labels';
 import { CATALOG, artUrl, incomeOf, money, perSec, work, type FrameId } from './catalog';
 import { CELL, FLOOR_H, ROOMS, STAIRS, inside, isStatueSlot, slotFloor, slotWorld, toWorld, type Plot } from './layout';
@@ -40,7 +41,11 @@ interface Shown {
   workId: string;
   frame: FrameId;
   repro?: boolean;
+  sparkles?: Sparkles;
 }
+
+/** Les œuvres précieuses scintillent (on les repère de loin en entrant dans un musée). */
+const SPARKLY = new Set(['epique', 'legendaire', 'mythique']);
 
 const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
 
@@ -657,6 +662,7 @@ export class MuseumView {
     s.art.group.removeFromParent();
     s.label.sprite.removeFromParent();
     s.label.dispose();
+    s.sparkles?.dispose();
   }
 
   private syncArtworks(list: Array<{ uid: string; workId: string; frame: FrameId; slot: number; repro?: boolean }>): void {
@@ -684,7 +690,7 @@ export class MuseumView {
           spot: true,
           frameStyle: a.frame,
           form: wk.form ?? 'knot',
-          material: wk.mat ?? (a.frame === 'dore' ? 'gold' : a.frame === 'diamant' ? 'glass' : 'marble'),
+          material: wk.mat ?? (a.frame === 'dore' || a.frame === 'arcenciel' ? 'gold' : a.frame === 'diamant' ? 'glass' : 'marble'),
         },
         null as unknown as THREE.AudioListener,
       );
@@ -696,14 +702,25 @@ export class MuseumView {
           ? [{ text: CATALOG.repro.label.toUpperCase(), color: '#cfc9bb', size: 50, weight: 900 }, { text: 'sans valeur · décorative', color: '#a9a49a', size: 38, weight: 700 }]
           : [
               { text: `+${perSec(incomeOf(a.workId, a.frame))} /s`, color: '#7dff9a', size: 58, weight: 900 },
-              { text: a.frame === 'normal' ? rar.label : `${rar.label} · ${CATALOG.frames[a.frame].label}`, color: a.frame === 'normal' ? rar.color : '#ffd36b', size: 40, weight: 800 },
+              { text: a.frame === 'normal' ? rar.label : `${rar.label} · ${CATALOG.frames[a.frame].label}`, color: a.frame === 'arcenciel' ? '#ff8fd8' : a.frame === 'normal' ? rar.color : '#ffd36b', size: 40, weight: 800 },
             ],
       );
       // au-dessus de la statue (socle 0,9 m + figure) ou du tableau
       const labelY = isSculpt ? 3.4 + slotFloor(a.slot) * FLOOR_H : 3.75 + slotFloor(a.slot) * FLOOR_H;
       label.sprite.position.copy(p).addScaledVector(normal, isSculpt ? 0.2 : 1.1).setY(labelY);
       this.scene.add(label.sprite);
-      this.shown.set(a.uid, { art, label, uid: a.uid, slot: a.slot, workId: a.workId, frame: a.frame, repro: a.repro });
+      let sparkles: Sparkles | undefined;
+      if (!a.repro && (SPARKLY.has(wk.rarity) || a.frame === 'diamant' || a.frame === 'arcenciel')) {
+        const at = p.clone().addScaledVector(normal, isSculpt ? 0 : 0.35).setY(0.6 + slotFloor(a.slot) * FLOOR_H);
+        sparkles = new Sparkles(at, a.frame === 'diamant' ? '#bfe9ff' : rar.color, {
+          rainbow: a.frame === 'arcenciel',
+          count: wk.rarity === 'mythique' || a.frame === 'arcenciel' ? 22 : 12,
+          radius: isSculpt ? 0.9 : 1.2,
+          height: 2.6,
+        });
+        this.scene.add(sparkles.points);
+      }
+      this.shown.set(a.uid, { art, label, uid: a.uid, slot: a.slot, workId: a.workId, frame: a.frame, repro: a.repro, sparkles });
     }
   }
 

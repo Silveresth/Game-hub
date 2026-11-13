@@ -28,6 +28,8 @@ export interface PlayerState {
   id: string;
   name: string;
   color: string;
+  /** Tenue du personnage (0 = costume). */
+  skin?: number;
   country?: string;
   quest: Quest | null;
   rank: number;
@@ -87,7 +89,9 @@ export interface DailyInfo {
   days: number;
 }
 export interface ConvoyEvent {
-  kind: 'golden' | 'rare' | 'soldes';
+  /** golden, rare, soldes : événements du convoi ; pluie, arcenciel, vitesse : « admin abuse » en direct. */
+  kind: 'golden' | 'rare' | 'soldes' | 'pluie' | 'arcenciel' | 'vitesse';
+  admin?: boolean;
   label: string;
   icon: string;
   desc: string;
@@ -169,9 +173,9 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 const post = <T>(path: string, body: unknown = {}) => call<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
-export async function login(name?: string, color?: string, country?: string): Promise<{ state: PlayerState; offlineGain: number; created: boolean; inbox?: InboxItem[] }> {
+export async function login(name?: string, color?: string, country?: string, skin?: number): Promise<{ state: PlayerState; offlineGain: number; created: boolean; inbox?: InboxItem[] }> {
   const saved = loadSession();
-  const r = await post<{ id: string; token?: string; state: PlayerState; offlineGain: number; created: boolean; inbox?: InboxItem[] }>('login', { ...saved, name, color, country });
+  const r = await post<{ id: string; token?: string; state: PlayerState; offlineGain: number; created: boolean; inbox?: InboxItem[] }>('login', { ...saved, name, color, country, skin });
   session = { id: r.id, token: r.token ?? saved!.token };
   try {
     localStorage.setItem(KEY, JSON.stringify(session));
@@ -209,8 +213,8 @@ function keepSession(r: SessionReply): SessionReply {
 }
 
 /** Inscription. Avec une session d'invité ouverte, son musée devient le compte (rien n'est perdu). */
-export const register = async (username: string, email: string, password: string, color?: string, country?: string) =>
-  keepSession(await post<SessionReply>('register', { username, email, password, color, country }));
+export const register = async (username: string, email: string, password: string, color?: string, country?: string, skin?: number) =>
+  keepSession(await post<SessionReply>('register', { username, email, password, color, country, skin }));
 /** Connexion par e-mail et mot de passe (sur n'importe quel appareil). */
 export const loginPassword = async (email: string, password: string) => keepSession(await post<SessionReply>('login/password', { email, password }));
 export const forgotPassword = (email: string) => post<{ ok: boolean; message: string; devLink?: string }>('password/forgot', { email });
@@ -241,7 +245,7 @@ export const expand = () => post<{ state: PlayerState }>('expand');
 export const sell = (uid: string) => post<{ gain: number; state: PlayerState }>('sell', { uid });
 export const moveArtwork = (uid: string, slot: number) => post<{ state: PlayerState; swapped: boolean }>('move', { uid, slot });
 export const setDecor = (room: number, theme: string) => post<{ state: PlayerState; room: number; theme: string; cost: number }>('decor', { room, theme });
-export const rename = (name: string, color?: string, country?: string) => post<{ state: PlayerState }>('name', { name, color, country });
+export const rename = (name: string, color?: string, country?: string, skin?: number) => post<{ state: PlayerState }>('name', { name, color, country, skin });
 export const claim = (quest: string) => post<{ reward: number; state: PlayerState }>('claim', { quest });
 export const buySecurity = (item: string, extra: { tier?: GuardTier; slot?: number } = {}) => post<{ label: string; price: number; state: PlayerState }>('security', { item, ...extra });
 export const buyTool = (tool: ToolId) => post<{ tool: ToolId; price: number; state: PlayerState }>('blackmarket', { tool });

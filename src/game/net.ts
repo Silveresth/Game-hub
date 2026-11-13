@@ -40,6 +40,24 @@ export interface NetPlayer {
   stealing: { plot: number; uid: string; endsAt: number } | null;
   /** Micro activé (discussion vocale de proximité). */
   voice?: boolean;
+  /** Tenue choisie (0 = costume, 1-3 = autres silhouettes). */
+  skin?: number;
+}
+
+/** Événement en direct (« admin abuse ») : pluie d'or, convoi arc-en-ciel, super vitesse. */
+export interface LiveEvent {
+  kind: string;
+  label: string;
+  icon: string;
+  desc: string;
+  admin?: boolean;
+  startsAt: number;
+  endsAt: number;
+}
+export interface CoinSpot {
+  id: number;
+  x: number;
+  z: number;
 }
 
 export interface ChatLine {
@@ -121,7 +139,12 @@ export type ServerMsg =
   | {
     t: 'welcome'; now: number; you: { id: string; plot: number; jailUntil: number }; plots: PlotInfo[]; players: NetPlayer[]; guards: NetGuard[]; district: number;
     chat?: ChatLine[]; invite?: { status: 'ok' | 'full' | 'offline' | 'unknown' | 'self'; name: string | null } | null; max?: number;
+    coins?: CoinSpot[];
   }
+  | { t: 'bonk'; from: string; to: string | null; dropped: boolean; x: number; z: number; stunMs: number }
+  | { t: 'coins'; add?: CoinSpot[]; del?: number[]; by?: string }
+  | { t: 'coin-got'; id: number; amount: number }
+  | { t: 'live-event'; event: LiveEvent | null }
   | ChatLine
   | { t: 'chat-error'; error: string }
   | { t: 'emote'; id: string; kind: EmoteKind }

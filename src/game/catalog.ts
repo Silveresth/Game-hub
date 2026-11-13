@@ -1,7 +1,7 @@
 import raw from '../shared/catalog.json';
 
 export type RarityId = 'commun' | 'rare' | 'epique' | 'legendaire' | 'mythique';
-export type FrameId = 'normal' | 'dore' | 'diamant';
+export type FrameId = 'normal' | 'dore' | 'diamant' | 'arcenciel';
 
 export interface Work {
   id: string;

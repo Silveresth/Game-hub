@@ -53,6 +53,20 @@ export class Sfx {
     for (let i = 0; i < 6; i++) this.tone(i % 2 ? 660 : 880, i * 0.28, 0.26, 'sawtooth', 0.06);
   }
   rare(): void { [784, 987.8, 1174.7, 1568].forEach((f, i) => this.tone(f, i * 0.06, 0.4, 'sine', 0.12)); }
+  /** Coup de parapluie : « boing » cartoon. */
+  bonk(): void {
+    this.tone(520, 0, 0.09, 'square', 0.09, 180);
+    this.tone(240, 0.06, 0.32, 'sine', 0.16, 640);
+  }
+  /** Double saut : petit envol plus aigu. */
+  jump2(): void { this.tone(520, 0, 0.16, 'sine', 0.1, 1240); }
+  /** Pièce de la pluie d'or ramassée. */
+  pickup(): void {
+    this.tone(1318.5, 0, 0.08, 'square', 0.05);
+    this.tone(1975.5, 0.06, 0.2, 'square', 0.05);
+  }
+  /** Début d'un événement en direct : fanfare. */
+  fanfare(): void { [523.3, 659.3, 784, 1046.5, 784, 1046.5].forEach((f, i) => this.tone(f, i * 0.11, i === 5 ? 0.6 : 0.2, 'triangle', 0.16)); }
 
   /** Bruit de pas feutré lors de la marche ou la course */
   step(): void {

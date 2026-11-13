@@ -12,37 +12,62 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 interface Template {
   scene: THREE.Object3D;
   clips: THREE.AnimationClip[];
+  /** Vêtement principal (le plus grand), teinté à la couleur du joueur. */
+  cloth?: string;
 }
 
 const loader = new GLTFLoader();
 let main: Template | null = null;
 const crowd: Template[] = [];
+/** Tenues au choix des joueurs (skins) : 0 = costume (modèle principal), puis les tenues de la foule. */
+const OUTFIT_FILES = ['', 'human_female', 'm_casual', 'f_casual'];
+const outfits = new Map<number, Template>();
 
 export async function loadCharacterModel(url: string): Promise<void> {
   const g = await loader.loadAsync(url);
   main = { scene: g.scene, clips: g.animations };
 }
 
-/** Tenues supplémentaires pour la foule (en arrière-plan ; en cas d'échec, la foule garde le modèle principal). */
+/** Tenues supplémentaires (foule et skins des joueurs), en arrière-plan ; en cas d'échec, on garde le modèle principal. */
 export async function loadCrowdModels(): Promise<void> {
   if (!main || crowd.length) return;
   const male = main;
-  let female: Template | null = null;
-  try {
-    const f = await loader.loadAsync('/models/human_female.glb');
-    female = { scene: f.scene, clips: f.animations };
-    crowd.push(female);
-  } catch {
-    /* tenue indisponible : ignorée */
-  }
-  for (const [url, anims] of [['/models/m_casual.glb', male], ['/models/f_casual.glb', female ?? male]] as const) {
+  for (let i = 1; i < OUTFIT_FILES.length; i++) {
     try {
-      const g = await loader.loadAsync(url);
-      crowd.push({ scene: g.scene, clips: g.animations.length ? g.animations : anims.clips });
+      const g = await loader.loadAsync(`/models/${OUTFIT_FILES[i]}.glb`);
+      // les tenues sans animation reprennent celles du modèle du même genre (même squelette)
+      const anims = g.animations.length ? g.animations : (OUTFIT_FILES[i].startsWith('f') ? outfits.get(1) ?? male : male).clips;
+      const tpl = { scene: g.scene, clips: anims };
+      outfits.set(i, tpl);
+      crowd.push(tpl);
     } catch {
       /* tenue indisponible : ignorée */
     }
   }
+}
+
+/** La tenue est-elle chargée (sinon le personnage porte le costume en attendant) ? */
+export const hasOutfit = (skin: number): boolean => skin === 0 || outfits.has(skin);
+
+/** Nom du vêtement principal d'une tenue : le matériau qui couvre le plus de triangles (hors peau, cheveux, yeux). */
+function clothOf(tpl: Template): string {
+  if (tpl.cloth !== undefined) return tpl.cloth;
+  const size = new Map<string, number>();
+  tpl.scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.Material[];
+    const geo = mesh.geometry;
+    const total = geo.index ? geo.index.count : geo.getAttribute('position').count;
+    const groups = geo.groups.length ? geo.groups : [{ start: 0, count: total, materialIndex: 0 }];
+    for (const g of groups) {
+      const n = mats[g.materialIndex ?? 0]?.name.toLowerCase() ?? '';
+      if (!n || /skin|hair|eye/.test(n)) continue;
+      size.set(n, (size.get(n) ?? 0) + Math.min(g.count, total));
+    }
+  });
+  tpl.cloth = [...size.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+  return tpl.cloth;
 }
 
 const ONE_SHOT = new Set(['Jump', 'Wave', 'ThumbsUp', 'Yes', 'No', 'Punch', 'Death', 'WalkJump', 'Interact']);
@@ -62,6 +87,8 @@ const SIT_DROP = 0.46;
 export interface CharacterOptions {
   /** Personnage de la foule : tenue et apparence au hasard. */
   crowd?: boolean;
+  /** Tenue choisie par un joueur (0 = costume). */
+  skin?: number;
 }
 
 export class Character {
@@ -77,11 +104,16 @@ export class Character {
   private legs: THREE.Object3D[] = [];
   private sitting = false;
   private baseY = 0;
+  /** Tenue réellement portée (0 si la tenue demandée n'est pas encore chargée). */
+  readonly outfit: number;
 
   /** @param tint couleur du costume (joueur, gardes) ; ignorée pour la foule */
   constructor(tint?: number, opts: CharacterOptions = {}) {
     if (!main) throw new Error('Modèle du personnage non chargé');
-    const tpl = opts.crowd && crowd.length ? pick([main, ...crowd]) : main;
+    const chosen = !opts.crowd && opts.skin ? outfits.get(opts.skin) : undefined;
+    this.outfit = chosen ? opts.skin! : 0;
+    const tpl = opts.crowd && crowd.length ? pick([main, ...crowd]) : chosen ?? main;
+    const cloth = chosen ? clothOf(chosen) : '';
     const model = cloneSkinned(tpl.scene);
     this.model = model;
     model.updateMatrixWorld(true);
@@ -110,7 +142,7 @@ export class Character {
             if (!look.clothes.has(name)) look.clothes.set(name, pick(CLOTHES));
             color = look.clothes.get(name)!;
           }
-        } else if (tint !== undefined && (name === 'main' || name.includes('suit') || name.includes('shirt') || name.includes('body'))) {
+        } else if (tint !== undefined && (chosen ? name === cloth : name === 'main' || name.includes('suit') || name.includes('shirt') || name.includes('body'))) {
           color = tint;
         }
         if (color === null) return m;

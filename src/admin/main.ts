@@ -13,13 +13,14 @@ interface Overview {
   results: Array<{ at: number; sale: string; workId: string; frame: string; price: number; winner: string; npc: boolean }>;
   works: Work[];
   push: Array<{ at: number; player: string; category: string; title: string; body: string }>;
+  liveEvent: { kind: string; label: string; icon: string; endsAt: number; admin?: boolean } | null;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const nf = new Intl.NumberFormat('fr-FR');
 const when = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const title = (id: string) => catalog.works.find((w) => w.id === id)?.title ?? id;
-const FRAMES: Record<string, string> = { normal: 'Cadre normal', dore: 'Cadre doré (×2)', diamant: 'Cadre diamant (×5)' };
+const FRAMES: Record<string, string> = { normal: 'Cadre normal', dore: 'Cadre doré (×2)', diamant: 'Cadre diamant (×5)', arcenciel: 'Cadre arc-en-ciel (×10)' };
 const RAR: Record<string, string> = { commun: 'Commun', rare: 'Rare', epique: 'Épique', legendaire: 'Légendaire', mythique: 'Mythique' };
 
 let token = '';
@@ -74,6 +75,10 @@ function render(): void {
   $('sOnline').textContent = nf.format(data.stats.online);
   $('sDistricts').textContent = nf.format(data.stats.districts);
   $('sLive').textContent = data.live ? `${data.live.sale.label} · lot ${(data.live.lot?.index ?? 0) + 1}/${data.live.lot?.count ?? 0}` : 'aucune';
+  const ev = data.liveEvent;
+  $('liveState').textContent = ev
+    ? `${ev.icon} ${ev.label} en cours (${ev.admin ? 'admin abuse' : 'événement du convoi'}), fin à ${new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(ev.endsAt)}.`
+    : 'Aucun événement en cours.';
   $('atHint').textContent = data.dev ? 'Mode test : la vente peut être programmée tout de suite, et lancée avec « Lancer ».' : 'Au moins 1 h à l’avance, pour laisser le temps de prévenir les joueurs.';
 
   $('sales').innerHTML = data.upcoming.map((s) => {
@@ -138,6 +143,28 @@ $('saleForm').onsubmit = async (e) => {
   try {
     const r = await call<{ sale: Sale }>('POST', 'sales', { title: $<HTMLInputElement>('title').value, at, lots, announce: $<HTMLInputElement>('announce').checked });
     say(`Vente « ${r.sale.label} » programmée le ${when.format(r.sale.at)}${r.sale.announced ? ' et annoncée' : ''}.`);
+    await refresh();
+  } catch (err) {
+    say((err as Error).message, false);
+  }
+};
+
+// « admin abuse » en direct
+document.querySelectorAll<HTMLButtonElement>('[data-live]').forEach((b) => {
+  b.onclick = async () => {
+    try {
+      const r = await call<{ event: { label: string } }>('POST', 'live', { kind: b.dataset.live });
+      say(`${r.event.label} lancé pour tous les joueurs en ligne.`);
+      await refresh();
+    } catch (err) {
+      say((err as Error).message, false);
+    }
+  };
+});
+$('liveStop').onclick = async () => {
+  try {
+    await call('DELETE', 'live');
+    say('Événement arrêté.');
     await refresh();
   } catch (err) {
     say((err as Error).message, false);

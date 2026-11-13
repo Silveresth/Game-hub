@@ -57,6 +57,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   const COUNTRY_CODES = new Set((catalog.countries ?? []).map((c) => c.code));
   /** Code pays du catalogue, ou null (on n'accepte plus n'importe quels 2 caractères). */
   const cleanCountry = (c) => (typeof c === 'string' && COUNTRY_CODES.has(c.toUpperCase()) ? c.toUpperCase() : null);
+  /** Tenue du personnage (index dans catalog.skins), ou null. */
+  const cleanSkin = (s) => (Number.isInteger(s) && s >= 0 && s < (catalog.skins?.length ?? 4) ? s : null);
   const DECOR_COST = catalog.decorCost ?? 5000;
   const UPGRADES = catalog.upgrades ?? {};
   const REBIRTH = catalog.rebirth ?? { minLevel: 5, baseCost: 50_000_000, growth: 5, incomeBonus: 0.5 };
@@ -111,12 +113,33 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
 
   // ---------------------------------------------------------------- événements du convoi (toutes les 15 min, 3 min)
 
+  /**
+   * Événements « admin abuse » (déclenchés par l'admin ou le soir automatiquement), prioritaires sur ceux du convoi.
+   * On garde les derniers : un camion parti pendant un événement garde son contenu (cadre arc-en-ciel…)
+   * même si l'événement est arrêté plus tôt ou remplacé par un autre.
+   */
+  let adminEvents = []; // [{ kind, startsAt, endsAt }]
+  function setAdminEvent(kind, minutes, now = Date.now()) {
+    if (kind !== null && !EVENTS?.kinds[kind]?.admin) throw new Error('Événement inconnu');
+    // l'événement en cours s'arrête maintenant (sans effacer son passé)
+    for (const e of adminEvents) if (e.startsAt <= now && e.endsAt > now) e.endsAt = now;
+    if (kind === null) return null;
+    adminEvents = [...adminEvents.filter((e) => now - e.endsAt < 2 * 3_600_000).slice(-9), { kind, startsAt: now, endsAt: now + Math.max(1, Math.min(60, minutes)) * 60_000 }];
+    return liveAdminEvent(now);
+  }
+  const liveAdminEvent = (ms) => {
+    const e = adminEvents.findLast((x) => x.startsAt <= ms && x.endsAt > ms);
+    return e ? { ...EVENTS.kinds[e.kind], kind: e.kind, startsAt: e.startsAt, endsAt: e.endsAt } : null;
+  };
+
   /** Événement en cours à l'instant `ms` (ou null), et le prochain : identiques pour tous les joueurs. */
+
   function eventAt(ms) {
     if (!EVENTS) return { current: null, next: null };
     const cycle = EVENTS.cycleMinutes * 60_000;
     const dur = EVENTS.durationMinutes * 60_000;
-    const kinds = Object.keys(EVENTS.kinds);
+    // le cycle automatique ne tire que les événements du convoi (pas ceux réservés à l'admin)
+    const kinds = Object.keys(EVENTS.kinds).filter((k) => !EVENTS.kinds[k].admin);
     const make = (k) => {
       const kind = kinds[parseInt(hash(`event:${k}`).slice(0, 6), 16) % kinds.length];
       const startsAt = (k + 1) * cycle - dur;
@@ -124,8 +147,19 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     };
     const k = Math.floor(ms / cycle);
     const ev = make(k);
+    const admin = liveAdminEvent(ms);
+    if (admin) return { current: admin, next: ms >= ev.startsAt ? make(k + 1) : ev };
     if (ms >= ev.startsAt) return { current: ev, next: make(k + 1) };
     return { current: null, next: ev };
+  }
+
+  /** Pièce ramassée pendant une pluie d'or : environ 15 s de revenu, 100 pièces au moins. */
+  function coinPickup(p) {
+    accrue(p);
+    const amount = Math.max(100, Math.round(income(p) * 15));
+    p.coins += amount;
+    touch(p);
+    return amount;
   }
 
   /** Semaine en cours (elles commencent le lundi à 0 h UTC) : le classement hebdomadaire repart de zéro. */
@@ -230,6 +264,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     p.daily ??= { day: '', streak: 0 };
     // code d'invitation à partager (jamais l'identifiant du compte)
     p.inviteCode ??= randomBytes(5).toString('base64url');
+    p.skin ??= 0; // tenue du personnage (0 à 3)
     // une œuvre restée « en cours de vol » (serveur arrêté pendant un vol) revient à son propriétaire
     for (const a of p.artworks) delete a.carriedBy;
     return p;
@@ -506,6 +541,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       value: Math.round(value(p)), shielded: shielded(p), immuneUntil: p.immuneUntil,
       sec: publicSecurity(p),
       rebirths: p.rebirths ?? 0,
+      skin: p.skin ?? 0,
     };
   }
 
@@ -559,6 +595,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       id, tokenHash: hash(token), name: cleanName(body.name) ?? `Musée n°${players.size + 1}`,
       color: colors.includes(body.color) ? body.color : colors[0],
       country: cleanCountry(body.country) ?? 'FR',
+      skin: cleanSkin(body.skin) ?? 0,
       coins: START_COINS, level: 1, artworks: [], cash: 0, lastTick: Date.now(), createdAt: Date.now(), bought: [],
     });
     players.set(id, p);
@@ -672,6 +709,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       daily: dailyInfo(p),
       event: eventAt(Date.now()),
       inviteCode: p.inviteCode,
+      skin: p.skin ?? 0,
       // compte : l'e-mail n'est envoyé qu'à son propriétaire ; jamais le mot de passe ni son empreinte
       account: { email: p.email ?? null, password: !!p.passwordHash, google: !!p.googleKey },
     };
@@ -715,7 +753,10 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     const work = pool[Math.floor(rnd() * pool.length)];
     const f = rnd();
     const fx = ev === 'golden' ? 4 : 1;
-    const frame = f < frames.diamant.chance * fx ? 'diamant' : f < (frames.diamant.chance + frames.dore.chance) * fx ? 'dore' : 'normal';
+    // cadre arc-en-ciel (×10) : très rare, un camion sur quatre pendant le « convoi arc-en-ciel »
+    const rainbow = ev === 'arcenciel' ? 0.25 : (frames.arcenciel?.chance ?? 0) * fx;
+    const frame = rnd() < rainbow ? 'arcenciel'
+      : f < frames.diamant.chance * fx ? 'diamant' : f < (frames.diamant.chance + frames.dore.chance) * fx ? 'dore' : 'normal';
     return {
       window, workId: work.id, frame, rarity, event: ev,
       price: Math.round(work.price * frames[frame].mult * (ev === 'soldes' ? 0.7 : 1)),
@@ -833,6 +874,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
         if (colors.includes(body.color)) guest.color = body.color;
         const country = cleanCountry(body.country);
         if (country) guest.country = country;
+        const skin = cleanSkin(body.skin);
+        if (skin !== null) guest.skin = skin;
         touch(guest);
         changed(guest);
         return json(res, 200, { id: guest.id, state: state(guest), upgraded: true });
@@ -1072,7 +1115,10 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       const name = body.name === undefined ? p.name : cleanName(body.name);
       if (!name) return json(res, 422, { error: 'Nom de 2 à 24 caractères' });
       if ((p.email || p.googleKey) && nameTaken(name, p)) return json(res, 409, { error: 'Ce nom d’utilisateur est déjà pris' });
+      const skin = body.skin === undefined ? p.skin : cleanSkin(body.skin);
+      if (skin === null) return json(res, 422, { error: 'Tenue inconnue' });
       if (body.color !== undefined && !colors.includes(body.color)) return json(res, 422, { error: 'Couleur inconnue' });
+      p.skin = skin;
       p.name = name;
       if (body.color) p.color = body.color;
       if (body.country !== undefined) {
@@ -1304,6 +1350,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       if (!a || !w) return json(res, 422, { error: 'Œuvre invalide' });
       if (w.unique && ownerOf(w.id) && ownerOf(w.id) !== p) return json(res, 409, { error: 'Déjà possédée' });
       a.workId = w.id;
+      if (typeof body.frame === 'string' && own(frames, body.frame)) a.frame = body.frame; // tests : cadre au choix
       touch(p);
       changed(p);
       return json(res, 200, { state: state(p) });
@@ -1389,6 +1436,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     /** Multiplicateur du temps de décrochage (gants de velours). */
     stealMult: (p) => upgValue(p, 'gloves', 1),
     eventAt,
+    setAdminEvent,
+    coinPickup,
     /** Joueur dont le code d'invitation est `code` (ou null). */
     byInvite: (code) => (typeof code === 'string' && code ? [...players.values()].find((x) => x.inviteCode === code) ?? null : null),
     handle, leaderboard, authenticate, snapshot, stealBlocker, markCarried, returnCarried, completeTheft, arrest, caughtTrying,

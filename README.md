@@ -4,6 +4,14 @@ Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâ
 
 **État : phases 0 à 6 terminées, prêt à mettre en ligne** (voir [docs/LANCEMENT.md](docs/LANCEMENT.md)).
 
+**Phase 9 — plus vivant, plus fun :**
+- **Coup de parapluie ☂** (touche F, bouton violet sur mobile) : le joueur le plus proche (2,6 m, même étage) est projeté en arrière et sonné 1,1 s. Un voleur touché lâche l'œuvre, qui retourne aussitôt chez son propriétaire. Recharge 2,5 s ; impossible de voler pendant qu'on est sonné. Tout est décidé par le serveur.
+- **Événements en direct (« admin abuse »)**, lancés depuis le panneau admin ou au hasard chaque soir à 21 h (heure de Paris) : 💰 **Pluie d'or** (3 min : des pièces tombent sur la place, la première personne qui passe dessus empoche environ 15 s de revenu), 🌈 **Convoi arc-en-ciel** (10 min : un camion sur quatre porte un cadre arc-en-ciel), ⚡ **Super vitesse** (10 min : tout le monde court 60 % plus vite, contrôle de vitesse du serveur compris). Fanfare, confettis, ciel et porte-monnaie aux couleurs de l'événement.
+- **Cadre arc-en-ciel** (×10, 1 chance sur 1 000 au convoi) : arc-en-ciel qui défile sur le cadre (ou le socle d'une statue), étincelles multicolores.
+- **Tenues** : 4 silhouettes au choix (costume, tailleur, décontracté, décontractée), à la couleur du joueur, visibles par tous. Choix à l'inscription et dans « Compte ».
+- **Déplacements** : marche et course plus rapides (5,4 et 8,6 m/s), double saut, poussière sous les pieds en courant et à l'atterrissage.
+- **Monde plus lumineux** : ciel avec des nuages qui dérivent et un halo de soleil, étincelles au-dessus des œuvres Épiques et plus, classement de la place lisible des deux côtés.
+
 **Comptes, application mobile, maintien en éveil :**
 - **Comptes** (`server/accounts.mjs`) : inscription par nom d'utilisateur, e-mail et mot de passe (empreinte scrypt), connexion sur n'importe quel appareil, « mot de passe oublié » par e-mail (Brevo, lien valable 1 h, qui ferme les autres sessions), connexion Google (crée le compte au premier passage). Un invité qui s'inscrit garde son musée. « Jouer sans compte » reste possible.
 - **Application Android** (Capacitor, `capacitor.config.ts`, `android/`) : plein écran immersif, écran allumé, micro, icône et écran de démarrage tirés du logo. Elle ouvre le jeu en ligne. Voir [docs/MOBILE.md](docs/MOBILE.md).
@@ -89,7 +97,7 @@ Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâ
   - 6 par jour au maximum, rien entre 22 h et 8 h sauf « vol en cours » si le joueur l'active.
   - La permission est demandée après le premier achat, jamais au chargement.
   - Sur iPhone : jeu installé sur l'écran d'accueil (iOS 16.4+).
-- **Panneau admin** (`/admin/`, jeton dans la variable `SAM_ADMIN_TOKEN`, désactivé sans elle) : planning, création d'une vente admin abuse (titre, date au moins 1 h à l'avance, 1 à 8 lots avec cadre), annonce (push et bandeau en jeu), annulation, derniers lots adjugés, dernières notifications, joueurs en ligne.
+- **Panneau admin** (`/admin/`, jeton dans la variable `SAM_ADMIN_TOKEN`, désactivé sans elle) : événements en direct (pluie d'or, convoi arc-en-ciel, super vitesse, arrêt), planning, création d'une vente admin abuse (titre, date au moins 1 h à l'avance, 1 à 8 lots avec cadre), annonce (push et bandeau en jeu), annulation, derniers lots adjugés, dernières notifications, joueurs en ligne.
 - **Barre live :** affiche « 🔴 en direct » pendant une vente ; la landing aussi.
 
 **Phase 3 — sécurité, failles et marché noir** (`server/guards.mjs`, `src/game/guards.ts`, panneau Sécurité, tente du marché noir) :
@@ -184,6 +192,8 @@ Variables utiles :
 | Touche | Action |
 | --- | --- |
 | ZQSD / WASD / flèches, Maj | marcher, courir |
+| Espace (deux fois) | sauter, double saut |
+| **F** | coup de parapluie ☂ |
 | Clic droit + souris, molette | tourner la caméra, zoomer |
 | **E** | acheter au convoi, accrocher / déplacer une œuvre, voler (maintenir), monter l'escalier, entrer (hôtel des ventes, marché noir) |
 | **R** | revendre une œuvre (deux appuis), descendre l'escalier, décor de la salle |
@@ -219,7 +229,7 @@ tests/                     ws.mjs et auction.mjs (serveur), smoke.mjs (navigateu
 
 | Méthode | Route | Rôle |
 | --- | --- | --- |
-| POST | `/api/game/login` | crée un joueur invité `{ name, color, country }` ou reprend une session `{ id, token }` ; renvoie l’état et le gain hors ligne |
+| POST | `/api/game/login` | crée un joueur invité `{ name, color, country, skin }` ou reprend une session `{ id, token }` ; renvoie l’état et le gain hors ligne |
 | POST | `/api/game/register`, `/login/password`, `/password/forgot`, `/password/reset`, `/logout` | comptes : inscription `{ username, email, password }` (avec une session d'invité : son musée devient le compte), connexion, lien de réinitialisation par e-mail, nouveau mot de passe, déconnexion de l'appareil |
 | GET | `/api/ping` | maintien en éveil (interroge aussi la base) |
 | POST | `/api/game/login/google`, `/api/game/link/google` | retrouver ou lier son musée avec Google (si `SAM_GOOGLE_CLIENT_ID`) |
@@ -230,8 +240,8 @@ tests/                     ws.mjs et auction.mjs (serveur), smoke.mjs (navigateu
 | POST | `/api/game/upgrade`, `/rebirth`, `/daily` | boutique `{ id: speed\|lock\|vault\|gloves\|luck }`, Renaissance, récompense du jour |
 | POST | `/api/game/push/subscribe`, `/api/game/push/prefs` | abonner un appareil aux notifications, régler les catégories |
 | GET | `/api/push/key`, `/api/config` | clé publique VAPID, configuration publique (Google) |
-| GET/POST/DELETE | `/api/admin/overview`, `/api/admin/sales[/:id[/announce\|/start]]` | panneau admin (en-tête `x-admin-token`) ; `start` seulement en mode test |
-| WS | `/ws` | quartier en temps réel. Client → serveur : `auth`, `pos`, `steal`, `steal-cancel`, `lock`, `tool`, `refresh`, `hall-enter`, `hall-leave`, `bid`, `chat`, `emote`, `voice`, `rtc` (l'authentification accepte `join` : code d'invitation). Serveur → client : `welcome`, `snap` (joueurs et gardes), `plot`, `steal`, `alarm`, `tool`, `fx`, `hall`, `won`, `sale`… Ping toutes les 30 s : une connexion morte est fermée |
+| GET/POST/DELETE | `/api/admin/overview`, `/api/admin/sales[/:id[/announce\|/start]]`, `/api/admin/live` | panneau admin (en-tête `x-admin-token`) ; `start` seulement en mode test ; `live` : POST `{ kind: pluie\|arcenciel\|vitesse, minutes? }` lance un événement en direct, DELETE l'arrête |
+| WS | `/ws` | quartier en temps réel. Client → serveur : `auth`, `pos`, `steal`, `steal-cancel`, `lock`, `tool`, `bonk`, `refresh`, `hall-enter`, `hall-leave`, `bid`, `chat`, `emote`, `voice`, `rtc` (l'authentification accepte `join` : code d'invitation). Serveur → client : `welcome`, `snap` (joueurs et gardes), `plot`, `steal`, `alarm`, `tool`, `fx`, `bonk`, `coins`, `coin-got`, `live-event`, `hall`, `won`, `sale`… Ping toutes les 30 s : une connexion morte est fermée |
 | GET | `/api/live?v=<id visiteur>` | flux SSE de la barre live, envoyé toutes les 5 s ; la connexion ouverte compte comme « en ligne », plusieurs onglets comptent pour une personne |
 | GET | `/api/stats` | mêmes chiffres en une requête (secours, healthcheck) |
 

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Character } from './character';
 import { Label } from './labels';
 import { artTexture } from './convoy';
+import { setRainbow } from './textures';
 import type { HallSeat, HallState } from './net';
 
 /**
@@ -11,7 +12,7 @@ import type { HallSeat, HallState } from './net';
  */
 const COLS = 8;
 const STAGE_Z = -12;
-const FRAME_COLORS: Record<string, number> = { normal: 0x3a2516, dore: 0xe0b041, diamant: 0xcff0ff };
+const FRAME_COLORS: Record<string, number> = { normal: 0x3a2516, dore: 0xe0b041, diamant: 0xcff0ff, arcenciel: 0xff5ea8 };
 
 export function seatPos(seat: number): THREE.Vector3 {
   const row = Math.floor(seat / COLS);
@@ -202,8 +203,11 @@ export class AuctionHall {
         m.map = artTexture(lot.workId);
         m.needsUpdate = true;
         const f = this.frame.material as THREE.MeshStandardMaterial;
-        f.color.setHex(FRAME_COLORS[lot.frame] ?? FRAME_COLORS.normal);
-        f.metalness = lot.frame === 'normal' ? 0.1 : 1;
+        setRainbow(f, lot.frame === 'arcenciel');
+        if (lot.frame !== 'arcenciel') {
+          f.color.setHex(FRAME_COLORS[lot.frame] ?? FRAME_COLORS.normal);
+          f.metalness = lot.frame === 'normal' ? 0.1 : 1;
+        }
         this.auctioneer?.gesture('Wave', 'Idle');
       }
       // une main levée à chaque nouvelle enchère

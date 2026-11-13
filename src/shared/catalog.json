@@ -9,7 +9,8 @@
   "frames": {
     "normal": { "label": "", "mult": 1, "chance": 0.945 },
     "dore": { "label": "Cadre doré", "mult": 2, "chance": 0.05 },
-    "diamant": { "label": "Cadre diamant", "mult": 5, "chance": 0.005 }
+    "diamant": { "label": "Cadre diamant", "mult": 5, "chance": 0.005 },
+    "arcenciel": { "label": "Cadre arc-en-ciel", "mult": 10, "chance": 0.001 }
   },
   "incomeRate": 0.006,
   "startCoins": 500,
@@ -51,9 +52,20 @@
     "kinds": {
       "golden": { "label": "Heure dorée", "icon": "✨", "desc": "Cadres dorés et diamant 4 fois plus fréquents au convoi" },
       "rare": { "label": "Trésors rares", "icon": "💎", "desc": "Œuvres Rares et Épiques 3 fois plus fréquentes au convoi" },
-      "soldes": { "label": "Soldes au convoi", "icon": "🏷", "desc": "Toutes les œuvres du convoi à −30 %" }
+      "soldes": { "label": "Soldes au convoi", "icon": "🏷", "desc": "Toutes les œuvres du convoi à −30 %" },
+      "pluie": { "label": "Pluie d’or", "icon": "💰", "desc": "Des pièces tombent sur la place : le premier arrivé les ramasse", "admin": true },
+      "arcenciel": { "label": "Convoi arc-en-ciel", "icon": "🌈", "desc": "Un camion sur quatre porte un cadre arc-en-ciel (valeur ×10)", "admin": true },
+      "vitesse": { "label": "Super vitesse", "icon": "⚡", "desc": "Tout le monde court 60 % plus vite", "admin": true }
     }
   },
+  "liveEvents": { "dailyHour": 21, "minutes": { "pluie": 3, "arcenciel": 10, "vitesse": 10 }, "coinSeconds": 20 },
+  "bonk": { "range": 2.6, "cooldownMs": 2500, "stunMs": 1100 },
+  "skins": [
+    { "id": 0, "label": "Costume" },
+    { "id": 1, "label": "Tailleur" },
+    { "id": 2, "label": "Décontracté" },
+    { "id": 3, "label": "Décontractée" }
+  ],
   "themes": ["classic", "modern", "futuristic", "zen"],
   "stealSeconds": { "commun": 2.5, "rare": 4, "epique": 6, "legendaire": 9, "mythique": 20 },
   "ticket": { "min": 20, "valueShare": 0.0005, "validMinutes": 10 },

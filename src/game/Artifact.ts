@@ -2,7 +2,7 @@
  * Œuvre d'art 3D : tableau accroché au mur (aux vraies proportions de l'image) ou sculpture posée au sol.
  */
 import * as THREE from 'three';
-import { artTextureByUrl, aspectOf } from './textures';
+import { artTextureByUrl, aspectOf, setRainbow } from './textures';
 
 export interface ArtifactConfig {
   id: string;
@@ -22,6 +22,7 @@ const FRAME_COLORS: Record<string, number> = {
   normal: 0x3b2a15,
   dore: 0xe8b64c,
   diamant: 0x9fd0ff,
+  arcenciel: 0xff5ea8,
 };
 
 const SCULPT_COLORS: Record<string, number> = {
@@ -69,6 +70,10 @@ export class Artifact {
       new THREE.BoxGeometry(1, 1, 0.08),
       std(frameColor, { roughness: metal ? 0.22 : 0.45, metalness: metal ? 0.85 : 0.15 }),
     );
+    if (config.frameStyle === 'arcenciel') {
+      this.rainbowMat = frame.material as THREE.MeshStandardMaterial;
+      setRainbow(this.rainbowMat, true);
+    }
     frame.castShadow = true;
     frame.receiveShadow = true;
     const canvasMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.6 });
@@ -133,6 +138,10 @@ export class Artifact {
       plinth.position.y = 0.45;
       const plinthCap = new THREE.Mesh(new THREE.BoxGeometry(1.1 * s, 0.08, 1.1 * s), std(0xc9c2b2, { roughness: 0.5 }));
       plinthCap.position.y = 0.94;
+      if (config.frameStyle === 'arcenciel') {
+        this.rainbowMat = plinthCap.material as THREE.MeshStandardMaterial;
+        setRainbow(this.rainbowMat, true);
+      }
       figure.position.y = 0.98;
       this.group.add(plinth, plinthCap, figure);
       this.group.traverse((o) => ((o as THREE.Mesh).castShadow = (o as THREE.Mesh).receiveShadow = true));
@@ -181,6 +190,10 @@ export class Artifact {
     this.floatBase = mesh.position.y;
     const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.35 * s, 0.4 * s, 0.25, 24), std(color, { roughness: 0.3 }));
     ped.position.y = 0.125;
+    if (config.frameStyle === 'arcenciel') {
+      this.rainbowMat = ped.material as THREE.MeshStandardMaterial;
+      setRainbow(this.rainbowMat, true);
+    }
     this.group.add(ped);
     this.group.traverse((o) => ((o as THREE.Mesh).castShadow = (o as THREE.Mesh).receiveShadow = true));
   }
@@ -191,8 +204,11 @@ export class Artifact {
   }
 
   /** Libère géométries et matériaux (les textures d'œuvres sont partagées : elles restent en cache). */
+  private rainbowMat: THREE.MeshStandardMaterial | null = null;
+
   dispose(): void {
     this.disposed = true;
+    if (this.rainbowMat) setRainbow(this.rainbowMat, false);
     this.group.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;

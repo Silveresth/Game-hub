@@ -256,6 +256,51 @@ export function planeUvMeters(geo: THREE.PlaneGeometry, w: number, h: number, ti
   return geo;
 }
 
+// ------------------------------------------------------------------ cadres arc-en-ciel (couleur qui tourne, légère lueur)
+
+const rainbow = new Set<THREE.MeshStandardMaterial>();
+let rainbowTex: THREE.CanvasTexture | null = null;
+/** Dégradé de tout le spectre, répété : il défile sur le cadre. */
+function rainbowTexture(): THREE.CanvasTexture {
+  if (rainbowTex) return rainbowTex;
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 4;
+  const g = c.getContext('2d')!;
+  const grd = g.createLinearGradient(0, 0, 256, 0);
+  for (let i = 0; i <= 6; i++) grd.addColorStop(i / 6, `hsl(${i * 60}, 95%, 60%)`);
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 256, 4);
+  rainbowTex = new THREE.CanvasTexture(c);
+  rainbowTex.colorSpace = THREE.SRGBColorSpace;
+  rainbowTex.wrapS = THREE.RepeatWrapping;
+  return rainbowTex;
+}
+/** Inscrit (ou retire) un matériau de cadre arc-en-ciel : un arc-en-ciel lumineux qui défile. */
+export function setRainbow(mat: THREE.MeshStandardMaterial, on: boolean): void {
+  if (on) {
+    if (rainbow.has(mat)) return;
+    rainbow.add(mat);
+    mat.map = mat.emissiveMap = rainbowTexture();
+    mat.color.setHex(0xffffff);
+    mat.emissive.setHex(0xffffff);
+    mat.emissiveIntensity = 0.4;
+    mat.metalness = 0.35;
+    mat.roughness = 0.25;
+    mat.needsUpdate = true;
+  } else if (rainbow.delete(mat)) {
+    mat.map = mat.emissiveMap = null;
+    mat.emissive.setHex(0x000000);
+    mat.needsUpdate = true;
+  }
+}
+export function updateRainbow(t: number): void {
+  if (!rainbowTex || !rainbow.size) return;
+  rainbowTex.offset.x = (t * 0.25) % 1;
+  const pulse = 0.35 + Math.sin(t * 4) * 0.12;
+  for (const m of rainbow) m.emissiveIntensity = pulse;
+}
+
 // ------------------------------------------------------------------ toiles du catalogue
 
 const artLoader = new THREE.TextureLoader();

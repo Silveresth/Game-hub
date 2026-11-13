@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Character } from './character';
+import { Character, hasOutfit } from './character';
 import { Label } from './labels';
 import { artTexture } from './convoy';
 import type { NetPlayer } from './net';
@@ -23,8 +23,12 @@ class Remote {
   speaking = false;
   readonly bubble: SpeechBubble;
 
+  /** Projection (coup de parapluie) : décalage qui s'amortit, ajouté à la position interpolée. */
+  knock = new THREE.Vector3();
+  stunUntil = 0;
+
   constructor(scene: THREE.Scene, readonly p: NetPlayer) {
-    this.ch = new Character(parseInt(p.color.slice(1), 16));
+    this.ch = new Character(parseInt(p.color.slice(1), 16), { skin: p.skin ?? 0 });
     this.ch.root.position.set(p.x, 0, p.z);
     this.target.set(p.x, 0, p.z);
     this.ch.root.add(this.label.sprite);
@@ -93,7 +97,9 @@ export class RemotePlayers {
       if (p.id === selfId) continue;
       seen.add(p.id);
       let r = this.map.get(p.id);
-      if (!r || r.p.color !== p.color || r.p.name !== p.name) {
+      const skin = p.skin ?? 0;
+      // nouvelle couleur, nouveau nom ou nouvelle tenue (ou tenue enfin chargée) : personnage reconstruit
+      if (!r || r.p.color !== p.color || r.p.name !== p.name || (r.p.skin ?? 0) !== skin || (r.ch.outfit !== skin && hasOutfit(skin))) {
         if (r) this.remove(p.id);
         r = new Remote(this.scene, p);
         this.map.set(p.id, r);
@@ -147,6 +153,18 @@ export class RemotePlayers {
     return [...this.map.values()].map((r) => ({ ...r.p, voice: r.voice }));
   }
 
+  /** Coup de parapluie : le frappeur fait un geste ; la cible est projetée et titube. */
+  bonk(fromId: string, toId: string | null, from: THREE.Vector3, stunMs: number): void {
+    const a = this.map.get(fromId);
+    a?.ch.gesture('Punch', 'Idle');
+    const b = toId ? this.map.get(toId) : undefined;
+    if (!b) return;
+    const away = b.ch.root.position.clone().sub(from).setY(0);
+    if (away.lengthSq() < 1e-4) away.set(0, 0, 1);
+    b.knock.copy(away.normalize().multiplyScalar(1.6)).setY(0.9);
+    b.stunUntil = performance.now() + stunMs;
+  }
+
   setWanted(id: string, wanted: boolean): void {
     const r = this.map.get(id);
     if (!r || r.wanted === wanted) return;
@@ -159,12 +177,18 @@ export class RemotePlayers {
     for (const r of this.map.values()) {
       const pos = r.ch.root.position;
       const k = 1 - Math.exp(-12 * dt);
+      // le décalage de projection est retiré avant l'interpolation, puis ré-appliqué en s'amortissant
+      pos.sub(r.knock);
       const far = pos.distanceTo(r.target) > 8;
       if (far) pos.copy(r.target);
       else pos.lerp(r.target, k);
+      r.knock.multiplyScalar(Math.exp(-5 * dt));
+      pos.add(r.knock);
       let d = r.ry - r.ch.root.rotation.y;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       r.ch.root.rotation.y += d * k;
+      // sonné : il titube sur place
+      r.ch.root.rotation.z = performance.now() < r.stunUntil ? Math.sin(t * 18) * 0.12 : 0;
       r.ch.root.visible = !this.hidden(pos.x, pos.z, r.floor);
       r.ch.play(['Idle', 'Walking', 'Running', 'Jump'].includes(r.anim) ? r.anim : 'Idle');
       r.ch.update(dt);

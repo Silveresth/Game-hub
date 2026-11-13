@@ -3,7 +3,7 @@ import { Label } from './labels';
 import { CATALOG, artUrl, money, perSec, incomeOf, work } from './catalog';
 import { ROAD } from './district';
 import type { ConvoyItem } from './api';
-import { artTextureByUrl, aspectOf } from './textures';
+import { artTextureByUrl, aspectOf, setRainbow } from './textures';
 
 /** Texture d'une œuvre du catalogue (cache partagé avec les tableaux des musées, voir textures.ts). */
 export function artTexture(id: string): THREE.Texture {
@@ -14,6 +14,7 @@ const FRAME_COLORS: Record<string, number> = {
   normal: 0x1f2430,
   dore: 0xffd36b,
   diamant: 0x9fe3ff,
+  arcenciel: 0xff5ea8,
 };
 
 const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
@@ -36,6 +37,8 @@ class Truck {
   private beam: THREE.Mesh;
   private wheels: THREE.Mesh[] = [];
   private sirens: THREE.Mesh[] = [];
+  /** Faisceau qui change de couleur (cadre arc-en-ciel). */
+  rainbowBeam = false;
 
   constructor() {
     // 1. Châssis & carrosserie moderne / cyberpunk
@@ -187,12 +190,16 @@ class Truck {
     else void entry.ready.then(fit);
 
     const frameMat = this.frame.material as THREE.MeshStandardMaterial;
-    frameMat.color.setHex(FRAME_COLORS[item.frame] ?? 0xffd36b);
-    frameMat.metalness = item.frame === 'normal' ? 0.3 : 0.95;
-    frameMat.roughness = item.frame === 'normal' ? 0.4 : 0.15;
+    setRainbow(frameMat, item.frame === 'arcenciel');
+    if (item.frame !== 'arcenciel') {
+      frameMat.color.setHex(FRAME_COLORS[item.frame] ?? 0xffd36b);
+      frameMat.metalness = item.frame === 'normal' ? 0.3 : 0.95;
+      frameMat.roughness = item.frame === 'normal' ? 0.4 : 0.15;
+    }
 
     const special = item.frame !== 'normal' || item.rarity !== 'commun';
     this.beam.visible = special;
+    this.rainbowBeam = item.frame === 'arcenciel';
     (this.beam.material as THREE.MeshBasicMaterial).color.set(
       item.frame === 'diamant' ? '#9fe3ff' : item.frame === 'dore' ? '#ffd36b' : rar.color,
     );
@@ -204,7 +211,7 @@ class Truck {
     const item = this.item!;
     const wk = work(item.workId);
     const rar = CATALOG.rarities[item.rarity];
-    const EVENT_TAG: Record<string, string> = { golden: '✨ HEURE DORÉE', rare: '💎 TRÉSORS RARES', soldes: '🏷 SOLDES −30 %' };
+    const EVENT_TAG: Record<string, string> = { golden: '✨ HEURE DORÉE', rare: '💎 TRÉSORS RARES', soldes: '🏷 SOLDES −30 %', arcenciel: '🌈 CONVOI ARC-EN-CIEL' };
     const tag = (item.frame === 'normal' ? rar.label : `${rar.label} · ${CATALOG.frames[item.frame].label}`) + (item.event ? ` · ${EVENT_TAG[item.event] ?? ''}` : '');
     const visible = !item.sold;
     this.canvasFront.visible = this.canvasBack.visible = this.frame.visible = visible;
@@ -214,7 +221,7 @@ class Truck {
         ? [{ text: 'ACQUIS', color: '#ff6b6b', size: 72, weight: 900 }]
         : [
             { text: wk.title.length > 28 ? `${wk.title.slice(0, 26)}…` : wk.title, color: '#ffffff', size: 48, weight: 900 },
-            { text: tag.toUpperCase(), color: item.frame === 'normal' ? rar.color : '#ffd36b', size: 38, weight: 800 },
+            { text: tag.toUpperCase(), color: item.frame === 'arcenciel' ? '#ff8fd8' : item.frame === 'normal' ? rar.color : '#ffd36b', size: 38, weight: 800 },
             { text: `${money(item.price)} pièces  ·  +${perSec(incomeOf(item.workId, item.frame))}/s`, color: '#7dff9a', size: 44, weight: 900 },
           ],
       { bg: 'rgba(10,14,24,0.92)', border: item.sold ? '#ff6b6b' : rar.color },
@@ -228,6 +235,7 @@ class Truck {
 
   spinWheels(dist: number): void {
     for (const w of this.wheels) w.rotation.y = -dist / 0.48;
+    if (this.rainbowBeam) (this.beam.material as THREE.MeshBasicMaterial).color.setHSL((performance.now() / 1000 * 0.25) % 1, 0.9, 0.6);
   }
 }
 

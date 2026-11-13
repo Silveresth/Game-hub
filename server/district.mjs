@@ -46,6 +46,14 @@ function cleanChat(raw) {
 export async function attachDistricts(httpServer, game, { layoutFile, devMode = false, auctions = null }) {
   const layout = JSON.parse(await readFile(layoutFile, 'utf8'));
   const CELL = layout.cell;
+  // coup de parapluie (« bonk ») et événements en direct (pluie d'or, super vitesse…)
+  const BONK = game.catalog.bonk ?? { range: 2.6, cooldownMs: 2500, stunMs: 1100 };
+  const LIVE = game.catalog.liveEvents ?? { dailyHour: 21, minutes: { pluie: 3, arcenciel: 10, vitesse: 10 }, coinSeconds: 20 };
+  const COINS_MAX = 40;
+  /** Multiplicateur de vitesse de l'événement en cours (super vitesse : ×1,6), recalculé à chaque tick. */
+  let eventSpeed = 1;
+  let raining = false;
+  let coinSeq = 0;
   // durées de décrochage : une seule source, le catalogue partagé avec le client
   const STEAL_SECONDS = game.catalog.stealSeconds ?? { commun: 2.5, rare: 4, epique: 6, legendaire: 9, mythique: 20 };
   const brain = createGuardBrain(CELL, layout.rooms);
@@ -138,6 +146,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       carry: c.carrying ? { workId: c.carrying.workId, frame: c.carrying.frame } : null,
       disguised: c.disguiseUntil > Date.now(),
       voice: !!c.voice,
+      skin: c.p.skin ?? 0,
       stealing: c.stealing ? { plot: c.stealing.plot.index, uid: c.stealing.uid, endsAt: c.stealing.endsAt } : null,
     };
   }
@@ -234,6 +243,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       t: 'welcome', now: Date.now(), you: { id: p.id, plot: pl.index, jailUntil: c.jailUntil },
       plots: d.plots.map(plotInfo), players: [...d.conns.values()].map(playerInfo), guards: guardsInfo(d), district: d.id,
       chat: d.chat, invite, max: MAX_ONLINE,
+      coins: [...(d.coins?.values() ?? [])].map(({ id, x, z }) => ({ id, x, z })),
     });
     broadcast(d, { t: 'plot', plot: plotInfo(pl) });
     broadcast(d, { t: 'join', player: playerInfo(c), invited: invite?.status === 'ok' ? invite.name : null });
@@ -269,6 +279,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
     const now = Date.now();
     const fail = (error) => send(c.ws, { t: 'steal', phase: 'refused', error });
     if (c.jailUntil > now) return fail(`En cellule encore ${Math.ceil((c.jailUntil - now) / 1000)} s`);
+    if (c.stunUntil > now) return fail('Vous êtes sonné !');
     if (c.carrying || c.stealing) return fail('Vous avez déjà les mains prises');
     const pl = c.d.plots[msg.plot];
     if (!pl?.ownerId || pl.ownerId === c.p.id) return fail('Rien à voler ici');
@@ -536,6 +547,66 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
     for (const d of districts.values()) tickDistrict(d, now);
   }, TICK_MS).unref();
 
+  // ---------------------------------------------------------------- événements en direct (« admin abuse »)
+
+  /** Point de la place libre pour une pièce : hors route, fontaine, étals, classement et parvis des musées. */
+  function coinSpot() {
+    for (let i = 0; i < 20; i++) {
+      const north = Math.random() < 0.5;
+      const x = -66 + Math.random() * 132;
+      const z = north ? -(8.5 + Math.random() * 6.5) : 8.5 + Math.random() * 5;
+      if (Math.abs(Math.abs(x) - 40) < 4.5 || (north && Math.abs(x) < 5.5) || (!north && Math.abs(x) < 7.5)) continue;
+      return { x: r2(x), z: r2(z) };
+    }
+    return null;
+  }
+
+  const parisClock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  let autoDay = '';
+
+  /** Démarre un événement en direct pour tout le serveur (bannière chez tous les joueurs). */
+  function startLiveEvent(kind, minutes = LIVE.minutes?.[kind] ?? 5) {
+    const event = game.setAdminEvent(kind, minutes);
+    broadcastAll({ t: 'live-event', event });
+    return event;
+  }
+  function stopLiveEvent() {
+    game.setAdminEvent(null);
+    broadcastAll({ t: 'live-event', event: null });
+  }
+
+  setInterval(() => {
+    const now = Date.now();
+    const current = game.eventAt(now).current;
+    eventSpeed = current?.kind === 'vitesse' ? 1.6 : 1;
+    raining = current?.kind === 'pluie';
+    // chaque soir à l'heure prévue (heure de Paris), un événement au hasard si personne ne l'a déjà lancé
+    const p = Object.fromEntries(parisClock.formatToParts(new Date(now)).map((x) => [x.type, x.value]));
+    const day = `${p.year}-${p.month}-${p.day}`;
+    if (Number(p.hour) === LIVE.dailyHour && Number(p.minute) < 2 && autoDay !== day && !current?.admin && conns.size) {
+      autoDay = day;
+      const kinds = Object.keys(LIVE.minutes ?? {});
+      if (kinds.length) startLiveEvent(kinds[Math.floor(Math.random() * kinds.length)]);
+    }
+    // pluie d'or : de nouvelles pièces sur la place de chaque quartier, les anciennes disparaissent
+    for (const d of districts.values()) {
+      d.coins ??= new Map();
+      const gone = [...d.coins.values()].filter((c) => c.until < now).map((c) => c.id);
+      for (const id of gone) d.coins.delete(id);
+      const add = [];
+      if (raining) {
+        for (let i = 0; i < 4 && d.coins.size < COINS_MAX; i++) {
+          const spot = coinSpot();
+          if (!spot) continue;
+          const coin = { id: ++coinSeq, ...spot, until: now + (LIVE.coinSeconds ?? 20) * 1000 };
+          d.coins.set(coin.id, coin);
+          add.push({ id: coin.id, x: coin.x, z: coin.z });
+        }
+      }
+      if (add.length || gone.length) broadcast(d, { t: 'coins', add, del: gone });
+    }
+  }, 1500).unref();
+
   // Achat, agrandissement, vol… : le quartier où se trouve ce musée est prévenu
   game.onChange((p) => {
     const d = districts.get(placement.get(p.id));
@@ -566,8 +637,9 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       }
       // dt plafonné à 1 s : se taire longtemps ne donne pas le droit de se téléporter loin
       const dt = Math.min(1, Math.max(0.05, (now - c.lastPosAt) / 1000));
-      // vitesse maximale, augmentée par les baskets de sprint achetées à la boutique
-      const max = (c.carrying ? CARRY_SPEED_MAX : SPEED_MAX) * (1 + game.speedBonus(c.p)) * dt + 1.2;
+      // vitesse maximale, augmentée par les baskets de sprint (boutique) et par l'événement « super vitesse » ;
+      // un joueur assommé est projeté en arrière : petite marge en plus
+      const max = (c.carrying ? CARRY_SPEED_MAX : SPEED_MAX) * (1 + game.speedBonus(c.p)) * eventSpeed * dt + (c.stunUntil > now - 1500 ? 4 : 1.2);
       if (!devMode && Math.hypot(x - c.x, z - c.z) > max) {
         // déplacement impossible : on remet le joueur à sa dernière position connue
         send(c.ws, { t: 'teleport', x: c.x, z: c.z, f: c.f });
@@ -617,6 +689,15 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
         }
       }
       c.inPlot = visiting ? visiting.index : -1;
+      // pluie d'or : le joueur ramasse les pièces sur lesquelles il passe (au rez-de-chaussée)
+      if (c.d.coins?.size && (c.f ?? 0) === 0) {
+        for (const [id, coin] of c.d.coins) {
+          if (Math.hypot(coin.x - c.x, coin.z - c.z) > 1.5) continue;
+          c.d.coins.delete(id);
+          send(c.ws, { t: 'coin-got', id, amount: game.coinPickup(c.p) });
+          broadcast(c.d, { t: 'coins', del: [id], by: c.p.id });
+        }
+      }
       // hors des salles d'un musée, on est forcément au rez-de-chaussée
       if (c.f > 0 && !c.d.plots.some((x) => x.ownerId && isIn(x, c))) {
         c.f = 0;
@@ -635,6 +716,27 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       pl.lockedUntil = now + lockMs;
       pl.lockReadyAt = now + lockMs + LOCK_COOLDOWN_MS;
       broadcast(c.d, { t: 'lock', plot: pl.index, lockedUntil: pl.lockedUntil, lockReadyAt: pl.lockReadyAt });
+    } else if (msg.t === 'bonk') {
+      // coup de parapluie : le joueur le plus proche (même étage) est sonné ; s'il porte une œuvre volée, il la lâche
+      if (c.jailUntil > now || c.stunUntil > now || now - (c.bonkAt ?? 0) < BONK.cooldownMs) return;
+      c.bonkAt = now;
+      let target = null;
+      let best = BONK.range;
+      for (const o of c.d.conns.values()) {
+        if (o === c || (o.f ?? 0) !== (c.f ?? 0) || o.jailUntil > now) continue;
+        const d = dist(o, c);
+        if (d < best) {
+          best = d;
+          target = o;
+        }
+      }
+      const dropped = !!target?.carrying;
+      if (target) {
+        target.stunUntil = now + BONK.stunMs;
+        if (target.stealing) cancelSteal(target, 'bonk');
+        if (target.carrying) giveBack(target, `${c.p.name} vous a assommé : l’œuvre retourne chez son propriétaire`);
+      }
+      broadcast(c.d, { t: 'bonk', from: c.p.id, to: target?.p.id ?? null, dropped, x: r2(c.x), z: r2(c.z), stunMs: BONK.stunMs });
     } else if (msg.t === 'chat') {
       // discussion du quartier : 4 messages par tranche de 8 s au plus
       c.chatTimes = (c.chatTimes ?? []).filter((t) => now - t < 8000);
@@ -747,6 +849,8 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
   });
 
   return {
+    startLiveEvent,
+    stopLiveEvent,
     stats: () => ({ districts: districts.size, online: conns.size }),
     id: randomBytes(4).toString('hex'),
   };

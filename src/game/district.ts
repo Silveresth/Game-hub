@@ -161,6 +161,14 @@ export class District {
   }
 
   update(t: number): void {
+    if (this.skyMat) {
+      const u = this.skyMat.uniforms;
+      const st = this.skyTint;
+      u.time.value = t;
+      st.amount += (st.want - st.amount) * 0.03;
+      u.tintAmt.value = st.amount;
+      if (st.rainbow) st.color.setHSL((t * 0.08) % 1, 0.8, 0.6);
+    }
     const w = this.water.material as THREE.MeshStandardMaterial;
     w.emissiveIntensity = 0.25 + Math.sin(t * 1.5) * 0.08;
     // gouttes de la fontaine : chacune suit une parabole, du bol central jusqu'au bassin
@@ -177,25 +185,68 @@ export class District {
 
   // ---------------------------------------------------------------- construction
 
+  /** Ciel : dégradé, nuages qui dérivent, halo du soleil ; teinté pendant les événements en direct. */
+  private skyMat: THREE.ShaderMaterial | null = null;
+  private skyTint = { color: new THREE.Color('#ffffff'), amount: 0, want: 0, rainbow: false };
+
   private buildSky(scene: THREE.Scene): void {
-    const sky = new THREE.Mesh(
-      new THREE.SphereGeometry(500, 32, 16),
-      new THREE.ShaderMaterial({
-        side: THREE.BackSide,
-        depthWrite: false,
-        uniforms: { top: { value: new THREE.Color('#2568ba') }, horizon: { value: new THREE.Color('#9fc2ea') } },
-        vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-        fragmentShader: /* glsl */ `
-          uniform vec3 top;
-          uniform vec3 horizon;
-          varying vec3 vP;
-          void main() {
-            gl_FragColor = vec4(mix(horizon, top, smoothstep(-0.02, 0.4, vP.y)), 1.0);
-            #include <colorspace_fragment>
-          }`,
-      }),
-    );
+    this.skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      uniforms: {
+        top: { value: new THREE.Color('#1f6fd1') },
+        horizon: { value: new THREE.Color('#a9d0f5') },
+        time: { value: 0 },
+        tint: { value: this.skyTint.color },
+        tintAmt: { value: 0 },
+        sunDir: { value: new THREE.Vector3(26, 42, 14).normalize() },
+      },
+      vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: /* glsl */ `
+        uniform vec3 top;
+        uniform vec3 horizon;
+        uniform float time;
+        uniform vec3 tint;
+        uniform float tintAmt;
+        uniform vec3 sunDir;
+        varying vec3 vP;
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float noise(vec2 p) {
+          vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+        }
+        float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }
+        void main() {
+          vec3 d = normalize(vP);
+          vec3 col = mix(horizon, top, smoothstep(-0.02, 0.45, d.y));
+          // nuages ronds et blancs (bruit fractal projeté sur un plafond), qui dérivent lentement
+          if (d.y > 0.0) {
+            vec2 uv = d.xz / (d.y + 0.15) * 1.4 + vec2(time * 0.010, time * 0.004);
+            float c = fbm(uv);
+            float cloud = smoothstep(0.5, 0.75, c) * smoothstep(0.0, 0.2, d.y);
+            vec3 cc = mix(vec3(1.0), vec3(0.78, 0.84, 0.95), smoothstep(0.62, 0.95, c));
+            col = mix(col, cc, cloud * 0.92);
+          }
+          float s = max(dot(d, sunDir), 0.0);
+          col += vec3(1.0, 0.92, 0.75) * (pow(s, 600.0) * 2.0 + pow(s, 14.0) * 0.22);
+          col = mix(col, col * 0.6 + tint * 0.55, tintAmt);
+          gl_FragColor = vec4(col, 1.0);
+          #include <colorspace_fragment>
+        }`,
+    });
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), this.skyMat);
+    sky.frustumCulled = false;
     scene.add(sky);
+  }
+
+  /** Teinte du ciel pendant un événement (null : ciel normal). */
+  setSkyEvent(kind: string | null): void {
+    const t = this.skyTint;
+    t.rainbow = kind === 'arcenciel';
+    t.want = kind === 'pluie' || kind === 'arcenciel' || kind === 'vitesse' || kind === 'golden' ? 0.35 : 0;
+    if (kind === 'pluie' || kind === 'golden') t.color.set('#ffc44d');
+    else if (kind === 'vitesse') t.color.set('#5ee7ff');
   }
 
   private plane(w: number, d: number, x: number, z: number, mat: THREE.Material, y = 0): THREE.Mesh {
@@ -602,7 +653,18 @@ export class District {
     screen.position.y = 4.6;
     const back = new THREE.Mesh(new THREE.BoxGeometry(10.6, 5.6, 0.3), std(0x1b1e27, { metalness: 0.5 }));
     back.position.set(0, 4.6, -0.17);
-    g.add(screen, back);
+    // écran des deux côtés : les joueurs qui sortent des musées du sud voient aussi le classement (avant : un dos noir)
+    const screen2 = new THREE.Mesh(screen.geometry, screen.material);
+    screen2.position.set(0, 4.6, -0.34);
+    screen2.rotation.y = Math.PI;
+    // liseré doré autour du panneau
+    const trimMat = std(0xe8b64c, { metalness: 0.85, roughness: 0.3 });
+    for (const [w, h, x, y] of [[10.9, 0.18, 0, 7.45], [10.9, 0.18, 0, 1.75], [0.18, 5.9, -5.4, 4.6], [0.18, 5.9, 5.4, 4.6]] as const) {
+      const t = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.42), trimMat);
+      t.position.set(x, y, -0.17);
+      g.add(t);
+    }
+    g.add(screen, screen2, back);
     for (const sx of [-4, 4]) {
       const p = new THREE.Mesh(new THREE.BoxGeometry(0.35, 2.2, 0.35), std(0x1b1e27));
       p.position.set(sx, 1.1, -0.17);

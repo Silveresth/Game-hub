@@ -546,6 +546,100 @@ cD2.ws.close();
   cHo.ws.close();
 }
 
+// --- Coup de parapluie, événements en direct (« admin abuse »), pluie d'or, tenues ---
+{
+  const admin = (method, path, body) => fetch(base + '/api/admin/' + path, {
+    method, headers: { 'x-admin-token': 'dev-admin', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+  }).then((r) => r.json());
+
+  // tenues (skins)
+  const sk = await http('login', { name: 'Musée Tenue', skin: 2 });
+  ok(sk.state?.skin === 2, `tenue choisie à la création (${sk.state?.skin})`);
+  const SK = { id: sk.id, token: sk.token };
+  ok((await http('name', { skin: 3 }, SK)).state?.skin === 3, 'tenue changée depuis « Mon compte »');
+  const badSkin = await http('name', { skin: 9, color: '#nope' }, SK);
+  ok(/Tenue/.test(badSkin.error ?? '') && (await http('state', null, SK)).skin === 3, 'tenue inconnue refusée, rien n’est modifié');
+
+  // un musée à voler, un voleur, un passant au parapluie : tous dans le même quartier (invitation)
+  const V = await newPlayer('Musée Victime');
+  await http('dev/grant', { coins: 1_000_000 }, V);
+  for (const it of (await http('convoy', null, V)).items) await http('buy', { window: it.window }, V).catch(() => {});
+  await http('dev/age', {}, V);
+  const sV = await http('state', null, V);
+  const cV = await connect(V);
+  const wV = await cV.wait((m) => m.t === 'welcome');
+  const T = await newPlayer('Musée Voleur');
+  const K = await newPlayer('Musée Parapluie');
+  await http('name', { skin: 1 }, K);
+  const cT = await connect(T, sV.inviteCode);
+  const wT = await cT.wait((m) => m.t === 'welcome');
+  const cK = await connect(K, sV.inviteCode);
+  const wK = await cK.wait((m) => m.t === 'welcome');
+  ok(wT.district === wV.district && wK.district === wV.district, `victime, voleur et passant dans le quartier n°${wV.district}`);
+  ok(!!(await cV.wait((m) => m.t === 'snap' && m.players.some((p) => p.id === K.id && p.skin === 1), 3000).catch(() => null)), 'la tenue des autres joueurs est visible dans les instantanés');
+
+  const prize = sV.artworks.find((a) => a.slot !== null);
+  const plotV = plotOf(wV.you.plot);
+  const st = standBy(plotV, prize.slot);
+  cT.send({ t: 'pos', x: st.x, z: st.z, ry: 0, anim: 'Idle' });
+  await sleep(250);
+  cT.send({ t: 'steal', plot: wV.you.plot, uid: prize.uid });
+  const carried = await cT.wait((m) => m.t === 'steal' && (m.phase === 'carry' || m.phase === 'refused'), 20000).catch(() => null);
+  ok(carried?.phase === 'carry', `le voleur emporte l’œuvre${carried?.error ? ` (${carried.error})` : ''}`);
+  if (carried?.phase === 'carry') {
+    // le passant arrive à 2 m (sans toucher le voleur) et donne un coup de parapluie
+    cK.send({ t: 'pos', x: st.x + 2, z: st.z, ry: 0, anim: 'Running' });
+    await sleep(250);
+    cK.send({ t: 'bonk' });
+    const bonk = await cT.wait((m) => m.t === 'bonk' && m.from === K.id, 3000).catch(() => null);
+    ok(bonk?.to === T.id && bonk.dropped, 'coup de parapluie : le voleur est touché et lâche l’œuvre');
+    const back = await cT.wait((m) => m.t === 'steal' && m.phase === 'returned' && m.thief === T.id, 3000).catch(() => null);
+    ok(!!back && /assommé/.test(back.message), `l’œuvre retourne chez son propriétaire : « ${back?.message} »`);
+    const sV2 = await http('state', null, V);
+    ok(sV2.artworks.some((a) => a.uid === prize.uid && !a.carriedBy), 'côté serveur, l’œuvre est revenue à la victime');
+    cT.send({ t: 'steal', plot: wV.you.plot, uid: prize.uid });
+    const dazed = await cT.wait((m) => m.t === 'steal' && m.phase === 'refused' && /sonné/.test(m.error), 2000).catch(() => null);
+    ok(!!dazed, 'sonné : impossible de voler pendant un instant');
+    const n = cT.inbox.filter((m) => m.t === 'bonk').length;
+    cK.send({ t: 'bonk' });
+    await sleep(400);
+    ok(cT.inbox.filter((m) => m.t === 'bonk').length === n, 'le parapluie a un temps de recharge');
+  }
+
+  // événements en direct lancés depuis le panneau admin
+  ok(/inconnu/.test((await admin('POST', 'live', { kind: 'golden' })).error ?? ''), 'seuls les événements « admin » se lancent à la main');
+  const rain = await admin('POST', 'live', { kind: 'pluie' });
+  ok(rain.event?.kind === 'pluie' && rain.event.endsAt > Date.now() + 2 * 60_000, `pluie d’or lancée (${rain.event?.label})`);
+  const announced = await cV.wait((m) => m.t === 'live-event' && m.event?.kind === 'pluie', 3000).catch(() => null);
+  ok(!!announced, 'tous les joueurs en ligne sont prévenus');
+  ok((await http('state', null, V)).event.current?.kind === 'pluie', 'l’événement apparaît dans l’état du joueur');
+  const drop = await cV.wait((m) => m.t === 'coins' && m.add?.length, 4000).catch(() => null);
+  ok(!!drop, `des pièces tombent sur la place (${drop?.add.length ?? 0})`);
+  if (drop) {
+    const coin = drop.add[0];
+    const before = (await http('state', null, V)).coins;
+    cV.send({ t: 'pos', x: coin.x, z: coin.z, ry: 0, anim: 'Running' });
+    const got = await cV.wait((m) => m.t === 'coin-got' && m.id === coin.id, 3000).catch(() => null);
+    ok(got?.amount >= 100, `pièce ramassée : +${got?.amount}`);
+    const gone = await cT.wait((m) => m.t === 'coins' && m.del?.includes(coin.id) && m.by === V.id, 3000).catch(() => null);
+    ok(!!gone, 'elle disparaît chez les autres joueurs');
+    ok((await http('state', null, V)).coins >= before + (got?.amount ?? 0), 'le gain est enregistré');
+  }
+  const rainbow = await admin('POST', 'live', { kind: 'arcenciel' });
+  ok(rainbow.event?.kind === 'arcenciel', 'convoi arc-en-ciel lancé (remplace la pluie d’or)');
+  const cvR = await http('convoy', null, V);
+  const during = cvR.items.filter((i) => i.startsAt >= rainbow.event.startsAt);
+  ok(during.length > 0 && during.every((i) => i.event === 'arcenciel'), `camions du convoi arc-en-ciel (${during.filter((i) => i.frame === 'arcenciel').length}/${during.length} en cadre ×10)`);
+  const ov = await admin('GET', 'overview');
+  ok(ov.liveEvent?.kind === 'arcenciel', 'le panneau admin affiche l’événement en cours');
+  await admin('DELETE', 'live');
+  const ended = await cV.wait((m) => m.t === 'live-event' && m.event === null, 3000).catch(() => null);
+  ok(!!ended && !(await http('state', null, V)).event.current?.admin, 'événement arrêté depuis le panneau admin');
+  cV.ws.close();
+  cT.ws.close();
+  cK.ws.close();
+}
+
 // --- Musée en sommeil : A se déconnecte, son musée reste visible pour B ---
 cA.ws.close();
 const asleep = await cB.wait((m) => m.t === 'plot' && m.plot.index === wA.you.plot && m.plot.online === false && m.plot.owner);
