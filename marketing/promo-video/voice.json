@@ -1,0 +1,23 @@
+[
+  { "id": "01", "at": 0.08, "max": 1.8, "text": "La Joconde. Huit cents millions !" },
+  { "id": "02", "at": 2.05, "max": 0.6, "text": "Volée !" },
+  { "id": "03", "at": 2.55, "max": 1.4, "text": "Et si c'était toi, le voleur ?" },
+  { "id": "04", "at": 4.15, "max": 1.9, "text": "Bienvenue dans le casse du siècle !" },
+  { "id": "05", "at": 5.85, "max": 1.55, "text": "Construis, collectionne, et vole !" },
+  { "id": "06", "at": 7.65, "max": 1.7, "text": "Achète des chefs-d'œuvre au convoi," },
+  { "id": "07", "at": 9.45, "max": 1.65, "text": "plus c'est rare, plus ça rapporte !" },
+  { "id": "08", "at": 11.45, "max": 1.5, "text": "Expose-les dans ton musée," },
+  { "id": "09", "at": 13.05, "max": 1.8, "text": "et encaisse, même quand tu dors !" },
+  { "id": "10", "at": 15.2, "max": 1.6, "text": "Vole les musées de tes rivaux !" },
+  { "id": "11", "at": 16.95, "max": 0.7, "text": "Au voleur !" },
+  { "id": "12", "at": 17.7, "max": 0.95, "text": "Ramène-la chez toi !" },
+  { "id": "13", "at": 18.97, "max": 0.5, "text": "Bonk !" },
+  { "id": "14", "at": 19.45, "max": 0.95, "text": "Il lâche tout !" },
+  { "id": "15", "at": 20.7, "max": 1.05, "text": "Et les admins abusent :" },
+  { "id": "16", "at": 21.85, "max": 0.6, "text": "pluie d'or," },
+  { "id": "17", "at": 22.6, "max": 0.95, "text": "cadre arc-en-ciel," },
+  { "id": "18", "at": 24.45, "max": 0.8, "text": "super vitesse !" },
+  { "id": "19", "at": 26.45, "max": 0.95, "text": "Joue gratuitement," },
+  { "id": "20", "at": 27.5, "max": 1.35, "text": "sur navigateur ou Android !" },
+  { "id": "21", "at": 28.95, "max": 0.8, "text": "Lien en bio !" }
+]
