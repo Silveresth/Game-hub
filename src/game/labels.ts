@@ -5,6 +5,8 @@ export interface LabelLine {
   color?: string;
   size?: number; // px dans le canvas
   weight?: number;
+  /** Pastille colorée derrière le texte (rareté, mutation) : elle se voit de loin. */
+  pill?: string;
 }
 
 /**
@@ -54,6 +56,16 @@ export class Label {
     for (const l of lines) {
       const size = l.size ?? 40;
       g.font = `${l.weight ?? 700} ${size}px 'Segoe UI', system-ui, sans-serif`;
+      if (l.pill) {
+        const tw = Math.min(w - 12, g.measureText(l.text).width + size * 0.9);
+        g.fillStyle = l.pill;
+        g.strokeStyle = 'rgba(0,0,0,.45)';
+        g.lineWidth = 4;
+        g.beginPath();
+        g.roundRect((w - tw) / 2, y - size * 0.04, tw, size * 1.12, size * 0.56);
+        g.fill();
+        g.stroke();
+      }
       g.lineWidth = Math.max(4, size / 7);
       g.strokeStyle = 'rgba(0,0,0,.7)';
       if (opts.stroke !== false) g.strokeText(l.text, w / 2, y + size * 0.09, w - 16);

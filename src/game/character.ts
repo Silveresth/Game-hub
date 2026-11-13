@@ -83,6 +83,10 @@ const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 const SIT_THIGH = -Math.PI / 2;
 const SIT_KNEE = Math.PI / 2;
 const SIT_DROP = 0.46;
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const tmpQ = new THREE.Quaternion();
+const tmpQ2 = new THREE.Quaternion();
+const tmpV = new THREE.Vector3();
 
 export interface CharacterOptions {
   /** Personnage de la foule : tenue et apparence au hasard. */
@@ -154,9 +158,30 @@ export class Character {
       mesh.material = Array.isArray(mesh.material) ? next : next[0];
     });
     // (le chargeur GLTF retire les points des noms d'os : « UpperLeg.L » devient « UpperLegL »)
+    const bone = (n: string) => model.getObjectByName(n) ?? model.getObjectByName(`${n.slice(0, -1)}.${n.slice(-1)}`);
     for (const n of ['UpperLegL', 'UpperLegR', 'LowerLegL', 'LowerLegR']) {
-      const b = model.getObjectByName(n) ?? model.getObjectByName(`${n.slice(0, -1)}.${n.slice(-1)}`);
+      const b = bone(n);
       if (b) this.legs.push(b);
+    }
+    // Les pieds (Foot.L / Foot.R) ne sont PAS les enfants des tibias : ce sont des cibles posées au sol (rig « IK »).
+    // Quand on plie les jambes (saut, position assise), il faut les raccrocher à la cheville, sinon le pied reste
+    // au sol et la peau s'étire (pieds « déformés »). On note donc, en pose de repos, où se trouve le pied
+    // par rapport au tibia (position et orientation).
+    model.updateMatrixWorld(true);
+    for (const side of ['L', 'R'] as const) {
+      const upper = bone(`UpperLeg${side}`);
+      const lower = bone(`LowerLeg${side}`);
+      const foot = bone(`Foot${side}`);
+      if (!upper || !lower || !foot?.parent) continue;
+      const lowerQ = lower.getWorldQuaternion(new THREE.Quaternion());
+      this.rig.push({
+        left: side === 'L',
+        upper, lower, foot,
+        restUpper: upper.quaternion.clone(),
+        restLower: lower.quaternion.clone(),
+        footInLower: lower.worldToLocal(foot.getWorldPosition(new THREE.Vector3())),
+        footRelQ: lowerQ.invert().multiply(foot.getWorldQuaternion(new THREE.Quaternion())),
+      });
     }
     this.root.add(model);
     this.mixer = new THREE.AnimationMixer(model);
@@ -183,14 +208,15 @@ export class Character {
 
   /** Animation en boucle (Idle, Walking, Running…). « Sitting » : pose assise (repos + jambes pliées). */
   play(name: string, fade = 0.2): void {
-    if (name === 'Sitting') {
-      this.setSitting(true);
-      name = 'Idle';
-    }
     if (this.oneShot) {
       this.after = name;
       return;
     }
+    // Se lever dès qu'on joue autre chose qu'« assis » : avant, un garde qui avait fait sa pause
+    // repartait en patrouille les jambes encore pliées (personnage déformé en marchant).
+    const sit = name === 'Sitting';
+    if (sit !== this.sitting) this.setSitting(sit);
+    if (sit) name = 'Idle';
     if (name === this.current) return;
     const next = this.actions.get(name);
     if (!next) return;
@@ -213,7 +239,8 @@ export class Character {
     a.reset().setEffectiveWeight(1).fadeIn(0.12).play();
     if (prev && prev !== a) prev.fadeOut(0.12);
     this.current = name;
-    this.after = then === 'Sitting' ? 'Idle' : then;
+    // « Sitting » est rejoué tel quel à la fin du geste : le personnage assis le reste
+    this.after = then;
     this.oneShot = true;
   }
 
@@ -231,28 +258,51 @@ export class Character {
   }
 
   private air = 0;
+  /** Os des jambes et des pieds, pose de repos, et place du pied par rapport au tibia (voir le constructeur). */
+  private rig: Array<{
+    left: boolean;
+    upper: THREE.Object3D;
+    lower: THREE.Object3D;
+    foot: THREE.Object3D;
+    restUpper: THREE.Quaternion;
+    restLower: THREE.Quaternion;
+    footInLower: THREE.Vector3;
+    footRelQ: THREE.Quaternion;
+  }> = [];
+  /** Pose des os modifiés à l'image précédente (remise en place avant l'animation suivante). */
+  private saved: Array<{ o: THREE.Object3D; q: THREE.Quaternion; p: THREE.Vector3 }> = [];
 
   update(dt: number): void {
     // pose de l'image précédente retirée avant l'animation (sinon, sur un os que l'animation
     // ne pilote pas, la rotation s'additionnerait à chaque image)
-    if (this.legPose.length) this.legs.forEach((b, i) => b.quaternion.copy(this.legPose[i]));
+    for (const s of this.saved) {
+      s.o.quaternion.copy(s.q);
+      s.o.position.copy(s.p);
+    }
+    this.saved = [];
     this.mixer.update(dt);
-    if (this.sitting) {
-      this.legPose = this.legs.map((b) => b.quaternion.clone());
-      // cuisses à l'horizontale (UpperLeg.*), genoux pliés (LowerLeg.*)
-      this.legs.forEach((b) => b.rotateX(b.name.startsWith('Upper') ? SIT_THIGH : SIT_KNEE));
-    } else if (this.air > 0.01) {
-      this.legPose = this.legs.map((b) => b.quaternion.clone());
-      const a = this.air;
-      this.legs.forEach((b) => {
-        const left = b.name.endsWith('L');
-        if (b.name.startsWith('Upper')) b.rotateX((left ? -1.1 : 0.35) * a);
-        else b.rotateX((left ? 1.45 : 1.05) * a);
-      });
-    } else this.legPose = [];
+    const w = this.sitting ? 1 : this.air;
+    if (w <= 0.01 || !this.rig.length) return;
+    for (const r of this.rig) for (const o of [r.upper, r.lower, r.foot]) this.saved.push({ o, q: o.quaternion.clone(), p: o.position.clone() });
+    // pose visée (depuis la pose de repos, pas en plus de l'animation : sinon, en pleine course,
+    // le genou dépassait 150° et la jambe se repliait dans la cuisse)
+    // assis : cuisses à l'horizontale, genoux pliés ; en l'air : un genou levé devant, l'autre jambe tirée en arrière
+    for (const r of this.rig) {
+      const thigh = this.sitting ? SIT_THIGH : r.left ? -1.1 : 0.35;
+      const knee = this.sitting ? SIT_KNEE : r.left ? 1.45 : 1.05;
+      r.upper.quaternion.slerp(tmpQ.copy(r.restUpper).multiply(tmpQ2.setFromAxisAngle(X_AXIS, thigh)), w);
+      r.lower.quaternion.slerp(tmpQ.copy(r.restLower).multiply(tmpQ2.setFromAxisAngle(X_AXIS, knee)), w);
+    }
+    // les pieds suivent la cheville (position et orientation de repos par rapport au tibia)
+    this.model.updateMatrixWorld(true);
+    for (const r of this.rig) {
+      const parent = r.foot.parent!;
+      const at = r.lower.localToWorld(tmpV.copy(r.footInLower));
+      r.foot.position.copy(parent.worldToLocal(at));
+      const q = r.lower.getWorldQuaternion(tmpQ).multiply(r.footRelQ);
+      r.foot.quaternion.copy(parent.getWorldQuaternion(tmpQ2).invert().multiply(q));
+    }
   }
-
-  private legPose: THREE.Quaternion[] = [];
 
   dispose(): void {
     this.mixer.stopAllAction();

@@ -55,16 +55,25 @@ function tileTexture(base: string, line: string, tiles: number, noise = 0.05): T
   return t;
 }
 
-/** Pelouse : vert franc, brins plus clairs et plus sombres, quelques fleurettes. */
-function grassTexture(): THREE.CanvasTexture {
+/**
+ * Pelouse : vert franc, brins plus clairs et plus sombres, quelques fleurettes.
+ * `snow` : tapis de neige bleutée qui scintille (saison de Noël).
+ */
+function grassTexture(base = '#4fa63f', snow = false, stripes = false): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const g = c.getContext('2d')!;
-  g.fillStyle = '#4fa63f';
+  g.fillStyle = base;
   g.fillRect(0, 0, 256, 256);
+  if (stripes) {
+    // pelouse tondue en bandes (parcelles des musées)
+    g.fillStyle = 'rgba(255,255,255,0.07)';
+    for (let x = 0; x < 256; x += 64) g.fillRect(x, 0, 32, 256);
+  }
   for (let i = 0; i < 5000; i++) {
     const v = Math.random();
-    g.fillStyle = v < 0.45 ? 'rgba(120,200,80,0.35)' : v < 0.9 ? 'rgba(30,90,30,0.3)' : 'rgba(255,240,140,0.5)';
+    if (snow) g.fillStyle = v < 0.5 ? 'rgba(255,255,255,0.6)' : v < 0.95 ? 'rgba(150,180,220,0.22)' : 'rgba(200,240,255,0.95)';
+    else g.fillStyle = v < 0.45 ? 'rgba(120,200,80,0.35)' : v < 0.9 ? 'rgba(30,90,30,0.3)' : 'rgba(255,240,140,0.5)';
     g.fillRect(Math.random() * 256, Math.random() * 256, v < 0.9 ? 1.5 : 2.5, v < 0.9 ? 3 : 2.5);
   }
   const t = new THREE.CanvasTexture(c);
@@ -73,6 +82,72 @@ function grassTexture(): THREE.CanvasTexture {
   t.anisotropy = 8;
   return t;
 }
+
+/** Pavés en damier de deux couleurs chaudes (la place) : vivant, sans le grand aplat beige d'avant. */
+function paverTexture(a: string, b: string, grout: string, tiles = 4): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d')!;
+  const s = 512 / tiles;
+  for (let i = 0; i < tiles; i++) {
+    for (let j = 0; j < tiles; j++) {
+      g.fillStyle = (i + j) % 2 ? a : b;
+      g.fillRect(i * s, j * s, s, s);
+      // léger relief : bord clair en haut à gauche, sombre en bas à droite
+      g.fillStyle = 'rgba(255,255,255,0.12)';
+      g.fillRect(i * s, j * s, s, 6);
+      g.fillStyle = 'rgba(0,0,0,0.1)';
+      g.fillRect(i * s, j * s + s - 6, s, 6);
+    }
+  }
+  for (let k = 0; k < 7000; k++) {
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    g.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
+  }
+  g.strokeStyle = grout;
+  g.lineWidth = 4;
+  for (let i = 0; i <= tiles; i++) {
+    g.beginPath(); g.moveTo(i * s, 0); g.lineTo(i * s, 512); g.stroke();
+    g.beginPath(); g.moveTo(0, i * s); g.lineTo(512, i * s); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+/** Haie taillée (le grand mur d'enceinte) : feuillage vert en touffes. */
+function hedgeTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#3d8a3a';
+  g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 900; i++) {
+    const v = Math.random();
+    g.fillStyle = v < 0.4 ? 'rgba(110,190,80,0.45)' : v < 0.85 ? 'rgba(20,70,25,0.4)' : 'rgba(255,120,160,0.7)';
+    g.beginPath();
+    g.arc(Math.random() * 256, Math.random() * 256, v < 0.85 ? 3 + Math.random() * 6 : 2.2, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * Emplacements libres de la place pour le décor des saisons (sapins, citrouilles, palmiers…) :
+ * hors de la route, des allées des musées, des lampadaires, des étals et du classement.
+ */
+// (façades des musées : x = parcelle ± 11 m, du perron jusqu'à z = ±16,6 ; tapis rouge jusqu'à z = ±5,5)
+export const DECO_SPOTS: Array<{ x: number; z: number }> = [
+  { x: -34.5, z: -19.5 }, { x: 34.5, z: -19.5 }, { x: -46.5, z: -20 }, { x: 47, z: -20 },
+  { x: -35, z: 15.5 }, { x: 35, z: 15.5 }, { x: -45.5, z: 16 }, { x: 45.5, z: 16 },
+];
+/** Grande pièce centrale du décor saisonnier (grand sapin de Noël…), au nord de la fontaine. */
+export const DECO_CENTER = { x: 0, z: -20.2 };
 
 function textTexture(lines: Array<[string, string, number]>, w = 1024, h = 256, bg = '#141826'): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -126,8 +201,62 @@ export class District {
     for (const b of this.boxes) if (x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) return true;
     for (const b of extraBoxes) if (x > b.minX - r && x < b.maxX + r && z > b.minZ - r && z < b.maxZ + r) return true;
     for (const c of this.circles) if (Math.hypot(x - c.x, z - c.z) < c.r + r) return true;
+    for (const c of this.seasonCircles) if (Math.hypot(x - c.x, z - c.z) < c.r + r) return true;
     for (const c of extraCircles) if (Math.hypot(x - c.x, z - c.z) < c.r + r) return true;
     return false;
+  }
+
+  /** Obstacles du décor saisonnier (grand sapin…), remplacés à chaque changement de saison. */
+  seasonCircles: Circle[] = [];
+
+  // ---------------------------------------------------------------- thème du monde (saisons)
+
+  private grassMat!: THREE.MeshStandardMaterial;
+  private plotMat!: THREE.MeshStandardMaterial;
+  private flagsGeo: THREE.BufferGeometry | null = null;
+  private bulbMat!: THREE.MeshStandardMaterial;
+  private groundKey = '';
+
+  /** Couleurs du ciel : haut et horizon. */
+  setSkyColors(top: string, horizon: string): void {
+    if (!this.skyMat) return;
+    (this.skyMat.uniforms.top.value as THREE.Color).set(top);
+    (this.skyMat.uniforms.horizon.value as THREE.Color).set(horizon);
+  }
+
+  /** Pelouse (ou neige) du quartier et des parcelles. */
+  setGround(color: string, snow = false): void {
+    const key = `${color}:${snow}`;
+    if (key === this.groundKey) return;
+    this.groundKey = key;
+    const swap = (mat: THREE.MeshStandardMaterial, tex: THREE.CanvasTexture, repeat: [number, number]) => {
+      const old = mat.map;
+      tex.repeat.set(...repeat);
+      mat.map = tex;
+      mat.needsUpdate = true;
+      old?.dispose();
+    };
+    swap(this.grassMat, grassTexture(color, snow), [40, 30]);
+    const lawn = snow ? color : `#${new THREE.Color(color).offsetHSL(0, 0.04, 0.05).getHexString()}`;
+    swap(this.plotMat, grassTexture(lawn, snow, !snow), [5, 5]);
+  }
+
+  /** Couleurs des fanions des guirlandes. */
+  setFlagColors(colors: string[]): void {
+    const geo = this.flagsGeo;
+    if (!geo || !colors.length) return;
+    const attr = geo.getAttribute('color') as THREE.BufferAttribute;
+    const c = new THREE.Color();
+    for (let i = 0; i < attr.count / 3; i++) {
+      c.set(colors[i % colors.length]);
+      for (let v = 0; v < 3; v++) attr.setXYZ(i * 3 + v, c.r, c.g, c.b);
+    }
+    attr.needsUpdate = true;
+  }
+
+  /** Couleur des ampoules des lampadaires. */
+  setBulb(color: string): void {
+    this.bulbMat.emissive.set(color);
   }
 
   setLeaderboard(
@@ -283,15 +412,18 @@ export class District {
     // (couleurs ravivées : l'ancien sol brun-gris rendait toute la scène terne)
     const baseStone = grassTexture();
     baseStone.repeat.set(40, 30);
-    this.plane(240, 180, 0, 0, std(0xffffff, { map: baseStone, roughness: 0.95 }), -0.05);
+    this.grassMat = std(0xffffff, { map: baseStone, roughness: 0.95 });
+    this.plane(240, 180, 0, 0, this.grassMat, -0.05);
 
-    // 2. Parvis central majestueux en pavés de pierre blonde, lumineux
-    const pav = tileTexture('#d4b98c', 'rgba(120,90,55,0.55)', 4, 0.035);
-    pav.repeat.set(170 / 4, 48 / 4);
-    this.plane(170, 48, 0, 0, std(0xffffff, { map: pav, roughness: 0.8 }), -0.01);
+    // 2. Place centrale en pavés dorés et terre cuite (avant : un grand aplat beige qui « blanchissait » toute la scène)
+    const pav = paverTexture('#eaae62', '#de9154', 'rgba(120,62,32,0.45)', 6);
+    pav.repeat.set(170 / 6, 48 / 6);
+    this.plane(170, 48, 0, 0, std(0xffffff, { map: pav, roughness: 0.82 }), -0.01);
 
-    // 3. Trottoirs piétons d'accès le long de la place (nord et sud) en pierre claire
-    const walkwayMat = std(0xe6d6b8, { roughness: 0.75 });
+    // 3. Trottoirs le long de la route (nord et sud) en briques rouges
+    const brick = tileTexture('#c0583b', 'rgba(90,35,20,0.5)', 8, 0.05);
+    brick.repeat.set(160 / 4, 1);
+    const walkwayMat = std(0xffffff, { map: brick, roughness: 0.8 });
     this.plane(160, 4.0, 0, -5.5, walkwayMat, 0.01);
     this.plane(160, 4.0, 0, 5.5, walkwayMat, 0.01);
 
@@ -310,32 +442,38 @@ export class District {
       this.group.add(kerb);
     }
 
-    // 5. Parcelles des musées : dallages individuels raffinés en damier de pierre noble
-    const plot = tileTexture('#8c7f6d', 'rgba(40,35,28,0.4)', 6, 0.02);
-    plot.repeat.set(6, 6);
-    const plotMat = std(0xffffff, { map: plot, roughness: 0.75 });
+    // 5. Parcelles des musées : pelouse tondue en bandes (avant : un damier de pierre gris-brun, terne)
+    const plot = grassTexture('#5cb84a', false, true);
+    plot.repeat.set(5, 5);
+    this.plotMat = std(0xffffff, { map: plot, roughness: 0.9 });
+    // allées des musées en pavés bleu ardoise : le tapis rouge des entrées s'y détache bien
+    const alley = tileTexture('#6f7fa0', 'rgba(30,36,55,0.5)', 3, 0.05);
+    alley.repeat.set(1, 3);
+    const alleyMat = std(0xffffff, { map: alley, roughness: 0.75 });
     for (const x of [-60, -20, 20, 60]) {
       for (const z of [-41, 41]) {
-        // Dalle de parcelle complète
-        this.plane(38, 38, x, z, plotMat, -0.005);
-        // Allée en plaques de travertin guidant de la chaussée jusqu'à l'entrée du musée
+        // pelouse de la parcelle
+        this.plane(38, 38, x, z, this.plotMat, -0.005);
+        // allée guidant de la chaussée jusqu'à l'entrée du musée
         const walkZ = z > 0 ? 15 : -15;
-        this.plane(6, 18, x, walkZ, std(0xa89882, { roughness: 0.7 }), 0.005);
+        this.plane(6, 18, x, walkZ, alleyMat, 0.005);
       }
     }
   }
 
   /** Bâtiments majestueux et palais d'art impériaux avec toiture classique complète. */
   private buildPlots(): void {
-    const stone = std(0xe8e0cf, { roughness: 0.8 });
+    // colonnes et fronton crème doré, murs framboise : l'hôtel des ventes se repère de loin (avant : tout blanc cassé)
+    const stone = std(0xf1d9a8, { roughness: 0.8 });
+    const wallRed = std(0xb83a4b, { roughness: 0.78 });
     const dark = std(0x2a2d36, { roughness: 0.5 });
-    const roofSlate = std(0x38414e, { roughness: 0.7 });
+    const roofSlate = std(0x2f3f63, { roughness: 0.7 });
     const goldAccent = std(0xe8b64c, { metalness: 0.7, roughness: 0.3 });
 
     const facade = (x: number, z: number, facing: 1 | -1, title: string, sub: string, accent = 0xe8b64c, dome = false) => {
       const g = new THREE.Group();
       // Corps principal de l'édifice
-      const body = new THREE.Mesh(new THREE.BoxGeometry(30, 9.5, 24), stone);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(30, 9.5, 24), wallRed);
       body.position.set(0, 4.75, 0);
       g.add(body);
       this.occluders.push(body);
@@ -382,7 +520,7 @@ export class District {
       }
 
       // Grand perron et marches monumentales
-      const steps = new THREE.Mesh(new THREE.BoxGeometry(30, 0.6, 3.6), std(0xd9d1bf, { roughness: 0.8 }));
+      const steps = new THREE.Mesh(new THREE.BoxGeometry(30, 0.6, 3.6), std(0xc98f5a, { roughness: 0.8 }));
       steps.position.set(0, 0.3, 15.4);
       g.add(steps);
 
@@ -450,6 +588,7 @@ export class District {
     // ni au milieu du trottoir (où l'on attend les camions), ni dans les dépôts (avant : x = ±75, dans les murs).
     const post = std(0x23262e, { metalness: 0.6, roughness: 0.4 });
     const bulb = new THREE.MeshStandardMaterial({ color: 0xfff1cf, emissive: 0xffd58a, emissiveIntensity: 1.4 });
+    this.bulbMat = bulb;
     for (const x of LAMP_X) {
       for (const z of [-LAMP_Z, LAMP_Z]) {
         const l = new THREE.Group();
@@ -554,6 +693,7 @@ export class District {
     const flagsGeo = new THREE.BufferGeometry();
     flagsGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     flagsGeo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    this.flagsGeo = flagsGeo;
     flagsGeo.computeVertexNormals();
     this.group.add(new THREE.Mesh(flagsGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })));
     this.group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(line), new THREE.LineBasicMaterial({ color: 0x3b3f4a })));
@@ -709,8 +849,11 @@ export class District {
   private buildPerimeterFence(): void {
     const wallHeight = 14.0;
     const wallThick = 2.4;
-    const wallMat = std(0x423d37, { roughness: 0.95 });
-    const capMat = std(0x2a2723, { roughness: 0.85 });
+    // grande haie taillée, fleurie (avant : un mur de pierre brun-gris qui assombrissait tout le quartier)
+    const hedge = hedgeTexture();
+    hedge.repeat.set(24, 3);
+    const wallMat = std(0xffffff, { map: hedge, roughness: 1 });
+    const capMat = std(0x2f7a33, { roughness: 0.9 });
 
     const addPerimeterWall = (x1: number, z1: number, x2: number, z2: number) => {
       const g = new THREE.Group();

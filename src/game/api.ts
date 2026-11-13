@@ -1,4 +1,4 @@
-import type { FrameId, RarityId } from './catalog';
+import type { FrameId, RarityId, SeasonId } from './catalog';
 
 export interface OwnedArtwork {
   uid: string;
@@ -86,7 +86,18 @@ export interface PlayerState {
   pity: Partial<Record<ChestId, { count: number; every: number; rarity: RarityId }>>;
   /** Mythiques encore libres (possibles dans les coffres). */
   freeMythics: string[];
+  /** Échange pièces → STH du mois : plafonné en montant et en nombre d'échanges. */
+  exchange: ExchangeInfo;
+  /** Thème du monde (saison) choisi par l'admin ou selon la date. */
+  season: SeasonState;
+  /** Cadeau saisonnier du jour (null hors saison festive). */
+  gift: { season: SeasonId; label: string; icon: string; available: boolean } | null;
+  /** Serveur privé : actif jusqu'à `until` (0 = jamais acheté). */
+  privateServer: { until: number; price: number; days: number };
 }
+
+export interface ExchangeInfo { month: string; used: number; count: number; cap: number; maxCount: number; left: number; rate: number; min: number; resetsAt: number }
+export interface SeasonState { id: SeasonId; mode: 'auto' | 'manual'; custom: { skyTop?: string; skyHorizon?: string; grass?: string } | null }
 
 export type ChestId = 'simple' | 'rare' | 'epique' | 'legendaire';
 export type PayMethodId = 'tmoney' | 'flooz' | 'card' | 'paypal';
@@ -104,8 +115,11 @@ export interface DailyInfo {
 }
 export interface ConvoyEvent {
   /** golden, rare, soldes : événements du convoi ; pluie, arcenciel, vitesse : « admin abuse » en direct. */
-  kind: 'golden' | 'rare' | 'soldes' | 'pluie' | 'arcenciel' | 'vitesse';
+  kind: 'golden' | 'rare' | 'soldes' | 'pluie' | 'arcenciel' | 'vitesse' | 'cadeaux' | 'bonbons' | 'oeufs';
   admin?: boolean;
+  /** Pluie saisonnière (cadeaux, bonbons, œufs) : comme la pluie d'or, en mieux. */
+  rain?: boolean;
+  mult?: number;
   label: string;
   icon: string;
   desc: string;
@@ -276,6 +290,10 @@ export const placeArtwork = (uid: string) => post<{ slot: number; state: PlayerS
 // STH coins et Lucky coffres
 export const exchangeSth = (sth: number) => post<{ sth: number; cost: number; state: PlayerState }>('sth/exchange', { sth });
 export const buyChest = (id: ChestId, qty: number) => post<{ id: ChestId; qty: number; cost: number; state: PlayerState }>('chest/buy', { id, qty });
+/** Cadeau saisonnier du jour : des pièces, quelques STH coins ou un Lucky coffre. */
+export const openGift = () => post<{ reward: { kind: 'coins' | 'sth' | 'chest'; amount: number }; gift: { label: string; icon: string }; state: PlayerState }>('gift');
+/** Serveur privé : 30 jours, payés en STH coins. */
+export const buyPrivate = () => post<{ until: number; price: number; state: PlayerState }>('private/buy');
 export const openChest = (id: ChestId) => post<{ chest: ChestId; artwork: OwnedArtwork; rarity: RarityId; frame: FrameId; pityUsed: boolean; state: PlayerState }>('chest/open', { id });
 // paiements en argent réel (STH coins)
 const payPost = <T>(path: string, body: unknown) => call<T>(path, { method: 'POST', body: JSON.stringify(body) }, '/api/pay/');

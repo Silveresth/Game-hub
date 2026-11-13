@@ -154,10 +154,13 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     return { current: null, next: ev };
   }
 
-  /** Pièce ramassée pendant une pluie d'or : environ 15 s de revenu, 100 pièces au moins. */
-  function coinPickup(p) {
+  /**
+   * Pièce ramassée pendant une pluie d'or : environ 15 s de revenu, 100 pièces au moins.
+   * Pluies saisonnières (cadeaux, bonbons, œufs) : `mult` fois plus.
+   */
+  function coinPickup(p, mult = 1) {
     accrue(p);
-    const amount = Math.max(100, Math.round(income(p) * 15));
+    const amount = Math.max(100, Math.round(income(p) * 15)) * Math.max(1, Math.min(5, Number(mult) || 1));
     p.coins += amount;
     touch(p);
     return amount;
@@ -272,6 +275,10 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     p.pity ??= {};
     p.purchases ??= [];
     p.stats.chests ??= 0;
+    // échanges pièces → STH du mois en cours (plafonnés), cadeau saisonnier du jour, serveur privé
+    p.exchange ??= { month: '', sth: 0, count: 0 };
+    p.seasonGift ??= { day: '', season: '' };
+    if (!Number.isFinite(p.privateUntil)) p.privateUntil = 0;
     // une œuvre restée « en cours de vol » (serveur arrêté pendant un vol) revient à son propriétaire
     for (const a of p.artworks) delete a.carriedBy;
     return p;
@@ -501,6 +508,9 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       if (f < (fr.arcenciel ?? 0)) frame = 'arcenciel';
       else if (f < (fr.arcenciel ?? 0) + (fr.diamant ?? 0)) frame = 'diamant';
       else if (f < (fr.arcenciel ?? 0) + (fr.diamant ?? 0) + (fr.dore ?? 0)) frame = 'dore';
+      // saison en cours : une petite chance de mutation saisonnière (Givrée à Noël, Hantée à Halloween…)
+      const mut = seasonMutation();
+      if (frame === 'normal' && mut && fairRandom() < (SEASON_RULES.chestMutationChance ?? 0)) frame = mut;
     }
     return { workId: w.id, rarity, frame, pityUsed };
   }
@@ -532,9 +542,16 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     if (shielded(victim, now)) return 'Bouclier débutant : ce musée est protégé';
     if (victim.immuneUntil > now) return `Musée déjà cambriolé : protégé encore ${Math.ceil((victim.immuneUntil - now) / 60_000)} min`;
     if (value(victim) < value(thief) * 0.5) return 'Cible trop modeste : elle vaut moins de la moitié de votre musée';
-    if (!victimOnline && now - victim.lastOfflineLoss < OFFLINE_LOSS_MS) return 'Son propriétaire est absent et a déjà été volé récemment';
+    // (avant : « a déjà été volé récemment », compris comme « cette œuvre a déjà été volée »)
+    if (!victimOnline && now - victim.lastOfflineLoss < OFFLINE_LOSS_MS) return `Musée protégé : son propriétaire est absent et s’est déjà fait voler une œuvre il y a moins de 2 h (encore ${waitText(victim.lastOfflineLoss + OFFLINE_LOSS_MS - now)})`;
     return null;
   }
+
+  /** « 1 h 05 » ou « 12 min ». */
+  const waitText = (ms) => {
+    const min = Math.max(1, Math.ceil(ms / 60_000));
+    return min >= 60 ? `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')}` : `${min} min`;
+  };
 
   /** L'œuvre est décrochée : elle reste au propriétaire mais ne rapporte plus et ne s'affiche plus. */
   function markCarried(victim, uid, thiefId) {
@@ -565,8 +582,9 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     accrue(thief, now);
     const [a] = victim.artworks.splice(i, 1);
     delete a.carriedBy;
-    const waiting = victim.artworks.find((x) => x.slot === null);
-    if (waiting) waiting.slot = a.slot;
+    // la place reste VIDE : avant, une œuvre de la réserve s'y accrochait toute seule, et les autres joueurs
+    // croyaient voir l'œuvre volée encore au mur (surtout quand c'était un double du même tableau).
+    // Le propriétaire choisit lui-même quoi exposer à sa place (inventaire → réserve).
     const artwork = { ...a, slot: freeSlot(thief, a.workId), boughtAt: now };
     thief.artworks.push(artwork);
     thief.stats.stolen++;
@@ -624,6 +642,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       themes: p.roomThemes ?? {},
       ticket: ticketPrice(p),
       value: Math.round(value(p)), shielded: shielded(p), immuneUntil: p.immuneUntil,
+      // propriétaire absent déjà volé : protégé jusqu'à cette heure (les autres le voient avant d'essayer)
+      robbedUntil: p.lastOfflineLoss ? p.lastOfflineLoss + OFFLINE_LOSS_MS : 0,
       sec: publicSecurity(p),
       rebirths: p.rebirths ?? 0,
       skin: p.skin ?? 0,
@@ -800,6 +820,11 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       chests: Object.fromEntries(Object.keys(CHESTS).map((id) => [id, p.chests[id] ?? 0])),
       pity: Object.fromEntries(Object.keys(CHESTS).filter((id) => CHESTS[id].pity).map((id) => [id, { count: p.pity[id] ?? 0, every: CHESTS[id].pity.every, rarity: CHESTS[id].pity.rarity }])),
       freeMythics: freeMythics().map((w) => w.id),
+      // échange pièces → STH plafonné par mois, saison du monde, cadeau saisonnier, serveur privé
+      exchange: exchangeInfo(p),
+      season: currentSeason(),
+      gift: giftInfo(p),
+      privateServer: { until: p.privateUntil ?? 0, price: PRIVATE.price, days: PRIVATE.days },
       // compte : l'e-mail n'est envoyé qu'à son propriétaire ; jamais le mot de passe ni son empreinte
       account: { email: p.email ?? null, password: !!p.passwordHash, google: !!p.googleKey },
     };
@@ -820,6 +845,122 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     const reward = Math.max(DAILY[i], Math.round(income(p) * 60 * (5 + 5 * (i + 1))));
     return { claimable, streak, reward, day: i + 1, days: DAILY.length };
   }
+
+  // ---------------------------------------------------------------- échange pièces → STH : plafond mensuel
+
+  /** Mois en cours (heure de Paris) : « 2026-11 ». */
+  const monthKey = (ms) => dayKey(ms).slice(0, 7);
+  /** Ce qu'il reste à échanger ce mois-ci (montant et nombre d'échanges plafonnés : les STH s'achètent surtout). */
+  function exchangeInfo(p, now = Date.now()) {
+    const month = monthKey(now);
+    const same = p.exchange?.month === month;
+    const used = same ? p.exchange.sth : 0;
+    const count = same ? p.exchange.count : 0;
+    const cap = PREMIUM.monthlyCap ?? 100;
+    const maxCount = PREMIUM.monthlyCount ?? 3;
+    const left = count >= maxCount ? 0 : Math.max(0, cap - used);
+    // prochain mois : le 1er à minuit (heure de Paris, approchée à l'heure UTC du serveur)
+    const [y, m] = month.split('-').map(Number);
+    return { month, used, count, cap, maxCount, left, rate: PREMIUM.coinsPerSth, min: PREMIUM.minExchange ?? 5, resetsAt: Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1) };
+  }
+
+  // ---------------------------------------------------------------- saisons (thème du monde choisi par l'admin)
+
+  const SEASONS = catalog.seasons ?? {};
+  const SEASON_RULES = catalog.seasonRules ?? { mutationChance: 0.05, chestMutationChance: 0.04, gift: { coinsMinutes: 15, minCoins: 2000, sth: 5, odds: { coins: 62, sth: 30, chest: 8 } } };
+  const HEX_RE = /^#[0-9a-f]{6}$/i;
+  /** Réglage de l'admin : « auto » (selon la date) ou une saison imposée, avec des couleurs personnalisées facultatives. */
+  let seasonCfg = { mode: 'auto', id: null, custom: null };
+  try {
+    const saved = await db.kvGet('season');
+    if (saved && typeof saved === 'object') seasonCfg = { mode: saved.mode === 'manual' ? 'manual' : 'auto', id: saved.id ?? null, custom: saved.custom ?? null };
+  } catch (e) {
+    console.error('Lecture de la saison impossible :', e.message);
+  }
+
+  /** Saison du calendrier : Noël du 1er décembre au 6 janvier, Halloween du 15 octobre au 2 novembre, etc. */
+  function autoSeason(ms) {
+    const d = dayKey(ms);
+    const v = Number(d.slice(5, 7)) * 100 + Number(d.slice(8, 10));
+    for (const [id, s] of Object.entries(SEASONS)) {
+      if (!Array.isArray(s.auto)) continue;
+      const a = s.auto[0][0] * 100 + s.auto[0][1];
+      const b = s.auto[1][0] * 100 + s.auto[1][1];
+      if (a <= b ? v >= a && v <= b : v >= a || v <= b) return id;
+    }
+    return 'classique';
+  }
+
+  function currentSeason(now = Date.now()) {
+    const id = seasonCfg.mode === 'manual' && own(SEASONS, seasonCfg.id) ? seasonCfg.id : autoSeason(now);
+    return { id, mode: seasonCfg.mode, custom: seasonCfg.custom ?? null };
+  }
+
+  /** Admin : saison imposée (ou « auto ») et couleurs personnalisées du ciel et du sol. */
+  async function setSeason(body) {
+    const mode = body.mode === 'auto' ? 'auto' : 'manual';
+    const id = mode === 'manual' ? String(body.id ?? '') : null;
+    if (mode === 'manual' && !own(SEASONS, id)) throw new Error('Saison inconnue');
+    let custom = null;
+    if (body.custom && typeof body.custom === 'object') {
+      custom = {};
+      for (const k of ['skyTop', 'skyHorizon', 'grass']) if (HEX_RE.test(String(body.custom[k] ?? ''))) custom[k] = String(body.custom[k]).toLowerCase();
+      if (!Object.keys(custom).length) custom = null;
+    }
+    seasonCfg = { mode, id, custom };
+    await db.kvSet('season', seasonCfg);
+    return currentSeason();
+  }
+
+  /** Mutation saisonnière en cours (frame du catalogue), ou null. */
+  function seasonMutation(now = Date.now()) {
+    const m = SEASONS[currentSeason(now).id]?.mutation;
+    return m && frames[m] ? m : null;
+  }
+
+  /** Cadeau saisonnier du jour (un par jour et par joueur, pendant les saisons qui en offrent). */
+  function giftInfo(p, now = Date.now()) {
+    const id = currentSeason(now).id;
+    const g = SEASONS[id]?.gift;
+    if (!g) return null;
+    return { season: id, label: g.label, icon: g.icon, available: p.seasonGift?.day !== dayKey(now) };
+  }
+
+  function openGift(p, now = Date.now()) {
+    const info = giftInfo(p, now);
+    if (!info) return { error: 'Pas de cadeau en ce moment : revenez pendant une saison festive !' };
+    if (!info.available) return { error: `${info.label} déjà ouvert aujourd’hui : revenez demain !` };
+    accrue(p, now);
+    const rules = SEASON_RULES.gift ?? {};
+    const odds = Object.entries(rules.odds ?? { coins: 1 });
+    let r = fairRandom() * odds.reduce((s, [, w]) => s + w, 0);
+    let kind = odds[0][0];
+    for (const [k, w] of odds) {
+      r -= w;
+      if (r < 0) {
+        kind = k;
+        break;
+      }
+    }
+    let amount = 1;
+    if (kind === 'sth') {
+      amount = rules.sth ?? 5;
+      p.sth += amount;
+    } else if (kind === 'chest' && CHESTS.simple) {
+      p.chests.simple = (p.chests.simple ?? 0) + 1;
+    } else {
+      kind = 'coins';
+      amount = Math.max(rules.minCoins ?? 2000, Math.round(income(p) * 60 * (rules.coinsMinutes ?? 15)));
+      p.coins += amount;
+    }
+    p.seasonGift = { day: dayKey(now), season: info.season };
+    touch(p);
+    return { reward: { kind, amount }, gift: info };
+  }
+
+  // ---------------------------------------------------------------- serveur privé (acheté en STH coins)
+
+  const PRIVATE = catalog.privateServer ?? { price: 200, days: 30, max: 7 };
 
   // ---------------------------------------------------------------- convoi
 
@@ -845,8 +986,11 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     const fx = ev === 'golden' ? 4 : 1;
     // cadre arc-en-ciel (×10) : très rare, un camion sur quatre pendant le « convoi arc-en-ciel »
     const rainbow = ev === 'arcenciel' ? 0.25 : (frames.arcenciel?.chance ?? 0) * fx;
-    const frame = rnd() < rainbow ? 'arcenciel'
+    let frame = rnd() < rainbow ? 'arcenciel'
       : f < frames.diamant.chance * fx ? 'diamant' : f < (frames.diamant.chance + frames.dore.chance) * fx ? 'dore' : 'normal';
+    // saison en cours : mutation saisonnière sur une partie des camions (tirage à part : le reste du camion ne change pas)
+    const mut = seasonMutation();
+    if (mut && frame === 'normal' && seededRandom(`${p.id}:${window}:mutation`)() < (SEASON_RULES.mutationChance ?? 0)) frame = mut;
     return {
       window, workId: work.id, frame, rarity, event: ev,
       price: Math.round(work.price * frames[frame].mult * (ev === 'soldes' ? 0.7 : 1)),
@@ -1429,19 +1573,42 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     // ------------------------------------------------------------ STH coins et Lucky coffres
 
     if (route === 'sth/exchange' && req.method === 'POST') {
-      // échange de pièces du jeu contre des STH coins (taux volontairement très élevé)
+      // échange de pièces du jeu contre des STH coins : taux très élevé ET plafond mensuel (montant et nombre d'échanges)
       const sth = Number(body.sth);
-      const min = PREMIUM.minExchange ?? 10;
-      const max = PREMIUM.maxExchange ?? 100_000;
-      if (!Number.isInteger(sth) || sth < min || sth > max) return json(res, 422, { error: `Entre ${min} et ${max.toLocaleString('fr-FR')} STH par échange` });
+      const info = exchangeInfo(p);
+      const fmt = (n) => n.toLocaleString('fr-FR');
+      if (info.count >= info.maxCount) return json(res, 409, { error: `Déjà ${info.maxCount} échanges ce mois-ci : le prochain sera possible le 1er du mois. En attendant, les STH coins s’achètent dans l’onglet 💎.`, limit: true });
+      if (info.left < info.min) return json(res, 409, { error: `Plafond du mois atteint (${fmt(info.cap)} STH par mois) : nouvel échange le 1er du mois.`, limit: true });
+      const max = Math.min(PREMIUM.maxExchange ?? info.cap, info.left);
+      if (!Number.isInteger(sth) || sth < info.min || sth > max) return json(res, 422, { error: `Entre ${info.min} et ${fmt(max)} STH pour cet échange (encore ${fmt(info.left)} STH convertibles ce mois-ci)` });
       const cost = sth * PREMIUM.coinsPerSth;
       if (!validPrice(cost)) return json(res, 422, { error: 'Montant invalide' });
       accrue(p);
-      if (p.coins < cost) return json(res, 402, { error: `Il vous manque ${Math.ceil(cost - p.coins).toLocaleString('fr-FR')} pièces` });
+      if (p.coins < cost) return json(res, 402, { error: `Il vous manque ${fmt(Math.ceil(cost - p.coins))} pièces` });
       p.coins -= cost;
       p.sth += sth;
+      p.exchange = { month: info.month, sth: info.used + sth, count: info.count + 1 };
       touch(p);
       return json(res, 200, { sth, cost, state: state(p) });
+    }
+
+    if (route === 'gift' && req.method === 'POST') {
+      // cadeau saisonnier du jour (sous le grand sapin, dans le chaudron d'Halloween…)
+      const r = openGift(p);
+      if (r.error) return json(res, 409, { error: r.error });
+      return json(res, 200, { reward: r.reward, gift: r.gift, state: state(p) });
+    }
+
+    if (route === 'private/buy' && req.method === 'POST') {
+      // serveur privé : un quartier rien qu'à soi et à ses amis invités, pendant 30 jours (prolongeable)
+      const price = PRIVATE.price;
+      if (!validPrice(price)) return json(res, 422, { error: 'Prix invalide' });
+      if (p.sth < price) return json(res, 402, { error: `Il vous manque ${Math.ceil(price - p.sth)} STH coins`, missingSth: Math.ceil(price - p.sth) });
+      const now = Date.now();
+      p.sth -= price;
+      p.privateUntil = Math.max(now, p.privateUntil ?? 0) + PRIVATE.days * 86_400_000;
+      touch(p);
+      return json(res, 200, { until: p.privateUntil, price, state: state(p) });
     }
 
     if (route === 'chest/buy' && req.method === 'POST') {
@@ -1501,10 +1668,10 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     }
 
     if (devMode && route === 'dev/age' && req.method === 'POST') {
-      // tests : fin du bouclier débutant et de l'immunité
+      // tests : fin du bouclier débutant et de l'immunité (keepOfflineLoss : garder la protection « absent, déjà volé »)
       p.createdAt = Date.now() - BEGINNER_MS - 1000;
       p.immuneUntil = 0;
-      p.lastOfflineLoss = 0;
+      if (!body.keepOfflineLoss) p.lastOfflineLoss = 0;
       p.clearLock = true;
       touch(p);
       changed(p);
@@ -1617,6 +1784,13 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     eventAt,
     setAdminEvent,
     coinPickup,
+    /** Saison du monde (thème choisi par l'admin ou selon la date) et son réglage. */
+    currentSeason,
+    setSeason,
+    seasons: SEASONS,
+    /** Serveur privé actif (acheté en STH coins). */
+    privateActive: (p) => (p?.privateUntil ?? 0) > Date.now(),
+    privateMax: PRIVATE.max ?? 7,
     /** Joueur dont le code d'invitation est `code` (ou null). */
     byInvite: (code) => (typeof code === 'string' && code ? [...players.values()].find((x) => x.inviteCode === code) ?? null : null),
     handle, leaderboard, authenticate, snapshot, stealBlocker, markCarried, returnCarried, completeTheft, arrest, caughtTrying,

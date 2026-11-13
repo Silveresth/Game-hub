@@ -1,7 +1,30 @@
 import raw from '../shared/catalog.json';
 
 export type RarityId = 'commun' | 'rare' | 'epique' | 'legendaire' | 'mythique';
-export type FrameId = 'normal' | 'dore' | 'diamant' | 'arcenciel';
+/** Cadres spéciaux et mutations (les mutations saisonnières n'apparaissent que pendant leur saison). */
+export type FrameId = 'normal' | 'dore' | 'diamant' | 'arcenciel' | 'givre' | 'hante' | 'fleuri' | 'solaire' | 'festif';
+export type SeasonId = 'classique' | 'noel' | 'halloween' | 'printemps' | 'ete' | 'fete';
+export interface SeasonDef {
+  label: string;
+  icon: string;
+  desc: string;
+  /** Ciel : [haut, horizon]. */
+  sky: [string, string];
+  fog: string;
+  grass: string;
+  /** Sol enneigé (la pelouse devient de la neige). */
+  snow?: boolean;
+  hemi: [string, string];
+  sun: string;
+  /** Intensité de la lumière (1 = normale). */
+  light: number;
+  flags: string[];
+  bulb: string;
+  particles: 'snow' | 'leaves' | 'petals' | 'confetti' | null;
+  gift?: { label: string; icon: string };
+  mutation?: FrameId;
+  event?: string;
+}
 
 export interface Work {
   id: string;
@@ -19,7 +42,11 @@ export interface Work {
 
 export const CATALOG = raw as unknown as {
   rarities: Record<RarityId, { label: string; color: string; convoyWeight: number; incomeRate: number }>;
-  frames: Record<FrameId, { label: string; mult: number; chance: number }>;
+  frames: Record<FrameId, { label: string; short: string; icon: string; color: string; mult: number; chance: number; season?: SeasonId }>;
+  seasons: Record<SeasonId, SeasonDef>;
+  seasonRules: { mutationChance: number; chestMutationChance: number };
+  privateServer: { price: number; days: number; max: number };
+  events: { kinds: Record<string, { label: string; icon: string; desc: string; admin?: boolean; rain?: boolean; mult?: number; season?: SeasonId }> };
   incomeRate: number;
   startCoins: number;
   countries: Array<{ code: string; name: string; flag: string }>;
@@ -51,6 +78,8 @@ export const CATALOG = raw as unknown as {
     coinsPerSth: number;
     minExchange: number;
     maxExchange: number;
+    monthlyCap: number;
+    monthlyCount: number;
     xofCountries: string[];
     eurCountries: string[];
     packs: Array<{ id: string; sth: number; bonus: number; xof: number; eur: number; usd: number; tag?: string }>;
@@ -67,6 +96,13 @@ export const CATALOG = raw as unknown as {
   }>;
   chestBulk: { qty: number; discount: number };
 };
+
+/** Libellé court d'un cadre / d'une mutation, avec son icône : « ❄️ Givré ×3 ». Vide pour un cadre normal. */
+export const frameTag = (f: FrameId): string => (f === 'normal' ? '' : `${CATALOG.frames[f].icon} ${CATALOG.frames[f].short} ×${CATALOG.frames[f].mult}`);
+/** Étoiles de rareté (lisibles même sans connaître les couleurs). */
+export const RARITY_STARS: Record<RarityId, string> = { commun: '●', rare: '★', epique: '★★', legendaire: '★★★', mythique: '♛' };
+/** Mutation saisonnière (et non simple cadre spécial). */
+export const isMutation = (f: FrameId): boolean => !!CATALOG.frames[f]?.season;
 
 const byId = new Map(CATALOG.works.map((w) => [w.id, w]));
 export const work = (id: string): Work => byId.get(id)!;

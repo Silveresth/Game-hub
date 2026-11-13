@@ -7,13 +7,14 @@ interface Sale { id: string; kind: string; label: string; at: number; live: bool
 interface Overview {
   now: number;
   dev: boolean;
-  stats: { players: number; online: number; districts: number };
+  stats: { players: number; online: number; districts: number; private?: number };
   live: { sale: Sale; lot: { index: number; count: number; workId: string; price: number; phase: string } | null; hall: number } | null;
   upcoming: Sale[];
   results: Array<{ at: number; sale: string; workId: string; frame: string; price: number; winner: string; npc: boolean }>;
   works: Work[];
   push: Array<{ at: number; player: string; category: string; title: string; body: string }>;
   liveEvent: { kind: string; label: string; icon: string; endsAt: number; admin?: boolean } | null;
+  season?: { id: string; mode: 'auto' | 'manual'; custom: { skyTop?: string; skyHorizon?: string; grass?: string } | null };
   payments?: {
     providers: string[];
     totals: Record<string, number>;
@@ -25,7 +26,16 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const nf = new Intl.NumberFormat('fr-FR');
 const when = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const title = (id: string) => catalog.works.find((w) => w.id === id)?.title ?? id;
-const FRAMES: Record<string, string> = { normal: 'Cadre normal', dore: 'Cadre doré (×2)', diamant: 'Cadre diamant (×5)', arcenciel: 'Cadre arc-en-ciel (×10)' };
+type FrameDef = { label: string; short?: string; icon?: string; mult: number; season?: string };
+type SeasonDef = { label: string; icon: string; desc: string; sky: [string, string]; grass: string; flags: string[]; event?: string };
+type EventDef = { label: string; icon: string; desc: string; admin?: boolean; season?: string };
+const FRAME_DEFS = catalog.frames as unknown as Record<string, FrameDef>;
+const SEASONS = (catalog as unknown as { seasons: Record<string, SeasonDef> }).seasons;
+const EVENTS = (catalog as unknown as { events: { kinds: Record<string, EventDef> }; liveEvents: { minutes: Record<string, number> } });
+/** Cadres et mutations proposés pour les lots (les mutations saisonnières aussi). */
+const FRAMES: Record<string, string> = Object.fromEntries(
+  Object.entries(FRAME_DEFS).map(([k, f]) => [k, k === 'normal' ? 'Cadre normal' : `${f.icon ?? ''} ${f.label} (×${f.mult})`.trim()]),
+);
 const RAR: Record<string, string> = { commun: 'Commun', rare: 'Rare', epique: 'Épique', legendaire: 'Légendaire', mythique: 'Mythique' };
 
 let token = '';
@@ -78,16 +88,17 @@ function render(): void {
   if (!data) return;
   $('sPlayers').textContent = nf.format(data.stats.players);
   $('sOnline').textContent = nf.format(data.stats.online);
-  $('sDistricts').textContent = nf.format(data.stats.districts);
+  $('sDistricts').textContent = `${nf.format(data.stats.districts)}${data.stats.private ? ` (${data.stats.private} privé${data.stats.private > 1 ? 's' : ''})` : ''}`;
   $('sLive').textContent = data.live ? `${data.live.sale.label} · lot ${(data.live.lot?.index ?? 0) + 1}/${data.live.lot?.count ?? 0}` : 'aucune';
   const ev = data.liveEvent;
   $('liveState').textContent = ev
     ? `${ev.icon} ${ev.label} en cours (${ev.admin ? 'admin abuse' : 'événement du convoi'}), fin à ${new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(ev.endsAt)}.`
     : 'Aucun événement en cours.';
+  renderSeason();
   $('atHint').textContent = data.dev ? 'Mode test : la vente peut être programmée tout de suite, et lancée avec « Lancer ».' : 'Au moins 1 h à l’avance, pour laisser le temps de prévenir les joueurs.';
 
   $('sales').innerHTML = data.upcoming.map((s) => {
-    const lots = s.lots ? s.lots.map((l) => `${esc(title(l.workId))}${l.frame !== 'normal' ? ` (${FRAMES[l.frame].split(' ')[1]})` : ''}`).join(', ') : '<span class="muted">tirés au sort</span>';
+    const lots = s.lots ? s.lots.map((l) => `${esc(title(l.workId))}${l.frame !== 'normal' ? ` (${FRAME_DEFS[l.frame]?.short ?? l.frame})` : ''}`).join(', ') : '<span class="muted">tirés au sort</span>';
     const actions = s.admin
       ? `${s.announced ? '<span class="tag">annoncée</span>' : `<button class="ghost" data-act="announce" data-id="${s.id}">Annoncer</button>`}
          ${data!.dev ? `<button class="ghost" data-act="start" data-id="${s.id}">Lancer</button>` : ''}
@@ -163,27 +174,81 @@ $('saleForm').onsubmit = async (e) => {
   }
 };
 
-// « admin abuse » en direct
-document.querySelectorAll<HTMLButtonElement>('[data-live]').forEach((b) => {
-  b.onclick = async () => {
-    try {
+// ---------------------------------------------------------------- thème du monde (saisons)
+
+let colorsTouched = false;
+function renderSeason(): void {
+  const s = data?.season;
+  if (!s) return;
+  const def = SEASONS[s.id];
+  $('seasonState').textContent = `${def?.icon ?? ''} ${def?.label ?? s.id} · ${s.mode === 'auto' ? 'automatique (selon la date)' : 'imposé par l’admin'}${s.custom ? ' · couleurs personnalisées' : ''}`;
+  const btn = (id: string, label: string, sub: string, colors: string[], on: boolean) =>
+    `<button type="button" data-season="${id}" class="${on ? 'on' : ''}"><span class="sw">${colors.map((c) => `<i style="background:${c}"></i>`).join('')}</span><b>${label}</b><small>${esc(sub)}</small></button>`;
+  $('seasonBtns').innerHTML =
+    btn('auto', '📅 Automatique', 'Suit le calendrier', ['#1d6fd8', '#eef5ff', '#2b1650', '#ff9ecb', '#0b86ff'], s.mode === 'auto') +
+    Object.entries(SEASONS).map(([id, d]) => btn(id, `${d.icon} ${d.label}`, d.desc.split(',')[0], [d.sky[0], d.sky[1], d.grass, ...d.flags.slice(0, 2)], s.mode === 'manual' && s.id === id)).join('');
+  // couleurs affichées : celles en vigueur (personnalisées, sinon celles du thème) tant que l'admin n'y a pas touché
+  if (!colorsTouched) {
+    $<HTMLInputElement>('cSkyTop').value = s.custom?.skyTop ?? def?.sky[0] ?? '#1d6fd8';
+    $<HTMLInputElement>('cSkyHorizon').value = s.custom?.skyHorizon ?? def?.sky[1] ?? '#8fc8ff';
+    $<HTMLInputElement>('cGrass').value = s.custom?.grass ?? def?.grass ?? '#4fa63f';
+  }
+}
+['cSkyTop', 'cSkyHorizon', 'cGrass'].forEach((id) => $(id).addEventListener('input', () => (colorsTouched = true)));
+
+async function setSeason(body: Record<string, unknown>, done: string): Promise<void> {
+  try {
+    const r = await call<{ season: Overview['season'] }>('POST', 'season', body);
+    if (data) data.season = r.season;
+    colorsTouched = false;
+    say(done);
+    renderSeason();
+  } catch (err) {
+    say((err as Error).message, false);
+  }
+}
+$('seasonBtns').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-season]');
+  if (!b) return;
+  const id = b.dataset.season!;
+  const custom = data?.season?.custom ?? null;
+  void setSeason(id === 'auto' ? { mode: 'auto', custom } : { mode: 'manual', id, custom }, id === 'auto' ? 'Saison automatique (selon la date) : appliquée chez tous les joueurs.' : `${SEASONS[id].icon} ${SEASONS[id].label} : appliqué chez tous les joueurs en ligne.`);
+});
+$('seasonColors').onclick = () => {
+  const s = data?.season;
+  void setSeason(
+    { mode: s?.mode ?? 'auto', id: s?.id, custom: { skyTop: $<HTMLInputElement>('cSkyTop').value, skyHorizon: $<HTMLInputElement>('cSkyHorizon').value, grass: $<HTMLInputElement>('cGrass').value } },
+    'Couleurs du ciel et du sol appliquées.',
+  );
+};
+$('seasonColorsReset').onclick = () => {
+  const s = data?.season;
+  void setSeason({ mode: s?.mode ?? 'auto', id: s?.id, custom: null }, 'Couleurs d’origine du thème rétablies.');
+};
+
+// ---------------------------------------------------------------- « admin abuse » en direct
+
+$('liveBtns').innerHTML =
+  Object.entries(EVENTS.events.kinds)
+    .filter(([, e]) => e.admin)
+    .map(([k, e]) => `<button type="button" data-live="${k}">${e.icon} ${esc(e.label)} · ${EVENTS.liveEvents.minutes[k] ?? 5} min${e.season ? ` <span class="tag">${SEASONS[e.season]?.icon ?? ''} ${esc(SEASONS[e.season]?.label ?? e.season)}</span>` : ''}</button>`)
+    .join('') + '<button type="button" class="danger" id="liveStop">Arrêter</button>';
+$('liveBtns').addEventListener('click', async (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+  if (!b) return;
+  try {
+    if (b.id === 'liveStop') {
+      await call('DELETE', 'live');
+      say('Événement arrêté.');
+    } else {
       const r = await call<{ event: { label: string } }>('POST', 'live', { kind: b.dataset.live });
       say(`${r.event.label} lancé pour tous les joueurs en ligne.`);
-      await refresh();
-    } catch (err) {
-      say((err as Error).message, false);
     }
-  };
-});
-$('liveStop').onclick = async () => {
-  try {
-    await call('DELETE', 'live');
-    say('Événement arrêté.');
     await refresh();
   } catch (err) {
     say((err as Error).message, false);
   }
-};
+});
 
 $('sales').addEventListener('click', async (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-act]');

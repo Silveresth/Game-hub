@@ -9,7 +9,7 @@ la page d'accueil (section « Journal des versions ») et dans le jeu (menu ☰ 
 
 **Version 1.3 — Lucky coffres, inventaire, nouvelle prise en main :**
 - **STH coins** (monnaie premium) : en argent réel (T-Money, Flooz / Moov Money, cartes Visa / Mastercard, PayPal) ou en
-  échangeant ses pièces (1 000 STH = 150 M). Offres de 100 à 15 000 STH, prix en FCFA, euros ou dollars selon le pays.
+  échangeant ses pièces (1 STH = 1 M de pièces, 100 STH et 3 échanges au plus par mois). Offres de 100 à 15 000 STH, prix en FCFA, euros ou dollars selon le pays.
   Paiements vérifiés par le serveur auprès du prestataire, crédités une seule fois : [docs/PAIEMENTS.md](docs/PAIEMENTS.md).
 - **Lucky coffres** (simple 60, rare 180, épique 450, légendaire 1 200 STH ; lot de 5 à −10 %) : une œuvre par coffre,
   probabilités affichées avant l'achat et l'ouverture, garantie après une série malchanceuse, Mythique seulement si elle

@@ -7,11 +7,59 @@
     "mythique": { "label": "Mythique", "color": "#ff3b4e", "convoyWeight": 0, "incomeRate": 0.003 }
   },
   "frames": {
-    "normal": { "label": "", "mult": 1, "chance": 0.945 },
-    "dore": { "label": "Cadre doré", "mult": 2, "chance": 0.05 },
-    "diamant": { "label": "Cadre diamant", "mult": 5, "chance": 0.005 },
-    "arcenciel": { "label": "Cadre arc-en-ciel", "mult": 10, "chance": 0.001 }
+    "normal": { "label": "", "short": "", "icon": "", "color": "#cfc9bb", "mult": 1, "chance": 0.945 },
+    "dore": { "label": "Cadre doré", "short": "Doré", "icon": "✨", "color": "#ffd36b", "mult": 2, "chance": 0.05 },
+    "diamant": { "label": "Cadre diamant", "short": "Diamant", "icon": "💎", "color": "#8ff0ff", "mult": 5, "chance": 0.005 },
+    "arcenciel": { "label": "Cadre arc-en-ciel", "short": "Arc-en-ciel", "icon": "🌈", "color": "#ff8fd8", "mult": 10, "chance": 0.001 },
+    "givre": { "label": "Mutation Givrée", "short": "Givré", "icon": "❄️", "color": "#9fe8ff", "mult": 3, "chance": 0, "season": "noel" },
+    "hante": { "label": "Mutation Hantée", "short": "Hanté", "icon": "👻", "color": "#c08bff", "mult": 4, "chance": 0, "season": "halloween" },
+    "fleuri": { "label": "Mutation Fleurie", "short": "Fleuri", "icon": "🌸", "color": "#ff8fc8", "mult": 3, "chance": 0, "season": "printemps" },
+    "solaire": { "label": "Mutation Solaire", "short": "Solaire", "icon": "☀️", "color": "#ffb52e", "mult": 3, "chance": 0, "season": "ete" },
+    "festif": { "label": "Mutation Festive", "short": "Festif", "icon": "🎉", "color": "#ff6fae", "mult": 3, "chance": 0, "season": "fete" }
   },
+  "seasons": {
+    "classique": {
+      "label": "Classique", "icon": "🏛️", "desc": "Le quartier de tous les jours : ciel bleu, pelouse verte, pavés dorés.",
+      "sky": ["#1d6fd8", "#8fc8ff"], "fog": "#9ccbf2", "grass": "#4fa63f", "hemi": ["#a6d6ff", "#6f8f4a"], "sun": "#fff0d6", "light": 1,
+      "flags": ["#ff5e62", "#ffd36b", "#3d8bff", "#4cc38a", "#b46bff", "#ff9f43"], "bulb": "#ffd58a", "particles": null
+    },
+    "noel": {
+      "label": "Noël", "icon": "🎄", "desc": "Neige qui tombe, sapins illuminés, cadeaux au pied du grand sapin et mutation Givrée ❄️.",
+      "auto": [[12, 1], [1, 6]],
+      "sky": ["#2f5ab0", "#cfe2f7"], "fog": "#d3e2f3", "grass": "#eef5ff", "snow": true, "hemi": ["#d6e8ff", "#8aa0c0"], "sun": "#fff4e6", "light": 0.95,
+      "flags": ["#e2333b", "#2e9e4f", "#ffd36b", "#ffffff"], "bulb": "#ffcf6b", "particles": "snow",
+      "gift": { "label": "Cadeau de Noël", "icon": "🎁" }, "mutation": "givre", "event": "cadeaux"
+    },
+    "halloween": {
+      "label": "Halloween", "icon": "🎃", "desc": "Ciel du crépuscule, citrouilles qui brillent, chauves-souris, bonbons et mutation Hantée 👻.",
+      "auto": [[10, 15], [11, 2]],
+      "sky": ["#2b1650", "#f08a3c"], "fog": "#6b4470", "grass": "#3f6b33", "hemi": ["#c7a0ff", "#4a3b2a"], "sun": "#ffb36b", "light": 0.85,
+      "flags": ["#ff7a1a", "#7b2fd6", "#1d1b24", "#7dff6a"], "bulb": "#ff8a1f", "particles": "leaves",
+      "gift": { "label": "Sac de bonbons", "icon": "🍬" }, "mutation": "hante", "event": "bonbons"
+    },
+    "printemps": {
+      "label": "Printemps", "icon": "🌸", "desc": "Pétales roses, parterres de fleurs, œufs géants à trouver et mutation Fleurie 🌸.",
+      "auto": [[3, 20], [4, 30]],
+      "sky": ["#3f9cff", "#c6ecff"], "fog": "#c5e6fb", "grass": "#5cc24a", "hemi": ["#c9ecff", "#7fb85a"], "sun": "#fff6e0", "light": 1,
+      "flags": ["#ff9ecb", "#ffe27a", "#9fe0ff", "#b9f5a8", "#d7b5ff"], "bulb": "#fff0b8", "particles": "petals",
+      "gift": { "label": "Œuf surprise", "icon": "🥚" }, "mutation": "fleuri", "event": "oeufs"
+    },
+    "ete": {
+      "label": "Été", "icon": "☀️", "desc": "Grand soleil, palmiers, parasols, ballons de plage et mutation Solaire ☀️.",
+      "auto": [[7, 1], [8, 31]],
+      "sky": ["#0b86ff", "#a4e4ff"], "fog": "#a9def7", "grass": "#63c03f", "hemi": ["#b5e6ff", "#86a84a"], "sun": "#fff2c8", "light": 1.08,
+      "flags": ["#ff4f6d", "#ffd23f", "#2ec4f1", "#3ddc84", "#ff8c42"], "bulb": "#fff2c8", "particles": null,
+      "gift": { "label": "Coffre au trésor", "icon": "🏖️" }, "mutation": "solaire", "event": "pluie"
+    },
+    "fete": {
+      "label": "Grande fête", "icon": "🎉", "desc": "Ballons, confettis qui tombent du ciel, cadeaux et mutation Festive 🎉. Pour les anniversaires et les grands jours.",
+      "sky": ["#5a3fd8", "#ffc3e8"], "fog": "#f1c9ec", "grass": "#56b847", "hemi": ["#ffd1f0", "#7a8f4a"], "sun": "#fff0e0", "light": 1,
+      "flags": ["#ff3b7a", "#ffd23f", "#2ec4f1", "#8c5bff", "#3ddc84"], "bulb": "#ffd1f0", "particles": "confetti",
+      "gift": { "label": "Cadeau de fête", "icon": "🎉" }, "mutation": "festif", "event": "pluie"
+    }
+  },
+  "seasonRules": { "mutationChance": 0.05, "chestMutationChance": 0.04, "gift": { "coinsMinutes": 15, "minCoins": 2000, "sth": 5, "odds": { "coins": 62, "sth": 30, "chest": 8 } } },
+  "privateServer": { "price": 200, "days": 30, "max": 7 },
   "incomeRate": 0.006,
   "startCoins": 500,
   "security": {
@@ -55,10 +103,13 @@
       "soldes": { "label": "Soldes au convoi", "icon": "🏷", "desc": "Toutes les œuvres du convoi à −30 %" },
       "pluie": { "label": "Pluie d’or", "icon": "💰", "desc": "Des pièces tombent sur la place : le premier arrivé les ramasse", "admin": true },
       "arcenciel": { "label": "Convoi arc-en-ciel", "icon": "🌈", "desc": "Un camion sur quatre porte un cadre arc-en-ciel (valeur ×10)", "admin": true },
-      "vitesse": { "label": "Super vitesse", "icon": "⚡", "desc": "Tout le monde court 60 % plus vite", "admin": true }
+      "vitesse": { "label": "Super vitesse", "icon": "⚡", "desc": "Tout le monde court 60 % plus vite", "admin": true },
+      "cadeaux": { "label": "Pluie de cadeaux", "icon": "🎁", "desc": "Des cadeaux tombent sur la place : ramassez-les (2 fois plus de pièces qu’une pluie d’or)", "admin": true, "rain": true, "mult": 2, "season": "noel" },
+      "bonbons": { "label": "Pluie de bonbons", "icon": "🍬", "desc": "Des bonbons tombent sur la place : ramassez-les (2 fois plus de pièces qu’une pluie d’or)", "admin": true, "rain": true, "mult": 2, "season": "halloween" },
+      "oeufs": { "label": "Chasse aux œufs", "icon": "🥚", "desc": "Des œufs surprises apparaissent sur la place : trouvez-les (2 fois plus de pièces qu’une pluie d’or)", "admin": true, "rain": true, "mult": 2, "season": "printemps" }
     }
   },
-  "liveEvents": { "dailyHour": 21, "minutes": { "pluie": 3, "arcenciel": 10, "vitesse": 10 }, "coinSeconds": 20 },
+  "liveEvents": { "dailyHour": 21, "minutes": { "pluie": 3, "arcenciel": 10, "vitesse": 10, "cadeaux": 4, "bonbons": 4, "oeufs": 4 }, "coinSeconds": 20 },
   "bonk": { "range": 2.6, "cooldownMs": 2500, "stunMs": 1100 },
   "skins": [
     { "id": 0, "label": "Costume" },
@@ -107,9 +158,11 @@
   "premium": {
     "label": "STH coins",
     "short": "STH",
-    "coinsPerSth": 150000,
-    "minExchange": 10,
-    "maxExchange": 100000,
+    "coinsPerSth": 1000000,
+    "minExchange": 5,
+    "maxExchange": 100,
+    "monthlyCap": 100,
+    "monthlyCount": 3,
     "xofCountries": ["TG", "BJ", "SN", "CI", "BF", "ML", "NE", "GW", "CM", "GA", "CG", "TD", "CF", "GQ"],
     "eurCountries": ["FR", "BE", "DE", "IT", "ES", "LU", "PT", "NL", "AT", "IE", "FI", "GR"],
     "packs": [

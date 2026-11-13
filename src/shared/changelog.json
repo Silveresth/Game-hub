@@ -1,6 +1,30 @@
 {
-  "current": "1.3.0",
+  "current": "1.4.0",
   "versions": [
+    {
+      "version": "1.4.0",
+      "date": "2026-11-13",
+      "title": "Saisons, serveurs privés et quartier tout en couleurs",
+      "items": [
+        { "type": "new", "text": "Saisons du quartier : Noël (neige qui tombe, grand sapin illuminé, bonshommes de neige), Halloween (citrouilles, fantômes, chauves-souris), Printemps (œufs géants, fleurs, lapins), Été (palmiers, parasols) et Grande fête (ballons, gâteau, confettis). Elles arrivent toutes seules selon la date, ou quand l’admin les lance." },
+        { "type": "new", "text": "Cadeau de saison : un par jour et par joueur, au pied du grand décor de la place (ou avec le bouton du haut). Des pièces, des STH coins ou un Lucky coffre." },
+        { "type": "new", "text": "Mutations saisonnières : Givrée ❄️ (×3), Hantée 👻 (×4), Fleurie 🌸 (×3), Solaire ☀️ (×3), Festive 🎉 (×3). Elles passent au convoi et sortent des coffres seulement pendant leur saison." },
+        { "type": "new", "text": "Pluies de saison en direct : cadeaux, bonbons ou œufs à ramasser sur la place, deux fois plus généreux qu’une pluie d’or." },
+        { "type": "new", "text": "Serveurs privés : un quartier rien qu’à vous et aux amis à qui vous donnez votre code (200 STH coins pour 30 jours, dans 👥 Amis)." },
+        { "type": "new", "text": "Panneau admin : choix du thème du monde (saison ou automatique) et couleurs du ciel et du sol au choix, appliqués tout de suite chez tous les joueurs." },
+        { "type": "improved", "text": "Rareté visible d’un coup d’œil : halo de la couleur de la rareté derrière chaque œuvre, pastille colorée avec étoiles, camions du convoi peints selon ce qu’ils transportent." },
+        { "type": "improved", "text": "Cadres et mutations bien visibles : glaçons, fleurs, lueurs et étincelles de leur couleur, et pastille « ❄️ Givré ×3 » sur l’étiquette et dans l’inventaire." },
+        { "type": "improved", "text": "Quartier plus coloré : pavés dorés et terre cuite, trottoirs en briques, pelouses tondues, grande haie fleurie, hôtel des ventes framboise, façades des musées à la couleur de leur propriétaire et tapis rouge à l’entrée." },
+        { "type": "improved", "text": "Nouveau design des menus : boutons en relief colorés, panneaux arrondis avec bandeau de couleur, onglets en pastilles, invites d’action plus lisibles." },
+        { "type": "improved", "text": "Marché noir redessiné (cartes néon par outil, stock visible) et boutique en cartes (améliorations, coffres, packs de STH coins)." },
+        { "type": "improved", "text": "Nouveaux Lucky coffres : bois cerclé de fer, acier bleu, violet aux coins dorés, coffre légendaire doré avec couronne, reflet animé et étincelles." },
+        { "type": "improved", "text": "Échange pièces → STH coins plus cher et limité : 1 STH = 1 million de pièces, 100 STH et 3 échanges au plus par mois." },
+        { "type": "fixed", "text": "Après un vol, une œuvre de la réserve de la victime s’accrochait toute seule à la place de l’œuvre volée : on croyait que l’œuvre volée était encore là. La place reste maintenant vide, et la victime est invitée à exposer une œuvre de sa réserve." },
+        { "type": "fixed", "text": "Message de vol plus clair : un musée dont le propriétaire est absent et s’est déjà fait voler il y a moins de 2 h affiche « protégé » (avec le temps restant) au lieu de proposer un vol qui serait refusé." },
+        { "type": "fixed", "text": "Les pieds du personnage se déformaient pendant le saut." },
+        { "type": "fixed", "text": "Après leur pause, les gardes repartaient en patrouille les jambes encore pliées (personnage déformé en marchant)." }
+      ]
+    },
     {
       "version": "1.3.0",
       "date": "2026-11-13",
@@ -138,7 +162,8 @@
     { "status": "next", "text": "Activer les paiements réels (clés des prestataires) et tester un achat de bout en bout." },
     { "status": "next", "text": "Partie test avec de vrais joueurs sur téléphone, puis équilibrage des prix et des coffres." },
     { "status": "planned", "text": "Coffres d’événement en édition limitée et récompenses de connexion en STH." },
-    { "status": "planned", "text": "Saisons avec classement remis à zéro et récompenses." },
+    { "status": "planned", "text": "Classement de saison (remis à zéro à chaque saison) avec récompenses pour les meilleurs." },
+    { "status": "planned", "text": "Coffres de saison en édition limitée (coffre de Noël, coffre hanté…)." },
     { "status": "planned", "text": "Application iPhone." },
     { "status": "idea", "text": "Le faussaire : vendre des copies comme si c’étaient des vraies." }
   ]

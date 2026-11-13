@@ -2,7 +2,7 @@
 // Chaque action passe par le serveur (ranger, exposer, remplacer, vendre, ouvrir un coffre).
 import * as api from './api';
 import type { ChestId, OwnedArtwork, PlayerState, ToolId } from './api';
-import { CATALOG, artUrl, incomeOf, money, perSec, work, type RarityId } from './catalog';
+import { CATALOG, RARITY_STARS, artUrl, frameTag, incomeOf, money, perSec, work, type RarityId } from './catalog';
 import { CHEST_IDS, RARITY_IDS, chestSvg, oddsHtml } from './premium';
 import type { Sfx } from './sfx';
 
@@ -101,13 +101,15 @@ export class Inventory {
   private card(a: OwnedArtwork, actions: string, where = ''): string {
     const w = work(a.workId);
     const r = CATALOG.rarities[w.rarity];
-    const frame = a.frame !== 'normal' ? `<span class="fr f-${a.frame}">${CATALOG.frames[a.frame].label}</span>` : '';
+    const f = CATALOG.frames[a.frame];
+    // cadre spécial ou mutation : pastille à sa couleur, avec son icône et son multiplicateur
+    const frame = a.frame !== 'normal' ? `<span class="mut" style="--mc:${f.color}" title="${esc(f.label)}">${frameTag(a.frame)}</span>` : '';
     return `<article class="art-card r-${w.rarity}${a.carried ? ' carried' : ''}" style="--rc:${r.color}">
       <div class="thumb f-${a.frame}"><img src="${artUrl(w.id)}" alt="" loading="lazy" /></div>
       <div class="ac-txt">
         <b title="${esc(w.title)}">${esc(w.title)}</b>
         <small>${esc(w.artist)}</small>
-        <span class="tags"><span class="rar">${r.label}</span>${frame}${a.repro ? '<span class="fr">Reproduction</span>' : ''}${w.kind === 'statue' ? '<span class="fr">Statue</span>' : ''}</span>
+        <span class="tags"><span class="rar">${RARITY_STARS[w.rarity]} ${r.label}</span>${frame}${a.repro ? '<span class="fr">Reproduction</span>' : ''}${w.kind === 'statue' ? '<span class="fr">Statue</span>' : ''}</span>
         <span class="num">${a.repro ? 'Décorative' : `+${perSec(incomeOfArt(a))}/s · ${money(valueOf(a))}`}</span>
         ${where ? `<span class="where">${where}</span>` : ''}
       </div>
@@ -194,7 +196,7 @@ export class Inventory {
       html += `<h3 class="album-r" style="color:${CATALOG.rarities[r].color}">${CATALOG.rarities[r].label} <small>${list.filter((w) => owned.has(w.id)).length}/${list.length}</small></h3><div class="album">`;
       for (const w of list) {
         const n = counts.get(w.id) ?? 0;
-        html += `<figure class="${n ? 'got' : 'missing'}" title="${esc(w.title)}, ${esc(w.artist)}"><img src="${artUrl(w.id)}" alt="" loading="lazy" />${n > 1 ? `<span>×${n}</span>` : ''}<figcaption>${n ? esc(w.title) : '???'}</figcaption></figure>`;
+        html += `<figure class="${n ? 'got' : 'missing'}" style="--rc:${CATALOG.rarities[r].color}" title="${esc(w.title)}, ${esc(w.artist)}"><img src="${artUrl(w.id)}" alt="" loading="lazy" />${n > 1 ? `<span>×${n}</span>` : ''}<figcaption>${n ? esc(w.title) : '???'}</figcaption></figure>`;
       }
       html += '</div>';
     }

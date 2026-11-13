@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { mountLiveBar, setupPwa } from '../shared/live';
 import * as api from './api';
-import type { ConvoyEvent, ConvoyItem, GuardTier, InboxItem, PlayerState, ToolId, UpgradeId } from './api';
+import type { ConvoyEvent, ConvoyItem, GuardTier, InboxItem, PlayerState, SeasonState, ToolId, UpgradeId } from './api';
 import { Character, hasOutfit, loadCharacterModel, loadCrowdModels } from './character';
 import { Coins, burst, dust, initFx, updateFx as updateParticles } from './fx';
 import { updateRainbow } from './textures';
@@ -23,8 +23,9 @@ import { Convoy, artTexture } from './convoy';
 import { Pedestrians, Visitors } from './visitors';
 import { Input } from './input';
 import { Sfx } from './sfx';
-import { CATALOG, incomeOf, money, perSec, work } from './catalog';
+import { CATALOG, artUrl, incomeOf, money, perSec, work } from './catalog';
 import { Premium } from './premium';
+import { Seasons } from './seasons';
 import { Inventory, type InvTab } from './inventory';
 import { Tutorial, type TutoFacts } from './tutorial';
 import { CHANGELOG, GAME_VERSION, roadmapHtml, versionHtml } from '../shared/changelog';
@@ -51,8 +52,11 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog('#9cc6ee', 100, 280); // Ciel azur avec brume atmosphérique légère
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.45;
-scene.add(new THREE.HemisphereLight(0x9cd0ff, 0x6f8f4a, 1.45));
-const sun = new THREE.DirectionalLight(0xfff0d6, 3.0);
+// intensités de base (thème classique) ; chaque saison les module (crépuscule d'Halloween, grand soleil d'été…)
+const LIGHT_BASE = { hemi: 1.35, sun: 2.9 };
+const hemi = new THREE.HemisphereLight(0x9cd0ff, 0x6f8f4a, LIGHT_BASE.hemi);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff0d6, LIGHT_BASE.sun);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 });
@@ -91,6 +95,7 @@ $('qualityBtn').onclick = () => {
   }
   applyQuality();
   pedestrians.setCount(pedestrianCount());
+  seasons.setQuality(quality);
 };
 applyQuality();
 
@@ -145,6 +150,9 @@ addEventListener('resize', () => {
 // ================================================================== monde
 
 const district = new District(scene);
+/** Thème du monde (saison) : décor, particules, couleurs du ciel, du sol et de la lumière. */
+const seasons = new Seasons(scene, district, { hemi, sun, fog: scene.fog as THREE.Fog, base: LIGHT_BASE });
+seasons.setQuality(quality);
 const convoy = new Convoy(scene);
 const visitors = new Visitors(scene);
 const pedestrians = new Pedestrians(scene);
@@ -175,6 +183,14 @@ scene.add(selfAnchor);
 const selfBubble = new SpeechBubble(selfAnchor, 3.45);
 let districtId = 0;
 let districtMax = 7;
+/** Serveur privé où l'on se trouve (son propriétaire), ou null dans un quartier public. */
+let privateOf: { id: string; name: string } | null = null;
+// serveur privé : on y retourne tout seul au lancement suivant (choix gardé sur l'appareil)
+try {
+  if (localStorage.getItem('sam-private') === '1') net.mode = 'private';
+} catch {
+  /* stockage indisponible */
+}
 chat.onSend = (text) => {
   if (!net.connected) return toast('Pas encore connecté au quartier');
   net.send({ t: 'chat', text });
@@ -191,8 +207,13 @@ chat.onOpenChange = (open) => {
 {
   const params = new URLSearchParams(location.search);
   const code = params.get('join');
-  if (code && /^[A-Za-z0-9_-]{4,16}$/.test(code)) net.joinCode = code;
-  if (params.has('join')) history.replaceState(null, '', location.pathname);
+  if (code && /^[A-Za-z0-9_-]{4,16}$/.test(code)) {
+    net.joinCode = code;
+    net.mode = null; // une invitation passe avant son propre serveur privé
+  }
+  // retour au quartier public (en quittant un serveur privé)
+  if (params.has('public')) net.mode = 'public';
+  if (params.has('join') || params.has('public')) history.replaceState(null, '', location.pathname);
 }
 
 // ---------------------------------------------------------------- confettis et gains flottants (moments forts)
@@ -326,6 +347,14 @@ function applyState(s: PlayerState): void {
   $('renameBtn').classList.toggle('save', guestNow);
   $('dailyBtn').hidden = !s.daily.claimable;
   $('dailyBtn').title = s.daily.claimable ? `Récompense du jour : +${money(s.daily.reward)} (série ${s.daily.streak})` : '';
+  // thème du monde et cadeau saisonnier du jour
+  if (s.season) seasons.apply(s.season);
+  const gift = s.gift;
+  $('giftBtn').hidden = !gift?.available;
+  if (gift) {
+    $('giftBtn').textContent = gift.icon;
+    $('giftBtn').title = `${gift.label} : un cadeau par jour pendant la saison (au pied du décor de la place, ou ici)`;
+  }
 }
 
 /** Caisse affichée : extrapolée entre deux synchros (au rythme « en ligne »). */
@@ -563,7 +592,10 @@ const inviteLink = () => `${location.origin}/game/?join=${state?.inviteCode ?? '
 function renderSocial(): void {
   if (!state) return;
   const others = remotes.list();
-  $('districtInfo').textContent = districtId ? `Quartier n°${districtId} · ${others.length + 1}/${districtMax} joueurs en ligne` : 'Connexion au quartier…';
+  $('districtInfo').textContent = !districtId ? 'Connexion au quartier…'
+    : privateOf ? `🔒 Serveur privé de ${privateOf.name} · ${others.length + 1}/${districtMax} joueurs en ligne`
+      : `Quartier n°${districtId} · ${others.length + 1}/${districtMax} joueurs en ligne`;
+  renderPrivate();
   $('inviteCode').textContent = state.inviteCode;
   $('shareInvite').hidden = !('share' in navigator);
   const list = $('playerList');
@@ -601,6 +633,76 @@ function renderSocial(): void {
   $('voiceToggle').textContent = voice.enabled ? 'Désactiver le micro' : 'Activer le micro';
 }
 $('socialBtn').onclick = () => openOverlay('social');
+
+/** Serveur privé : acheter (STH coins), y aller, le prolonger, ou revenir au quartier public. */
+function renderPrivate(): void {
+  if (!state) return;
+  const ps = state.privateServer;
+  const active = ps.until > serverNow();
+  const until = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long' }).format(ps.until);
+  const go = $('privateGo');
+  const more = $('privateMore');
+  more.hidden = true;
+  if (privateOf) {
+    $('privateInfo').innerHTML = privateOf.id === state.id
+      ? `Vous êtes sur <b>votre serveur privé</b>${active ? ` (actif jusqu’au ${until})` : ''}. Donnez votre code à vos amis pour qu’ils vous rejoignent.`
+      : `Vous êtes sur le serveur privé de <b>${escHtml(privateOf.name)}</b>.`;
+    go.textContent = 'Retour au quartier public';
+    go.dataset.act = 'public';
+    if (privateOf.id === state.id) {
+      more.hidden = false;
+      more.textContent = `Prolonger de ${ps.days} jours · ${ps.price} 💎`;
+      more.dataset.act = 'buy';
+    }
+  } else if (active) {
+    $('privateInfo').innerHTML = `Votre serveur privé est prêt (actif jusqu’au <b>${until}</b>).`;
+    go.textContent = 'Aller sur mon serveur privé';
+    go.dataset.act = 'go';
+  } else {
+    $('privateInfo').innerHTML = `<b>${ps.price} STH coins 💎</b> pour ${ps.days} jours. Vous avez ${state.sth.toLocaleString('fr-FR')} STH.`;
+    go.textContent = `Créer mon serveur privé · ${ps.price} 💎`;
+    go.dataset.act = 'buy';
+  }
+}
+const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+function gotoPrivate(on: boolean): void {
+  try {
+    if (on) localStorage.setItem('sam-private', '1');
+    else localStorage.removeItem('sam-private');
+  } catch {
+    /* stockage indisponible */
+  }
+  location.href = on ? '/game/' : '/game/?public=1';
+}
+for (const id of ['privateGo', 'privateMore']) {
+  $(id).addEventListener('click', () => {
+    const act = $(id).dataset.act;
+    if (act === 'go') gotoPrivate(true);
+    else if (act === 'public') gotoPrivate(false);
+    else if (act === 'buy') {
+      if (!state) return;
+      if (state.sth < state.privateServer.price) {
+        sfx.error();
+        toast(`Il vous manque ${state.privateServer.price - state.sth} STH coins : rechargez dans la boutique 💎`);
+        openShop('sth');
+        return;
+      }
+      void (async () => {
+        const r = await guarded(() => api.buyPrivate());
+        if (!r) return;
+        applyState(r.state);
+        sfx.fanfare();
+        if (privateOf?.id === state?.id) {
+          toast(`🔒 Serveur privé prolongé : −${r.price} STH`);
+          renderPrivate();
+        } else {
+          toast(`🔒 Serveur privé créé (−${r.price} STH) : on y va !`);
+          setTimeout(() => gotoPrivate(true), 900);
+        }
+      })();
+    }
+  });
+}
 $('copyInvite').onclick = () => {
   void navigator.clipboard?.writeText(inviteLink()).then(
     () => toast('🔗 Lien d’invitation copié : envoyez-le à un ami !'),
@@ -675,18 +777,26 @@ function upgradeText(id: UpgradeId, v: number): string {
 }
 let rebirthArmed = 0;
 
+/** Couleur de chaque amélioration (cartes de la boutique). */
+const UPGRADE_COLORS: Record<UpgradeId, string> = { speed: '#2ec4f1', lock: '#ff8c42', vault: '#ffc93c', gloves: '#ff5e9a', luck: '#3ddc84' };
 function renderShop(): void {
   if (!state) return;
   const s = state;
-  let html = '<h2>Améliorations</h2>';
+  let html = '<h2>Améliorations <small>permanentes, gardées après une Renaissance</small></h2><div class="up-grid">';
   for (const id of UPGRADE_IDS) {
     const u = CATALOG.upgrades[id];
     const cur = s.upgrades[id];
-    const dots = `<span class="lvl">${u.levels.map((_, i) => `<i class="${i < cur.level ? 'on' : ''}"></i>`).join('')}</span>`;
-    const now = cur.value !== null ? ` · actuel : ${upgradeText(id, cur.value)}` : '';
-    const desc = cur.next ? `${u.desc}${now} · prochain : ${upgradeText(id, cur.next.value)}` : `${u.desc}${now} · niveau maximum`;
-    html += offerHtml(`${u.icon} ${u.label}${dots}`, desc, cur.next ? cur.next.price : null, { upgrade: id }, cur.next ? undefined : 'Maximum');
+    const bar = `<div class="lvlbar" title="Niveau ${cur.level} / ${cur.max}">${u.levels.map((_, i) => `<i class="${i < cur.level ? 'on' : ''}"></i>`).join('')}</div>`;
+    const now = cur.value !== null ? `Actuel : <em>${upgradeText(id, cur.value)}</em>` : 'Pas encore achetée';
+    const next = cur.next ? ` → <em>${upgradeText(id, cur.next.value)}</em>` : ' · niveau maximum';
+    const poor = !!cur.next && s.coins < cur.next.price;
+    html += `<article class="up-card" style="--uc:${UPGRADE_COLORS[id]}">
+      <div class="ic">${u.icon}</div><b>${u.label}</b>${bar}
+      <p>${u.desc}<br/>${now}${next}</p>
+      <button data-upgrade="${id}" class="${poor ? 'poor' : ''}" ${cur.next ? '' : 'disabled'}>${cur.next ? `<i class="coin"></i>${money(cur.next.price)}` : '✓ Maximum'}</button>
+    </article>`;
   }
+  html += '</div>';
   // récompense du jour
   const d = s.daily;
   html += `<h2>Récompense du jour <small class="${d.claimable ? '' : 'off'}">série : ${d.streak} jour${d.streak > 1 ? 's' : ''}</small></h2>`;
@@ -757,6 +867,8 @@ function renderEvent(now: number): void {
   const { current, next } = state.event;
   const el = $('eventInfo');
   if (current && current.endsAt > now) {
+    // pluies saisonnières : des cadeaux, des bonbons ou des œufs tombent à la place des pièces
+    rainCoins.style = current.rain ? current.kind : 'pluie';
     // texte court (le porte-monnaie ne s'élargit plus) ; la description complète est dans l'infobulle et la bannière
     el.textContent = `${current.icon} ${current.label} : encore ${fmtDur(current.endsAt - now)}`;
     el.title = current.desc;
@@ -864,20 +976,38 @@ $('secBody').addEventListener('click', (e) => {
   })();
 });
 
+/** Couleur néon de chaque outil du marché noir. */
+const TOOL_COLORS: Record<ToolId, string> = { brouilleur: '#2ec4f1', fumigene: '#b9b3c9', pied: '#ff8c42', leurre: '#ff4fd8', pince: '#ffd23f', deguisement: '#3ddc84' };
 function renderMarket(): void {
   if (!state) return;
-  let html = '';
+  const s = state;
+  let html = `<div class="bm-hero"><small>Outils à usage unique · ${CATALOG.maxTools} de chaque au maximum · touches 1 à 6 près d’un musée rival</small></div><div class="bm-grid">`;
   TOOL_IDS.forEach((id, i) => {
     const t = CATALOG.tools[id];
-    const n = state!.tools[id] ?? 0;
+    const n = s.tools[id] ?? 0;
     const full = n >= CATALOG.maxTools;
-    html += offerHtml(`${t.icon} ${t.label} <small>(${n}/${CATALOG.maxTools} · touche ${i + 1})</small>`, t.desc, full ? null : state!.toolPrices[id], { tool: id }, full ? 'Plein' : undefined);
+    const price = s.toolPrices[id];
+    const poor = !full && s.coins < price;
+    const pips = Array.from({ length: CATALOG.maxTools }, (_, k) => `<i class="${k < n ? 'on' : ''}"></i>`).join('');
+    html += `<article class="bm-card ${full ? 'full' : ''}" style="--tc:${TOOL_COLORS[id]}">
+      <span class="bm-key" title="Touche du clavier">${i + 1}</span>
+      <div class="bm-icon">${t.icon}</div>
+      <b>${t.label}</b>
+      <small>${t.desc}</small>
+      <div class="bm-stock" title="${n} / ${CATALOG.maxTools} en poche">${pips}</div>
+      <button data-tool="${id}" class="${poor ? 'poor' : ''}" ${full ? 'disabled' : ''}>${full ? 'Poches pleines' : `<i class="coin"></i>${money(price)}`}</button>
+    </article>`;
   });
-  html += '<div class="faille">Le marché noir ne rembourse rien. Les outils se déclenchent dans un musée rival ou devant son entrée.</div>';
-  html += '<h2>Reproductions</h2>';
+  html += '</div><div class="faille">🕶 Le marché noir ne rembourse rien. Les outils se déclenchent dans un musée rival ou devant son entrée.</div>';
+  html += `<h2>Reproductions <small class="off">copies sans valeur · ${money(CATALOG.repro.price)} pièces</small></h2><div class="bm-repro-grid">`;
   for (const w of CATALOG.works.filter((x) => x.unique)) {
-    html += offerHtml(`🖼 « ${w.title} » (copie)`, 'Marquée « Reproduction » sur son cartel. Elle décore, ne rapporte rien, ne compte pas dans la valeur du musée et n’intéresse pas les voleurs.', CATALOG.repro.price, { repro: w.id });
+    html += `<article class="bm-repro">
+      <div class="pic"><img src="${artUrl(w.id)}" alt="" loading="lazy" /><span class="stamp">COPIE</span></div>
+      <b>${escHtml(w.title)}</b>
+      <button data-repro="${w.id}" class="${s.coins < CATALOG.repro.price ? 'poor' : ''}"><i class="coin"></i>${money(CATALOG.repro.price)}</button>
+    </article>`;
   }
+  html += '</div><p class="legal">Une reproduction est marquée « Reproduction » sur son cartel : elle décore, ne rapporte rien, ne compte pas dans la valeur du musée et n’intéresse pas les voleurs.</p>';
   $('marketBody').innerHTML = html;
 }
 
@@ -1417,9 +1547,39 @@ function onCoinGot(m: Extract<ServerMsg, { t: 'coin-got' }>): void {
   renderHud();
   bumpWallet();
   sfx.pickup();
-  burst(pos.clone(), 0xffc93c);
-  floatText(pos.clone().setY(3.1), `+${money(m.amount)}`);
+  const icon = { cadeaux: ' 🎁', bonbons: ' 🍬', oeufs: ' 🥚' }[rainCoins.style] ?? '';
+  burst(pos.clone(), icon ? 0xff6fd8 : 0xffc93c, !!icon);
+  floatText(pos.clone().setY(3.1), `+${money(m.amount)}${icon}`);
 }
+
+/** L'admin change le thème du monde : décor, ciel et sol changent tout de suite, avec une annonce. */
+function onSeason(s: SeasonState): void {
+  const changed = s.id !== seasons.id;
+  seasons.apply(s);
+  if (state) state.season = s;
+  if (!changed || !playing) return;
+  const def = CATALOG.seasons[s.id];
+  sfx.fanfare();
+  confetti(pos.clone().setY(floor * FLOOR_H), 80);
+  banner(`${def.icon} ${def.label} !`, s.id === 'classique' ? 'Le quartier retrouve ses couleurs de tous les jours' : def.desc);
+  chat.system(`${def.icon} Nouveau thème du quartier : ${def.label}`);
+  refreshSoon(); // cadeau saisonnier et mutation : l'état du serveur les confirme
+}
+
+/** Cadeau saisonnier du jour (pièces, STH coins ou Lucky coffre). */
+async function doGift(): Promise<void> {
+  if (!state?.gift?.available) return;
+  const r = await guarded(() => api.openGift());
+  if (!r) return;
+  applyState(r.state);
+  sfx.fanfare();
+  confetti(pos.clone().setY(floor * FLOOR_H), 110);
+  burstCoins(pos.clone(), 16);
+  const what = r.reward.kind === 'sth' ? `+${r.reward.amount} STH coins 💎` : r.reward.kind === 'chest' ? 'un Lucky coffre 🎁 (dans l’inventaire)' : `+${money(r.reward.amount)} pièces`;
+  floatText(pos.clone().setY(3.4 + floor * FLOOR_H), r.reward.kind === 'coins' ? `+${money(r.reward.amount)}` : r.reward.kind === 'sth' ? `+${r.reward.amount} 💎` : '🎁 +1', '#ffd36b');
+  banner(`${r.gift.icon} ${r.gift.label} : ${what}`, 'Revenez demain pour un nouveau cadeau !');
+}
+$('giftBtn').onclick = () => void doGift();
 
 function onLiveEvent(ev: LiveEvent | null): void {
   if (!state) return;
@@ -1824,9 +1984,14 @@ function onWelcome(m: Extract<ServerMsg, { t: 'welcome' }>): void {
   // social : historique de la discussion, quartier, micro (après une reconnexion, le serveur l'a oublié)
   districtId = m.district;
   districtMax = m.max ?? 7;
+  privateOf = m.privateOf ?? null;
+  if (m.season) seasons.apply(m.season);
   chat.clear();
   for (const line of m.chat ?? []) if (!chat.blocked.has(line.id)) chat.add({ ...line, me: line.id === state?.id });
-  chat.system(`Quartier n°${m.district} · ${m.players.length}/${districtMax} joueurs · Entrée pour écrire, 👥 pour inviter un ami`);
+  chat.system(privateOf
+    ? `🔒 Serveur privé de ${privateOf.name} · ${m.players.length}/${districtMax} joueurs · on n’y entre que sur invitation`
+    : `Quartier n°${m.district} · ${m.players.length}/${districtMax} joueurs · Entrée pour écrire, 👥 pour inviter un ami`);
+  if (privateOf && privateOf.id === state?.id && net.mode === 'private') banner('🔒 Votre serveur privé', 'Invitez vos amis avec votre code (👥) : personne d’autre ne peut entrer');
   if (voice.enabled) net.send({ t: 'voice', on: true });
   const inv = m.invite;
   if (inv) {
@@ -1948,6 +2113,7 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
         sfx.error();
         banner('On vous a volé…', m.refund > 0 ? `${m.thiefName} est reparti avec « ${title} ». Assurance : +${money(m.refund)} pièces` : `${m.thiefName} est reparti avec « ${title} ». Protégez-vous : G`);
         refreshSoon();
+        setTimeout(freeSlotHint, 4000);
       } else toast(`${m.thiefName} a volé « ${title} » au ${m.victimName}`);
       chat.system(`🦹 ${m.thiefName} a volé « ${title} » au ${m.victimName}`);
       if (m.thief === me) confetti(pos, 80);
@@ -2104,6 +2270,7 @@ net.onMessage = (m) => {
     case 'coins': onCoins(m); break;
     case 'coin-got': onCoinGot(m); break;
     case 'live-event': onLiveEvent(m.event); break;
+    case 'season': onSeason(m.season); break;
     default: break;
   }
 };
@@ -2162,6 +2329,7 @@ async function start(name?: string, color?: string, country?: string, pre?: Awai
       stolen.length === 1 ? 'Cambriolé pendant votre absence !' : `${stolen.length} vols pendant votre absence !`,
       [stolen.map((s) => `« ${work(s.workId).title} » par ${s.by}`).join(' · '), refund ? `assurance +${money(refund)}` : '', defended].filter(Boolean).join(' · '),
     );
+    setTimeout(freeSlotHint, 4500);
   } else if (defended) {
     sfx.coin(3);
     banner('Votre musée a tenu bon !', defended);
@@ -2611,7 +2779,7 @@ function updatePlayer(dt: number): void {
       jumps = 1;
       lastJumpAt = now;
       sfx.jump();
-      squash = -0.22; // étirement au décollage
+      squash = -0.1; // léger étirement au décollage (plus fort, il déformait le personnage)
       dust(pos.clone().setY(floor * FLOOR_H), 4, 0.5);
       tuto.jumps++;
     } else if (jumps === 1) {
@@ -2619,7 +2787,7 @@ function updatePlayer(dt: number): void {
       jumps = 2;
       lastJumpAt = now;
       sfx.jump2();
-      squash = -0.18;
+      squash = -0.08;
       spin = Math.PI * 2; // petite vrille au double saut
       dust(pos.clone().setY(floor * FLOOR_H + pos.y), 6, 0.6);
       tuto.jumps++;
@@ -2632,7 +2800,7 @@ function updatePlayer(dt: number): void {
   if (pos.y === 0) {
     if (airborne && vy < -4) {
       dust(pos.clone().setY(floor * FLOOR_H), 7, 0.75); // atterrissage
-      squash = Math.min(0.3, -vy * 0.025); // écrasement à l'atterrissage
+      squash = Math.min(0.12, -vy * 0.012); // petit écrasement à l'atterrissage
     }
     airborne = false;
     vy = 0;
@@ -2677,6 +2845,8 @@ function updatePlayer(dt: number): void {
   player.root.rotation.x = stunned ? 0 : Math.min(0.12, sp * 0.011) * (pos.y > 0.05 ? 0.4 : 1);
 }
 
+/** Centre de la météo saisonnière (le joueur, à son étage). */
+const weatherAt = new THREE.Vector3();
 let groundedAt = 0;
 let lastJumpAt = 0;
 let airPose = 0;
@@ -2710,7 +2880,19 @@ function protection(v: MuseumView, now: number): string | null {
   if (o.shielded) return 'Protégé : bouclier débutant';
   if (o.immuneUntil > now) return `Protégé encore ${Math.ceil((o.immuneUntil - now) / 60_000)} min (déjà cambriolé)`;
   if (o.value < state.value * 0.5) return 'Cible trop modeste pour vous';
+  // même règle que le serveur : un propriétaire absent ne perd qu'une œuvre toutes les 2 h
+  if (!v.online && (o.robbedUntil ?? 0) > now) return `musée protégé : son propriétaire est absent et s’est déjà fait voler une œuvre (encore ${fmtDur((o.robbedUntil ?? 0) - now)})`;
   return null;
+}
+
+/** Après un vol : une place est vide au mur ; si la réserve a des œuvres, on propose de la remplir. */
+function freeSlotHint(): void {
+  if (!state) return;
+  const used = new Set(state.artworks.map((a) => a.slot).filter((x) => x !== null));
+  const reserve = state.artworks.filter((a) => a.slot === null && !a.carried).length;
+  let free = 0;
+  for (let i = 0; i < Math.min(state.slots, 214); i++) if (!used.has(i)) free++;
+  if (free && reserve) toast(`🖼 ${free} place${free > 1 ? 's' : ''} vide${free > 1 ? 's' : ''} au mur : exposez une œuvre de votre réserve (🎒 → Réserve)`);
 }
 
 /** Vol : maintenir E devant une œuvre d'un musée rival. Renvoie true si une invite de vol est affichée. */
@@ -2814,6 +2996,12 @@ function interactions(): void {
   } else if (shopD < 2.8) {
     items.push({ key: 'E', text: 'Boutique : Lucky coffres, STH coins, améliorations, Renaissance' });
     if (input.consume('action')) openOverlay('shop');
+  } else if (ground && state.gift && seasons.hasCenter && pos.distanceTo(seasons.center) < 6) {
+    // cadeau saisonnier au pied du grand décor de la place (sapin, chaudron, œuf géant…)
+    if (state.gift.available) {
+      items.push({ key: 'E', text: `Ouvrir votre ${state.gift.label.toLowerCase()} ${state.gift.icon}` });
+      if (input.consume('action')) void doGift();
+    } else items.push({ key: state.gift.icon, text: `${state.gift.label} déjà ouvert aujourd’hui : revenez demain !` });
   } else if (lockD < 1.2) {
     if (museum.isLocked(now)) items.push({ key: '🔒', text: `Portes verrouillées encore ${Math.ceil((museum.lockedUntil - now) / 1000)} s` });
     else if (now < museum.lockReadyAt) items.push({ key: '…', text: `Verrou en recharge : ${Math.ceil((museum.lockReadyAt - now) / 1000)} s` });
@@ -3086,6 +3274,8 @@ renderer.setAnimationLoop(() => {
   updateRainbow(t);
   rainCoins.update(t);
   district.update(t);
+  // décor animé et particules de la saison (la neige / les feuilles suivent le joueur, à son étage)
+  seasons.update(t, dt, weatherAt.set(pos.x, floor * FLOOR_H, pos.z));
   const alarmOn = performance.now() < alarmUntil;
   $('alert').classList.toggle('on', alarmOn);
   if (state && Math.floor(t) !== Math.floor(t - dt)) {
@@ -3140,12 +3330,17 @@ if (import.meta.env.DEV) {
       camera.position.set(...at);
       camera.lookAt(...look);
     },
-    /** Personnage de test (foule) posé en (x, z), assis ou debout. */
-    testCharacter(x: number, z: number, sit = false, ry = 0) {
+    /**
+     * Personnage de test (foule) posé en (x, z), assis ou debout. `air` : pose de saut (0 à 1) ;
+     * `then` : animation jouée après s'être assis (un garde qui reprend sa patrouille, par exemple).
+     */
+    testCharacter(x: number, z: number, sit = false, ry = 0, opts: { air?: number; then?: string } = {}) {
       const c = new Character(undefined, { crowd: true });
       c.root.position.set(x, 0, z);
       c.root.rotation.y = ry;
       if (sit) c.play('Sitting', 0);
+      if (opts.then) c.play(opts.then, 0);
+      if (opts.air) c.setAir(opts.air);
       scene.add(c.root);
       const tick = () => {
         c.update(1 / 60);

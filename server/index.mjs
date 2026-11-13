@@ -256,7 +256,20 @@ async function adminApi(req, res, url) {
   const ok = (body) => send(res, 200, body, undefined, { 'cache-control': 'no-store' });
   try {
     if (parts[2] === 'overview' && req.method === 'GET') {
-      return ok({ ...auctions.adminList(), stats: { players: [...game.allPlayers()].length, online: districts.stats().online, districts: districts.stats().districts }, push: push.log.slice(-20).reverse(), dev: DEV, liveEvent: game.eventAt(Date.now()).current, payments: payments.adminSummary() });
+      const ds = districts.stats();
+      return ok({
+        ...auctions.adminList(), stats: { players: [...game.allPlayers()].length, online: ds.online, districts: ds.districts, private: ds.private },
+        push: push.log.slice(-20).reverse(), dev: DEV, liveEvent: game.eventAt(Date.now()).current, payments: payments.adminSummary(),
+        season: game.currentSeason(),
+      });
+    }
+    // thème du monde : saison imposée (Noël, Halloween…) ou automatique, couleurs du ciel et du sol
+    if (parts[2] === 'season' && req.method === 'POST') {
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      const season = await game.setSeason(body);
+      districts.broadcastSeason(season);
+      return ok({ season });
     }
     // « admin abuse » en direct : pluie d'or, convoi arc-en-ciel, super vitesse
     if (parts[2] === 'live' && req.method === 'POST') {

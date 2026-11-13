@@ -29,31 +29,62 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 // ---------------------------------------------------------------- dessins
 
 let svgSeq = 0;
-/** Coffre en SVG (le couvercle est un groupe à part, animé à l'ouverture). */
+/** Apparence de chaque coffre : corps, ferrures, pierre de la serrure. */
+const CHEST_LOOK: Record<ChestId, { body: string; metal: string; gem: string; planks: boolean; crown?: boolean; stars: number }> = {
+  simple: { body: '#b8733a', metal: '#868c99', gem: '#ff5e62', planks: true, stars: 0 },
+  rare: { body: '#3d8bff', metal: '#e6eef8', gem: '#7fe3ff', planks: false, stars: 2 },
+  epique: { body: '#9b5cff', metal: '#ffd36b', gem: '#ff6fd8', planks: false, stars: 3 },
+  legendaire: { body: '#ffae1f', metal: '#fff1b8', gem: '#ff2d4d', planks: false, crown: true, stars: 4 },
+};
+
+/** Coffre en SVG (le couvercle est un groupe à part, animé à l'ouverture), avec reflet qui passe et étincelles. */
 export function chestSvg(id: ChestId, cls = ''): string {
-  const c = CATALOG.chests[id];
-  const band = id === 'simple' ? '#8a6a3a' : id === 'legendaire' ? '#fff1b8' : '#e9d38f';
-  const gem = c.color;
+  const L = CHEST_LOOK[id];
+  const dark = shade(L.body, -0.55);
+  const metalDark = shade(L.metal, -0.45);
   // identifiants uniques : un dégradé référencé dans un élément masqué (display:none) n'est pas dessiné par le navigateur
   const u = `${id}-${++svgSeq}`;
-  return `<svg class="chest-svg ${cls}" viewBox="0 0 200 170" aria-hidden="true">
+  const planks = L.planks
+    ? [96, 114, 132].map((y) => `<path d="M24 ${y} H176" stroke="${dark}" stroke-width="2.5" opacity=".55"/>`).join('') +
+      '<path d="M30 50 Q100 38 170 50" stroke="#6b3d1a" stroke-width="2.5" fill="none" opacity=".5"/><path d="M24 66 Q100 56 176 66" stroke="#6b3d1a" stroke-width="2.5" fill="none" opacity=".5"/>'
+    : `<path d="M30 100 Q100 92 170 100" stroke="${shade(L.body, 0.35)}" stroke-width="3" fill="none" opacity=".45"/>`;
+  const corner = (x: number, y: number, sx: number, sy: number) =>
+    `<path d="M${x} ${y} h${sx * 22} l${-sx * 8} ${sy * 8} h${-sx * 6} v${sy * 6} l${-sx * 8} ${sy * 8} Z" fill="${L.metal}" stroke="${metalDark}" stroke-width="2"/>`;
+  const rivets = [[46, 92], [46, 140], [154, 92], [154, 140], [46, 60], [154, 60]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="3.2" fill="${shade(L.metal, 0.3)}" stroke="${metalDark}" stroke-width="1.2"/>`).join('');
+  const star = (x: number, y: number, r: number) => `<path class="twinkle" d="M${x} ${y - r} L${x + r * 0.28} ${y - r * 0.28} L${x + r} ${y} L${x + r * 0.28} ${y + r * 0.28} L${x} ${y + r} L${x - r * 0.28} ${y + r * 0.28} L${x - r} ${y} L${x - r * 0.28} ${y - r * 0.28} Z" fill="#fff"/>`;
+  const stars = [[22, 30, 9], [182, 46, 7], [170, 8, 6], [8, 100, 6]].slice(0, L.stars).map(([x, y, r]) => star(x, y, r)).join('');
+  const crown = L.crown
+    ? `<path d="M72 30 L76 8 L89 22 L100 2 L111 22 L124 8 L128 30 Z" fill="#ffe27a" stroke="#b07a12" stroke-width="2.5" stroke-linejoin="round"/>
+       <circle cx="100" cy="18" r="4" fill="${L.gem}"/><circle cx="80" cy="22" r="3" fill="#7fe3ff"/><circle cx="120" cy="22" r="3" fill="#7fe3ff"/>`
+    : '';
+  return `<svg class="chest-svg ${cls}" viewBox="0 -6 200 176" aria-hidden="true">
     <defs>
-      <linearGradient id="cb-${u}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c.color}"/><stop offset="1" stop-color="${shade(c.color, -0.45)}"/></linearGradient>
-      <linearGradient id="cl-${u}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${shade(c.color, 0.35)}"/><stop offset="1" stop-color="${c.color}"/></linearGradient>
+      <linearGradient id="cb-${u}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${L.body}"/><stop offset="1" stop-color="${shade(L.body, -0.4)}"/></linearGradient>
+      <linearGradient id="cl-${u}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${shade(L.body, 0.35)}"/><stop offset="1" stop-color="${L.body}"/></linearGradient>
+      <linearGradient id="cm-${u}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${shade(L.metal, 0.4)}"/><stop offset="1" stop-color="${L.metal}"/></linearGradient>
+      <clipPath id="cc-${u}"><path d="M18 82 Q18 24 100 24 Q182 24 182 82 V150 Q182 156 176 156 H24 Q18 156 18 150 Z"/></clipPath>
     </defs>
+    <ellipse cx="100" cy="160" rx="78" ry="8" fill="#000" opacity=".25"/>
     <ellipse class="glow" cx="100" cy="80" rx="70" ry="16" fill="#fff" opacity="0"/>
     <g class="body">
-      <rect x="18" y="78" width="164" height="78" rx="9" fill="url(#cb-${u})" stroke="${shade(c.color, -0.6)}" stroke-width="3"/>
-      <rect x="40" y="78" width="13" height="78" fill="${band}"/><rect x="147" y="78" width="13" height="78" fill="${band}"/>
-      <rect x="18" y="140" width="164" height="9" fill="${shade(c.color, -0.55)}" opacity=".7"/>
+      <rect x="18" y="78" width="164" height="78" rx="9" fill="url(#cb-${u})" stroke="${dark}" stroke-width="3"/>
+      ${planks}
+      <rect x="38" y="78" width="16" height="78" fill="url(#cm-${u})" stroke="${metalDark}" stroke-width="1.5"/><rect x="146" y="78" width="16" height="78" fill="url(#cm-${u})" stroke="${metalDark}" stroke-width="1.5"/>
+      ${corner(18, 156, 1, -1)}${corner(182, 156, -1, -1)}
+      ${rivets}
     </g>
     <g class="lid">
-      <path d="M18 82 Q18 24 100 24 Q182 24 182 82 Z" fill="url(#cl-${u})" stroke="${shade(c.color, -0.6)}" stroke-width="3"/>
-      <path d="M40 82 Q41 34 53 30 L53 82 Z" fill="${band}"/><path d="M147 30 Q159 34 160 82 L147 82 Z" fill="${band}"/>
-      <rect x="84" y="62" width="32" height="38" rx="6" fill="${band}" stroke="${shade(c.color, -0.6)}" stroke-width="2"/>
-      <circle cx="100" cy="76" r="8" fill="${gem}" stroke="#fff" stroke-width="2"/>
-      <rect x="97" y="84" width="6" height="10" rx="2" fill="${shade(c.color, -0.7)}"/>
+      <path d="M18 82 Q18 24 100 24 Q182 24 182 82 Z" fill="url(#cl-${u})" stroke="${dark}" stroke-width="3"/>
+      ${L.planks ? '' : `<path d="M30 70 Q34 38 70 30" stroke="#fff" stroke-width="5" stroke-linecap="round" fill="none" opacity=".35"/>`}
+      <path d="M38 82 Q38 36 54 29 L54 82 Z" fill="url(#cm-${u})" stroke="${metalDark}" stroke-width="1.5"/><path d="M146 29 Q162 36 162 82 L146 82 Z" fill="url(#cm-${u})" stroke="${metalDark}" stroke-width="1.5"/>
+      <rect x="18" y="76" width="164" height="9" rx="3" fill="url(#cm-${u})" stroke="${metalDark}" stroke-width="1.5"/>
+      ${crown}
+      <path d="M82 62 h36 v26 q0 14 -18 18 q-18 -4 -18 -18 Z" fill="url(#cm-${u})" stroke="${metalDark}" stroke-width="2"/>
+      <path d="M100 66 l9 9 l-9 9 l-9 -9 Z" fill="${L.gem}" stroke="#fff" stroke-width="2"/>
+      <path d="M97 88 h6 v8 h-6 Z" fill="${metalDark}" rx="2"/>
     </g>
+    <g clip-path="url(#cc-${u})" pointer-events="none"><g class="shine"><rect x="0" y="0" width="34" height="170" fill="#fff" opacity=".28" transform="skewX(-18)"/></g></g>
+    ${stars}
   </svg>`;
 }
 
@@ -87,7 +118,12 @@ export function oddsHtml(id: ChestId, s: PlayerState | null): string {
       <small>${pool.length} œuvre${pool.length > 1 ? 's' : ''}${each}${r === 'mythique' ? ' · seulement si elle est encore libre (unique sur le serveur), sinon une Légendaire' : ''}<br/>${names}</small></div>`;
   }
   const fr = c.frames;
-  html += `<div class="odd frames"><b>Cadres spéciaux</b><small>${(['dore', 'diamant', 'arcenciel'] as FrameId[]).filter((f) => fr[f]).map((f) => `${CATALOG.frames[f].label} (valeur ×${CATALOG.frames[f].mult}) : <b>${pct(fr[f]!)}</b>`).join(' · ')} · les Mythiques gardent leur cadre d’origine</small></div>`;
+  html += `<div class="odd frames"><b>Cadres spéciaux</b><small>${(['dore', 'diamant', 'arcenciel'] as FrameId[]).filter((f) => fr[f]).map((f) => `${CATALOG.frames[f].icon} ${CATALOG.frames[f].label} (valeur ×${CATALOG.frames[f].mult}) : <b>${pct(fr[f]!)}</b>`).join(' · ')} · les Mythiques gardent leur cadre d’origine</small></div>`;
+  const season = s?.season ? CATALOG.seasons[s.season.id] : null;
+  if (season?.mutation) {
+    const m = CATALOG.frames[season.mutation];
+    html += `<div class="odd frames"><b>${m.icon} Mutation de saison (${season.label})</b><small>${m.label} (valeur ×${m.mult}) : <b>${pct(CATALOG.seasonRules.chestMutationChance * 100)}</b> sur une œuvre sans cadre spécial, pendant la saison seulement</small></div>`;
+  }
   if (c.pity) {
     const left = s?.pity?.[id] ? c.pity.every - s.pity[id]!.count : c.pity.every;
     html += `<div class="odd pity">🎯 <span>Garantie : une ${CATALOG.rarities[c.pity.rarity].label} (ou mieux) au plus tard au ${c.pity.every}<sup>e</sup> coffre.${s ? ` Encore <b>${left}</b> coffre${left > 1 ? 's' : ''} au maximum.` : ''}</span></div>`;
@@ -152,7 +188,12 @@ export class Premium {
   renderChests(): void {
     const s = this.ctx.state();
     if (!s) return;
-    let html = `<p class="pane-intro">Achetez des coffres avec vos 💎 STH coins : ils se rangent dans votre <b>inventaire 🎒</b> et s’ouvrent quand vous voulez. Chaque coffre contient une œuvre d’art.</p><div class="chest-grid">`;
+    let html = `<p class="pane-intro">Achetez des coffres avec vos 💎 STH coins : ils se rangent dans votre <b>inventaire 🎒</b> et s’ouvrent quand vous voulez. Chaque coffre contient une œuvre d’art.</p>`;
+    // saison en cours : chance de mutation saisonnière dans les coffres
+    const season = CATALOG.seasons[s.season?.id ?? 'classique'];
+    const mut = season?.mutation ? CATALOG.frames[season.mutation] : null;
+    if (mut) html += `<div class="mut-note"><span style="font-size:24px">${mut.icon}</span><span><b>${season.icon} ${season.label}</b> : chaque coffre a ${pct(CATALOG.seasonRules.chestMutationChance * 100)} de chance de donner une œuvre <b style="color:${mut.color}">${mut.short} (valeur ×${mut.mult})</b>. Seulement pendant la saison !</span></div>`;
+    html += '<div class="chest-grid">';
     for (const id of CHEST_IDS) {
       const c = CATALOG.chests[id];
       const bulk = CATALOG.chestBulk;
@@ -161,7 +202,8 @@ export class Premium {
       const poor1 = s.sth < c.price;
       const poorN = s.sth < bulkCost;
       html += `<article class="chest-card" style="--cc:${c.color}">
-        <div class="chest-pic">${chestSvg(id, 'idle')}${owned ? `<span class="own">×${owned}</span>` : ''}</div>
+        <span class="tier">${c.short}</span>
+        <div class="chest-pic"><span class="rays"></span>${chestSvg(id, 'idle')}${owned ? `<span class="own">×${owned}</span>` : ''}</div>
         <h3>${c.label}</h3>
         <p class="d">${c.desc}</p>
         ${oddsBar(id)}
@@ -262,18 +304,33 @@ export class Premium {
     html += '</div>';
     if (!this.cfg.methods.length) html += '<p class="faille">Le paiement en ligne n’est pas encore activé sur ce serveur. En attendant, échangez vos pièces ci-dessous.</p>';
     else html += `<p class="pay-logos">Paiement : ${this.cfg.methods.map((m) => `<span>${m.icon} ${m.label}</span>`).join('')}</p>`;
-    const max = Math.min(CATALOG.premium.maxExchange, Math.floor(s.coins / rate));
-    html += `<div class="exchange">
-      <h3>Échanger mes pièces</h3>
-      <p class="d">Taux : <b>1 000 STH = ${money(rate * 1000)} pièces</b> (1 STH = ${nf.format(rate)} pièces). Vous pouvez échanger jusqu’à <b>${nf.format(max)} STH</b>.</p>
-      <div class="ex-row"><input id="exAmount" type="number" inputmode="numeric" min="${CATALOG.premium.minExchange}" step="10" value="${Math.max(CATALOG.premium.minExchange, Math.min(100, max - (max % 10)))}" />
+    // échange plafonné chaque mois (montant et nombre d'échanges) : les STH coins s'achètent surtout
+    const ex = s.exchange;
+    const max = this.exchangeMax();
+    const resets = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long' }).format(ex.resetsAt);
+    const locked = ex.left < ex.min || ex.count >= ex.maxCount;
+    html += `<div class="exchange ${locked ? 'locked' : ''}">
+      <h3>Échanger mes pièces <small style="font:700 12px 'Segoe UI'">(limité chaque mois)</small></h3>
+      <p class="d">Taux : <b>1 STH = ${money(rate)} pièces</b> (100 STH = ${money(rate * 100)} pièces).</p>
+      <div class="ex-gauge" title="${ex.used} / ${ex.cap} STH échangés ce mois-ci"><i style="width:${Math.min(100, (ex.used / ex.cap) * 100)}%"></i></div>
+      <div class="ex-meta"><span>Ce mois-ci : <b>${nf.format(ex.used)} / ${nf.format(ex.cap)} STH</b></span><span>Échanges : <b>${ex.count} / ${ex.maxCount}</b></span><span>Remise à zéro le <b>${resets}</b></span></div>
+      ${locked
+        ? `<div class="ex-cta">🔒 <b>Limite du mois atteinte.</b> Prochain échange le ${resets}. Pour ouvrir des coffres dès maintenant, choisissez un pack de STH coins ci-dessus 💎</div>`
+        : `<div class="ex-row"><input id="exAmount" type="number" inputmode="numeric" min="${ex.min}" max="${max}" step="5" value="${Math.max(ex.min, Math.min(ex.left, max - (max % 5)))}" />
         <button data-ex="1">Échanger</button></div>
-      <div class="ex-quick">${[10, 100, 1000].map((n) => `<button data-exq="${n}">${nf.format(n)}</button>`).join('')}<button data-exq="max">Max</button></div>
-      <p class="d" id="exCost"></p>
+      <div class="ex-quick">${[5, 25, 50].filter((n) => n <= ex.left).map((n) => `<button data-exq="${n}">${nf.format(n)}</button>`).join('')}<button data-exq="max">Max</button></div>
+      <p class="d" id="exCost"></p>`}
     </div>
     <p class="legal">Les STH coins sont une monnaie virtuelle, utilisable seulement dans Steal a Masterpiece, sans valeur en dehors du jeu ; ils ne sont ni remboursables ni échangeables contre de l’argent. Les probabilités de chaque coffre sont affichées avant l’achat.</p>`;
     this.sthEl.innerHTML = html;
     this.renderExchangeCost();
+  }
+
+  /** Le plus grand échange possible maintenant : plafond du mois, plafond par échange et pièces disponibles. */
+  private exchangeMax(): number {
+    const s = this.ctx.state();
+    if (!s) return 0;
+    return Math.max(0, Math.min(CATALOG.premium.maxExchange, s.exchange.left, Math.floor(s.coins / CATALOG.premium.coinsPerSth)));
   }
 
   private renderExchangeCost(): void {
@@ -301,8 +358,9 @@ export class Premium {
       this.renderSth();
     } else if (b.dataset.exq && s) {
       const input = this.sthEl.querySelector<HTMLInputElement>('#exAmount')!;
-      const max = Math.min(CATALOG.premium.maxExchange, Math.floor(s.coins / CATALOG.premium.coinsPerSth));
-      input.value = String(b.dataset.exq === 'max' ? Math.max(CATALOG.premium.minExchange, max) : b.dataset.exq);
+      // « Max » : ce que permettent le plafond du mois et les pièces (au moins le minimum, pour voir le prix)
+      const max = this.exchangeMax();
+      input.value = String(b.dataset.exq === 'max' ? Math.max(s.exchange.min, max) : b.dataset.exq);
       this.renderExchangeCost();
     } else if (b.dataset.ex) {
       const n = Math.floor(Number(this.sthEl.querySelector<HTMLInputElement>('#exAmount')?.value) || 0);

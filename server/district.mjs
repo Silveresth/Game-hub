@@ -53,6 +53,8 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
   /** Multiplicateur de vitesse de l'événement en cours (super vitesse : ×1,6), recalculé à chaque tick. */
   let eventSpeed = 1;
   let raining = false;
+  /** Pluies saisonnières (cadeaux, bonbons, œufs) : chaque ramassage vaut `rainMult` pluies d'or. */
+  let rainMult = 1;
   let coinSeq = 0;
   // durées de décrochage : une seule source, le catalogue partagé avec le client
   const STEAL_SECONDS = game.catalog.stealSeconds ?? { commun: 2.5, rare: 4, epique: 6, legendaire: 9, mythique: 20 };
@@ -102,12 +104,14 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
   const placement = new Map();
   let nextDistrict = 1;
 
-  function newDistrict() {
+  /** `privateOwner` : identifiant du joueur dont c'est le serveur privé (on n'y entre que sur invitation). */
+  function newDistrict(privateOwner = null) {
     const d = {
       id: nextDistrict++,
       plots: layout.plots.map((pl) => ({ ...pl, ...freshPlotState() })),
       conns: new Map(),
       chat: [], // derniers messages, envoyés à l'arrivée d'un joueur
+      privateOwner,
     };
     districts.set(d.id, d);
     return d;
@@ -182,20 +186,29 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
    * Choisit le quartier et la parcelle d'un joueur qui se connecte.
    * `prefer` : quartier d'un ami qui l'a invité (s'il y reste de la place).
    */
-  function assign(p, prefer = null) {
+  function assign(p, prefer = null, { wantPrivate = false, wantPublic = false } = {}) {
     const at = placement.get(p.id);
     if (at && !districts.has(at)) placement.delete(p.id);
     const home = at && districts.has(at) ? districts.get(at) : null;
     const homePl = home?.plots.find((x) => x.ownerId === p.id) ?? null;
-    const target = prefer && prefer.conns.size < MAX_ONLINE ? prefer : null;
+    // serveur privé : le sien (créé à la demande), réservé à lui et à ses invités
+    let own = null;
+    if (wantPrivate && game.privateActive(p)) {
+      own = [...districts.values()].find((d) => d.privateOwner === p.id) ?? null;
+      if (!own) own = newDistrict(p.id);
+    }
+    const target = own ?? (prefer && prefer.conns.size < MAX_ONLINE ? prefer : null);
+    // retour au quartier public demandé : on quitte le serveur privé où l'on était
+    const leaving = wantPublic && home?.privateOwner;
     // déjà présent (endormi) quelque part : il se réveille sur sa parcelle si le quartier a de la place
-    if (home && homePl && (!target || target === home) && home.conns.size < MAX_ONLINE) return { d: home, pl: homePl };
+    if (home && homePl && !leaving && (!target || target === home) && home.conns.size < MAX_ONLINE) return { d: home, pl: homePl };
     if (home && homePl) {
       freePlot(home, homePl);
       broadcast(home, { t: 'plot', plot: plotInfo(homePl) });
     }
-    // sinon : le quartier de l'ami, ou le plus peuplé qui a encore de la place (on regroupe les joueurs)
-    const open = [...districts.values()].filter((d) => d.conns.size < MAX_ONLINE).sort((a, b) => b.conns.size - a.conns.size);
+    // sinon : le quartier de l'ami, ou le plus peuplé qui a encore de la place (on regroupe les joueurs) ;
+    // les serveurs privés ne reçoivent jamais de joueurs au hasard
+    const open = [...districts.values()].filter((d) => !d.privateOwner && d.conns.size < MAX_ONLINE).sort((a, b) => b.conns.size - a.conns.size);
     const d = target ?? open[0] ?? newDistrict();
     let pl = d.plots.find((x) => !x.ownerId);
     if (!pl) {
@@ -211,7 +224,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
   const conns = new Map(); // playerId → connexion
   const jailed = new Map(); // playerId → fin de cellule
 
-  function join(ws, p, joinCode = null) {
+  function join(ws, p, joinCode = null, opts = {}) {
     const old = conns.get(p.id);
     if (old) {
       send(old.ws, { t: 'kicked', reason: 'Connexion ouverte dans un autre onglet' });
@@ -230,7 +243,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
         else prefer = hc.d;
       }
     }
-    const { d, pl } = assign(p, prefer);
+    const { d, pl } = assign(p, prefer, opts);
     pl.ownerId = p.id;
     pl.online = true;
     placement.set(p.id, d.id);
@@ -244,6 +257,9 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
       plots: d.plots.map(plotInfo), players: [...d.conns.values()].map(playerInfo), guards: guardsInfo(d), district: d.id,
       chat: d.chat, invite, max: MAX_ONLINE,
       coins: [...(d.coins?.values() ?? [])].map(({ id, x, z }) => ({ id, x, z })),
+      // serveur privé : à qui il appartient (pour l'affichage)
+      privateOf: d.privateOwner ? { id: d.privateOwner, name: game.getPlayer(d.privateOwner)?.name ?? '?' } : null,
+      season: game.currentSeason(),
     });
     broadcast(d, { t: 'plot', plot: plotInfo(pl) });
     broadcast(d, { t: 'join', player: playerInfo(c), invited: invite?.status === 'ok' ? invite.name : null });
@@ -579,14 +595,18 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
     const now = Date.now();
     const current = game.eventAt(now).current;
     eventSpeed = current?.kind === 'vitesse' ? 1.6 : 1;
-    raining = current?.kind === 'pluie';
-    // chaque soir à l'heure prévue (heure de Paris), un événement au hasard si personne ne l'a déjà lancé
+    raining = current?.kind === 'pluie' || !!current?.rain;
+    rainMult = current?.rain ? current.mult ?? 2 : 1;
+    // chaque soir à l'heure prévue (heure de Paris), un événement au hasard si personne ne l'a déjà lancé ;
+    // pendant une saison festive, son événement (pluie de cadeaux, de bonbons, chasse aux œufs) a une chance sur deux
     const p = Object.fromEntries(parisClock.formatToParts(new Date(now)).map((x) => [x.type, x.value]));
     const day = `${p.year}-${p.month}-${p.day}`;
     if (Number(p.hour) === LIVE.dailyHour && Number(p.minute) < 2 && autoDay !== day && !current?.admin && conns.size) {
       autoDay = day;
-      const kinds = Object.keys(LIVE.minutes ?? {});
-      if (kinds.length) startLiveEvent(kinds[Math.floor(Math.random() * kinds.length)]);
+      const kinds = Object.keys(LIVE.minutes ?? {}).filter((k) => !game.catalog.events?.kinds[k]?.season);
+      const seasonal = game.seasons[game.currentSeason(now).id]?.event;
+      const pick = seasonal && Math.random() < 0.5 ? seasonal : kinds[Math.floor(Math.random() * kinds.length)];
+      if (pick) startLiveEvent(pick);
     }
     // pluie d'or : de nouvelles pièces sur la place de chaque quartier, les anciennes disparaissent
     for (const d of districts.values()) {
@@ -694,7 +714,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
         for (const [id, coin] of c.d.coins) {
           if (Math.hypot(coin.x - c.x, coin.z - c.z) > 1.5) continue;
           c.d.coins.delete(id);
-          send(c.ws, { t: 'coin-got', id, amount: game.coinPickup(c.p) });
+          send(c.ws, { t: 'coin-got', id, amount: game.coinPickup(c.p, rainMult) });
           broadcast(c.d, { t: 'coins', del: [id], by: c.p.id });
         }
       }
@@ -836,7 +856,7 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
           return ws.close();
         }
         clearTimeout(timer);
-        c = join(ws, p, typeof msg.join === 'string' && msg.join ? msg.join : null);
+        c = join(ws, p, typeof msg.join === 'string' && msg.join ? msg.join : null, { wantPrivate: msg.private === true, wantPublic: msg.public === true });
         return;
       }
       onMessage(c, msg);
@@ -851,7 +871,9 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
   return {
     startLiveEvent,
     stopLiveEvent,
-    stats: () => ({ districts: districts.size, online: conns.size }),
+    /** Nouvelle saison (thème du monde) : tous les joueurs en ligne la voient tout de suite. */
+    broadcastSeason: (season) => broadcastAll({ t: 'season', season }),
+    stats: () => ({ districts: districts.size, online: conns.size, private: [...districts.values()].filter((d) => d.privateOwner).length }),
     id: randomBytes(4).toString('hex'),
   };
 }

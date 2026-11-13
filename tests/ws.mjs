@@ -26,7 +26,7 @@ async function newPlayer(name) {
   return { id: r.id, token: r.token, name };
 }
 
-function connect(auth, join = null) {
+function connect(auth, join = null, extra = {}) {
   const ws = new WebSocket(base.replace('http', 'ws') + '/ws');
   const inbox = [];
   const waiters = [];
@@ -43,7 +43,7 @@ function connect(auth, join = null) {
     setTimeout(() => rej(new Error(`délai dépassé en attendant ${pred.toString()}`)), ms);
   });
   return new Promise((res) => ws.on('open', () => {
-    ws.send(JSON.stringify({ t: 'auth', id: auth.id, token: auth.token, ...(join ? { join } : {}) }));
+    ws.send(JSON.stringify({ t: 'auth', id: auth.id, token: auth.token, ...(join ? { join } : {}), ...extra }));
     res({ ws, wait, inbox, send: (m) => ws.send(JSON.stringify(m)) });
   }));
 }
@@ -158,6 +158,9 @@ ok(delivered.artwork?.workId === target.workId, 'casse réussi : l’œuvre arri
 const sA = await http('state', null, A);
 const sB = await http('state', null, B);
 ok(!sA.artworks.some((a) => a.uid === target.uid) && sB.artworks.some((a) => a.workId === target.workId), 'transfert enregistré côté serveur');
+ok(!sA.artworks.some((a) => a.slot === target.slot), 'la place de l’œuvre volée reste vide (aucune œuvre de la réserve ne s’y accroche toute seule)');
+const plotAfter = [...cB.inbox].reverse().find((m) => m.t === 'plot' && m.plot.index === wA.you.plot);
+ok(plotAfter && !plotAfter.plot.owner.artworks.some((a) => a.uid === target.uid || a.slot === target.slot), 'les autres joueurs ne voient plus rien à cette place');
 ok(sA.immuneUntil > Date.now(), 'A est immunisé 15 min');
 const boardT = await http('leaderboard?board=theft');
 ok(boardT.some((r) => r.name === 'Musée Bêta' && r.value > 0), 'classement « plus gros casses » à jour');
@@ -658,5 +661,80 @@ const cC = await connect(C);
 await cC.wait((m) => m.t === 'welcome');
 cC.ws.close();
 cB.ws.close();
+
+// --- Propriétaire absent : une seule œuvre perdue toutes les 2 h, et un message clair pour les voleurs suivants ---
+{
+  const V = await newPlayer('Musée Absent');
+  await http('dev/grant', { coins: 3_000_000 }, V);
+  for (let k = 0; k < 3; k++) {
+    for (const it of (await http('convoy', null, V)).items) await http('buy', { window: it.window }, V).catch(() => {});
+    await sleep(300);
+  }
+  await http('dev/age', {}, V);
+  const sV = await http('state', null, V);
+  const T1 = await newPlayer('Voleur Un');
+  const T2 = await newPlayer('Voleur Deux');
+  const cV = await connect(V);
+  const wV = await cV.wait((m) => m.t === 'welcome');
+  const c1 = await connect(T1);
+  const w1 = await c1.wait((m) => m.t === 'welcome');
+  const c2 = await connect(T2);
+  await c2.wait((m) => m.t === 'welcome');
+  cV.ws.close(); // le propriétaire s'en va : son musée reste, endormi
+  await c1.wait((m) => m.t === 'plot' && m.plot.index === wV.you.plot && m.plot.online === false);
+  const shown = sV.artworks.filter((a) => a.slot !== null);
+  if (shown.length >= 2) {
+    const pV = plotOf(wV.you.plot);
+    const goTo = (c, a) => { const w = slotWorld(pV, a.slot); c.send({ t: 'pos', x: w.x + (pV.x - w.x) * 0.25, z: w.z + (pV.z - w.z) * 0.25, ry: 0, anim: 'Idle' }); };
+    goTo(c1, shown[0]);
+    await sleep(300);
+    c1.send({ t: 'steal', plot: wV.you.plot, uid: shown[0].uid });
+    await c1.wait((m) => m.t === 'steal' && m.phase === 'carry' && m.thief === T1.id, 20000);
+    const h1 = plotOf(w1.you.plot);
+    c1.send({ t: 'pos', x: h1.x + 2, z: h1.z, ry: 0, anim: 'Running' });
+    await c1.wait((m) => m.t === 'steal' && m.phase === 'delivered' && m.thief === T1.id, 8000);
+    const last = [...c2.inbox].reverse().find((m) => m.t === 'plot' && m.plot.index === wV.you.plot);
+    ok(last && !last.plot.owner.artworks.some((a) => a.uid === shown[0].uid) && last.plot.owner.robbedUntil > Date.now() + 110 * 60_000, 'un autre joueur ne voit plus l’œuvre volée, et sait que le musée est protégé 2 h');
+    await http('dev/age', { keepOfflineLoss: true }, V); // fin des 15 min d'immunité, pas de la règle des 2 h
+    goTo(c2, shown[1]);
+    await sleep(300);
+    c2.send({ t: 'steal', plot: wV.you.plot, uid: shown[1].uid });
+    const no = await c2.wait((m) => m.t === 'steal' && ((m.phase === 'start' && m.thief === T2.id) || m.phase === 'refused'));
+    ok(no.phase === 'refused' && /absent/.test(no.error) && /moins de 2 h/.test(no.error), `second vol refusé : « ${no.error} »`);
+  } else ok(true, '(musée trop petit pour tester la règle des 2 h)');
+  c1.ws.close();
+  c2.ws.close();
+}
+
+// --- Serveur privé : réservé à son propriétaire et à ses amis invités ---
+{
+  const P = await newPlayer('Musée Privé');
+  await http('dev/sth', { sth: 500 }, P);
+  const bought = await http('private/buy', {}, P);
+  ok(bought.state?.privateServer.until > Date.now(), 'serveur privé acheté');
+  const cP = await connect(P, null, { private: true });
+  const wP = await cP.wait((m) => m.t === 'welcome');
+  ok(wP.privateOf?.id === P.id, `serveur privé ouvert (quartier n°${wP.district})`);
+  const R = await newPlayer('Musée Hasard');
+  const cR = await connect(R);
+  const wR = await cR.wait((m) => m.t === 'welcome');
+  ok(wR.district !== wP.district && !wR.privateOf, 'un joueur au hasard n’entre pas dans le serveur privé');
+  const code = (await http('state', null, P)).inviteCode;
+  const F = await newPlayer('Musée Ami');
+  const cF = await connect(F, code);
+  const wF = await cF.wait((m) => m.t === 'welcome');
+  ok(wF.district === wP.district && wF.privateOf?.id === P.id, 'un ami invité rejoint le serveur privé');
+  // P quitte son serveur privé pour le quartier public (F y reste)
+  cP.ws.close();
+  await sleep(300);
+  const cP2 = await connect(P, null, { public: true });
+  const wP2 = await cP2.wait((m) => m.t === 'welcome');
+  ok(!wP2.privateOf && wP2.district !== wP.district, 'retour au quartier public');
+  const N = await newPlayer('Musée Sans Pass');
+  const cN = await connect(N, null, { private: true });
+  const wN = await cN.wait((m) => m.t === 'welcome');
+  ok(!wN.privateOf, 'sans serveur privé acheté : quartier public');
+  for (const c of [cP2, cF, cR, cN]) c.ws.close();
+}
 console.log(failures ? `\n${failures} échec(s)` : '\nTout est vert');
 process.exit(failures ? 1 : 0);

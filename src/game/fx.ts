@@ -30,8 +30,10 @@ export class Sparkles {
   private seeds: Float32Array;
   private base: THREE.Vector3;
   private rainbow: boolean;
+  /** Flocons (mutation Givrée) : ils descendent au lieu de monter. */
+  private snow: boolean;
 
-  constructor(at: THREE.Vector3, color: string, opts: { count?: number; radius?: number; height?: number; rainbow?: boolean } = {}) {
+  constructor(at: THREE.Vector3, color: string, opts: { count?: number; radius?: number; height?: number; rainbow?: boolean; snow?: boolean } = {}) {
     const n = opts.count ?? 14;
     const pos = new Float32Array(n * 3);
     this.seeds = new Float32Array(n * 4);
@@ -56,6 +58,7 @@ export class Sparkles {
     this.points.frustumCulled = false;
     this.base = at.clone();
     this.rainbow = !!opts.rainbow;
+    this.snow = !!opts.snow;
     sparkles.add(this);
   }
 
@@ -67,7 +70,7 @@ export class Sparkles {
       const r = this.seeds[i * 4 + 1];
       const v = (this.seeds[i * 4 + 2] + t * 0.18) % 1;
       arr[i * 3] = this.base.x + Math.cos(a) * r;
-      arr[i * 3 + 1] = this.base.y + v * this.seeds[i * 4 + 3];
+      arr[i * 3 + 1] = this.base.y + (this.snow ? 1 - v : v) * this.seeds[i * 4 + 3];
       arr[i * 3 + 2] = this.base.z + Math.sin(a) * r;
     }
     this.points.geometry.getAttribute('position').needsUpdate = true;
@@ -92,9 +95,67 @@ const coinMat = new THREE.MeshStandardMaterial({ color: 0xffc93c, metalness: 0.9
 let glowMat: THREE.SpriteMaterial | null = null;
 const coinGlow = () => (glowMat ??= new THREE.SpriteMaterial({ map: dot(), color: 0xffc93c, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
 
+// pluies saisonnières : cadeaux emballés, bonbons, œufs décorés (au lieu des pièces)
+const PARTY = [0xff3b5c, 0x2ec4f1, 0x3ddc84, 0xffd23f, 0xb46bff, 0xff8c42];
+const partyMats = new Map<number, THREE.MeshStandardMaterial>();
+const partyMat = (c: number) => {
+  let m = partyMats.get(c);
+  if (!m) partyMats.set(c, (m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.4, metalness: 0.1, emissive: c, emissiveIntensity: 0.18 })));
+  return m;
+};
+const giftBox = new THREE.BoxGeometry(0.6, 0.6, 0.6);
+const ribbonA = new THREE.BoxGeometry(0.64, 0.64, 0.14);
+const ribbonB = new THREE.BoxGeometry(0.14, 0.64, 0.64);
+const bow = new THREE.TorusGeometry(0.12, 0.045, 8, 16);
+const candyBody = new THREE.SphereGeometry(0.24, 16, 12);
+const candyEnd = new THREE.ConeGeometry(0.16, 0.24, 10);
+const eggGeo = new THREE.SphereGeometry(0.3, 18, 14);
+const eggBand = new THREE.TorusGeometry(0.29, 0.04, 8, 24);
+
+/** Objet à ramasser selon la pluie en cours : pièce d'or, cadeau, bonbon ou œuf. */
+function pickupMesh(style: string): THREE.Object3D {
+  const c = PARTY[Math.floor(Math.random() * PARTY.length)];
+  const c2 = PARTY[(PARTY.indexOf(c) + 3) % PARTY.length];
+  if (style === 'cadeaux') {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(giftBox, partyMat(c)), new THREE.Mesh(ribbonA, partyMat(c2)), new THREE.Mesh(ribbonB, partyMat(c2)));
+    for (const s of [-1, 1]) {
+      const b = new THREE.Mesh(bow, partyMat(c2));
+      b.position.set(s * 0.1, 0.38, 0);
+      b.rotation.y = s * 0.5;
+      g.add(b);
+    }
+    return g;
+  }
+  if (style === 'bonbons') {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(candyBody, partyMat(c));
+    body.scale.set(1.3, 1, 1);
+    g.add(body);
+    for (const s of [-1, 1]) {
+      const end = new THREE.Mesh(candyEnd, partyMat(c2));
+      end.rotation.z = (s * Math.PI) / 2;
+      end.position.x = s * 0.4;
+      g.add(end);
+    }
+    return g;
+  }
+  if (style === 'oeufs') {
+    const egg = new THREE.Mesh(eggGeo, partyMat(c));
+    egg.scale.set(1, 1.35, 1);
+    const band = new THREE.Mesh(eggBand, partyMat(c2));
+    band.rotation.x = Math.PI / 2;
+    egg.add(band);
+    return egg;
+  }
+  return new THREE.Mesh(coinGeo, coinMat);
+}
+
 export class Coins {
   readonly group = new THREE.Group();
-  private map = new Map<number, { mesh: THREE.Mesh; born: number; seed: number }>();
+  private map = new Map<number, { mesh: THREE.Object3D; born: number; seed: number }>();
+  /** Forme des objets qui tombent : « pluie » (pièces d'or), « cadeaux », « bonbons », « oeufs ». */
+  style = 'pluie';
 
   constructor(scene: THREE.Scene) {
     scene.add(this.group);
@@ -103,9 +164,9 @@ export class Coins {
   add(list: Array<{ id: number; x: number; z: number }>, now = performance.now()): void {
     for (const c of list) {
       if (this.map.has(c.id)) continue;
-      const mesh = new THREE.Mesh(coinGeo, coinMat);
+      const mesh = pickupMesh(this.style);
       mesh.position.set(c.x, 9, c.z); // elle tombe du ciel
-      mesh.castShadow = true;
+      mesh.traverse((o) => (o.castShadow = true));
       // halo doré : on repère les pièces de loin sur la place
       const glow = new THREE.Sprite(coinGlow());
       glow.scale.setScalar(1.6);

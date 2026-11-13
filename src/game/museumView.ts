@@ -3,7 +3,7 @@ import { MuseumBuilding, type ThemeId } from './Room';
 import { Artifact } from './Artifact';
 import { Sparkles } from './fx';
 import { Label } from './labels';
-import { CATALOG, artUrl, incomeOf, money, perSec, work, type FrameId } from './catalog';
+import { CATALOG, RARITY_STARS, artUrl, frameTag, incomeOf, money, perSec, work, type FrameId, type RarityId } from './catalog';
 import { CELL, FLOOR_H, ROOMS, STAIRS, inside, isStatueSlot, slotFloor, slotWorld, toWorld, type Plot } from './layout';
 import { disposeMerged, mergeStatic } from './merge';
 import type { Box, Circle } from './district';
@@ -23,6 +23,8 @@ export interface MuseumSnap {
   value: number;
   shielded: boolean;
   immuneUntil: number;
+  /** Propriétaire absent déjà volé : protégé jusqu'à cette heure (s'il est hors ligne). */
+  robbedUntil?: number;
   sec: PublicSecurity;
   themes?: Record<string, string>;
   /** Nombre d'étages (1 = rez-de-chaussée seul). */
@@ -46,6 +48,8 @@ interface Shown {
 
 /** Les œuvres précieuses scintillent (on les repère de loin en entrant dans un musée). */
 const SPARKLY = new Set(['epique', 'legendaire', 'mythique']);
+/** Force du halo de rareté derrière chaque œuvre. */
+const AURA: Record<RarityId, number> = { commun: 0, rare: 0.3, epique: 0.5, legendaire: 0.8, mythique: 1 };
 
 const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
 
@@ -106,6 +110,8 @@ export class MuseumView {
   private facadeTopOcc: THREE.Object3D[] = [];
   private porch: Box | null = null;
   private topShown = true;
+  /** Couleur du propriétaire utilisée pour la façade (reconstruite s'il en change). */
+  private facadeColor = '';
 
   // étages (phase 5)
   floors = 1;
@@ -208,7 +214,7 @@ export class MuseumView {
       this.refreshStatus(Date.now());
       return;
     }
-    if (ownerChanged || !this.signMesh) this.buildFacade();
+    if (ownerChanged || !this.signMesh || snap.color !== this.facadeColor) this.buildFacade();
     const flag = CATALOG.countries?.find((c) => c.code === snap.country)?.flag;
     this.setSignName(flag ? `${flag} ${snap.name}` : snap.name);
     if (!this.building) {
@@ -690,33 +696,41 @@ export class MuseumView {
           spot: true,
           frameStyle: a.frame,
           form: wk.form ?? 'knot',
-          material: wk.mat ?? (a.frame === 'dore' || a.frame === 'arcenciel' ? 'gold' : a.frame === 'diamant' ? 'glass' : 'marble'),
+          material: wk.mat ?? (a.frame === 'dore' || a.frame === 'arcenciel' || a.frame === 'solaire' ? 'gold' : a.frame === 'diamant' || a.frame === 'givre' ? 'glass' : 'marble'),
+          // halo de la couleur de la rareté, de plus en plus fort (aucun pour les communes et les reproductions)
+          aura: a.repro ? undefined : CATALOG.rarities[wk.rarity].color,
+          auraLevel: a.repro ? 0 : AURA[wk.rarity],
         },
         null as unknown as THREE.AudioListener,
       );
       this.scene.add(art.group);
       const rar = CATALOG.rarities[wk.rarity];
-      const label = new Label(0.62, 512, 150);
+      const fr = CATALOG.frames[a.frame];
+      const label = new Label(0.82, 512, 210);
       label.update(
         a.repro
           ? [{ text: CATALOG.repro.label.toUpperCase(), color: '#cfc9bb', size: 50, weight: 900 }, { text: 'sans valeur · décorative', color: '#a9a49a', size: 38, weight: 700 }]
           : [
-              { text: `+${perSec(incomeOf(a.workId, a.frame))} /s`, color: '#7dff9a', size: 58, weight: 900 },
-              { text: a.frame === 'normal' ? rar.label : `${rar.label} · ${CATALOG.frames[a.frame].label}`, color: a.frame === 'arcenciel' ? '#ff8fd8' : a.frame === 'normal' ? rar.color : '#ffd36b', size: 40, weight: 800 },
+              { text: `+${perSec(incomeOf(a.workId, a.frame))} /s`, color: '#7dff9a', size: 56, weight: 900 },
+              // rareté dans une pastille à sa couleur : se lit de loin, d'un coup d'œil
+              { text: `${RARITY_STARS[wk.rarity]} ${rar.label.toUpperCase()}`, color: '#ffffff', size: 40, weight: 900, pill: rar.color },
+              ...(a.frame !== 'normal' ? [{ text: frameTag(a.frame), color: fr.color, size: 40, weight: 900 }] : []),
             ],
       );
       // au-dessus de la statue (socle 0,9 m + figure) ou du tableau
-      const labelY = isSculpt ? 3.4 + slotFloor(a.slot) * FLOOR_H : 3.75 + slotFloor(a.slot) * FLOOR_H;
+      const labelY = isSculpt ? 3.5 + slotFloor(a.slot) * FLOOR_H : 3.85 + slotFloor(a.slot) * FLOOR_H;
       label.sprite.position.copy(p).addScaledVector(normal, isSculpt ? 0.2 : 1.1).setY(labelY);
       this.scene.add(label.sprite);
       let sparkles: Sparkles | undefined;
-      if (!a.repro && (SPARKLY.has(wk.rarity) || a.frame === 'diamant' || a.frame === 'arcenciel')) {
+      if (!a.repro && (SPARKLY.has(wk.rarity) || a.frame !== 'normal')) {
         const at = p.clone().addScaledVector(normal, isSculpt ? 0 : 0.35).setY(0.6 + slotFloor(a.slot) * FLOOR_H);
-        sparkles = new Sparkles(at, a.frame === 'diamant' ? '#bfe9ff' : rar.color, {
+        // un cadre spécial ou une mutation colore les étincelles (doré, glace, violet hanté…), sinon la rareté
+        sparkles = new Sparkles(at, a.frame !== 'normal' ? fr.color : rar.color, {
           rainbow: a.frame === 'arcenciel',
-          count: wk.rarity === 'mythique' || a.frame === 'arcenciel' ? 22 : 12,
+          count: wk.rarity === 'mythique' || a.frame === 'arcenciel' ? 26 : a.frame !== 'normal' ? 18 : 12,
           radius: isSculpt ? 0.9 : 1.2,
           height: 2.6,
+          snow: a.frame === 'givre',
         });
         this.scene.add(sparkles.points);
       }
@@ -782,10 +796,17 @@ export class MuseumView {
   /** Façade classique monumentale : colonnades de marbre, fronton orné, toit en pente noble et entrée majestueuse. */
   private buildFacade(): void {
     this.clearFacade();
-    const stoneMat = std(0xe8e2d4, { roughness: 0.75 });
-    const stoneDark = std(0xd4cdbd, { roughness: 0.8 });
+    // la façade prend la couleur choisie par le joueur (murs pastel, toit foncé) : chaque musée a son identité,
+    // et le quartier n'est plus une rangée de bâtiments blanc cassé
+    const own = new THREE.Color(this.owner?.color ?? '#e8b64c');
+    this.facadeColor = this.owner?.color ?? '';
+    const white = new THREE.Color('#fff6e6');
+    const stoneMat = std(0xf6e7c8, { roughness: 0.75 });
+    const stoneDark = std(own.clone().lerp(white, 0.22).getHex(), { roughness: 0.8 });
+    const pedMat = std(own.clone().lerp(white, 0.45).getHex(), { roughness: 0.75 });
     const goldTrim = std(0xe8b64c, { roughness: 0.25, metalness: 0.8 });
-    const roofSlate = std(0x363e4b, { roughness: 0.7 });
+    const roofSlate = std(own.clone().multiplyScalar(0.5).getHex(), { roughness: 0.7 });
+    const stepsMat = std(0xd9b48a, { roughness: 0.85 });
 
     const d = -this.plot.f; // direction de la place sur l'axe z
     const wallZ = this.plot.z + d * 6.1;
@@ -842,7 +863,7 @@ export class MuseumView {
       bevelSize: 0.08,
       bevelThickness: 0.08,
     });
-    const pediment = new THREE.Mesh(pedGeo, stoneMat);
+    const pediment = new THREE.Mesh(pedGeo, pedMat);
     pediment.position.set(x0, 7.8, wallZ + d * 3.4);
     if (d === -1) {
       pediment.rotation.y = Math.PI;
@@ -857,7 +878,7 @@ export class MuseumView {
     roof.position.set(x0, 7.9, wallZ + d * 1.6);
 
     // Parvis dallé (bas : on marche dessus sans s'y enfoncer)
-    const steps = new THREE.Mesh(new THREE.BoxGeometry(22.0, 0.12, 5.6), stoneDark);
+    const steps = new THREE.Mesh(new THREE.BoxGeometry(22.0, 0.12, 5.6), stepsMat);
     steps.position.set(x0, 0.06, wallZ + d * 2.5);
 
     this.facade.add(steps);
@@ -896,10 +917,10 @@ export class MuseumView {
     this.rightDoorGroup = createLeaf(false);
     this.scene.add(this.leftDoorGroup, this.rightDoorGroup);
 
-    // Tapis de marbre noble menant vers la galerie
+    // Tapis rouge menant vers la galerie (avant : un tapis de marbre blanc)
     const runway = new THREE.Mesh(
       new THREE.PlaneGeometry(4.2, 16),
-      std(0xeae4d8, { roughness: 0.6 }),
+      std(0xa31c30, { roughness: 0.95 }),
     );
     runway.rotation.x = -Math.PI / 2;
     runway.position.set(x0, 0.02, wallZ + d * 8.4);
@@ -1022,13 +1043,15 @@ export class MuseumView {
     if (this.own) lines = [{ text: 'VOTRE MUSÉE', color: '#ffd36b', size: 66, weight: 900 }];
     else if (!o) lines = [];
     else {
+      const robbed = !this.online && (o.robbedUntil ?? 0) > now;
       const tag = o.shielded ? '🛡 Bouclier débutant'
         : o.immuneUntil > now ? `🛡 Protégé ${Math.ceil((o.immuneUntil - now) / 60_000)} min`
+        : robbed ? `🛡 Absent, déjà volé : protégé ${Math.ceil(((o.robbedUntil ?? 0) - now) / 60_000)} min`
         : this.isLocked(now) ? '🔒 Verrouillé'
         : this.online ? '● Propriétaire présent' : '☾ Propriétaire absent';
       lines = [
         { text: o.rebirths ? `${o.name} · ⭐${o.rebirths}` : o.name, color: '#fff', size: 52, weight: 900 },
-        { text: `${money(o.value)} · ${tag}`, color: o.shielded || o.immuneUntil > now ? '#9fe3ff' : this.online ? '#7dff9a' : '#ffb3c1', size: 40, weight: 800 },
+        { text: `${money(o.value)} · ${tag}`, color: o.shielded || o.immuneUntil > now || robbed ? '#9fe3ff' : this.online ? '#7dff9a' : '#ffb3c1', size: 40, weight: 800 },
       ];
       const prot = this.protectionText(now);
       if (prot) lines.push({ text: prot, color: '#ffd36b', size: 34, weight: 800 });

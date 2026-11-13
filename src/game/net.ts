@@ -1,4 +1,5 @@
 import type { FrameId } from './catalog';
+import type { SeasonState } from './api';
 import type { MuseumSnap } from './museumView';
 
 export interface PlotInfo {
@@ -140,7 +141,11 @@ export type ServerMsg =
     t: 'welcome'; now: number; you: { id: string; plot: number; jailUntil: number }; plots: PlotInfo[]; players: NetPlayer[]; guards: NetGuard[]; district: number;
     chat?: ChatLine[]; invite?: { status: 'ok' | 'full' | 'offline' | 'unknown' | 'self'; name: string | null } | null; max?: number;
     coins?: CoinSpot[];
+    /** Serveur privé : son propriétaire (null dans un quartier public). */
+    privateOf?: { id: string; name: string } | null;
+    season?: SeasonState;
   }
+  | { t: 'season'; season: SeasonState }
   | { t: 'bonk'; from: string; to: string | null; dropped: boolean; x: number; z: number; stunMs: number }
   | { t: 'coins'; add?: CoinSpot[]; del?: number[]; by?: string }
   | { t: 'coin-got'; id: number; amount: number }
@@ -170,6 +175,11 @@ export class Net {
   connected = false;
   /** Code d'invitation d'un ami : envoyé à la première connexion seulement. */
   joinCode: string | null = null;
+  /**
+   * « private » : aller (et revenir après une coupure) sur son serveur privé ;
+   * « public » : quitter le serveur privé pour un quartier public (une seule fois).
+   */
+  mode: 'private' | 'public' | null = null;
   onMessage: (m: ServerMsg) => void = () => undefined;
   onStatus: (connected: boolean) => void = () => undefined;
 
@@ -182,8 +192,9 @@ export class Net {
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     this.ws = ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify({ t: 'auth', id: a.id, token: a.token, ...(this.joinCode ? { join: this.joinCode } : {}) }));
+      ws.send(JSON.stringify({ t: 'auth', id: a.id, token: a.token, ...(this.joinCode ? { join: this.joinCode } : {}), ...(this.mode ? { [this.mode]: true } : {}) }));
       this.joinCode = null; // une reconnexion ramène le joueur chez lui, pas chez l'ami
+      if (this.mode === 'public') this.mode = null;
       this.retry = 0;
     };
     ws.onmessage = (e) => {

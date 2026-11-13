@@ -6,8 +6,13 @@ Les **STH coins** sont la monnaie premium. Ils servent à acheter des **Lucky co
 On les obtient de deux façons :
 
 1. **En argent réel** (offres ci-dessous) ;
-2. **En échangeant des pièces du jeu**, à un taux volontairement très élevé : **1 000 STH = 150 M de pièces**
-   (1 STH = 150 000 pièces, 10 STH minimum par échange). C'est une dépense de fin de partie.
+2. **En échangeant des pièces du jeu**, à un taux volontairement très élevé : **1 STH = 1 M de pièces**
+   (5 STH minimum par échange), et **plafonné chaque mois** : 100 STH et 3 échanges au plus (remise à zéro le 1er).
+   C'est une dépense de fin de partie ; pour ouvrir des coffres régulièrement, il faut acheter des STH.
+   Réglages : `premium.coinsPerSth`, `premium.monthlyCap`, `premium.monthlyCount`.
+
+Les STH servent aussi à louer un **serveur privé** (un quartier réservé au joueur et à ses invités) : 200 STH pour 30 jours,
+prolongeable (`privateServer` dans le catalogue).
 
 | Offre | STH reçus | FCFA | Euro | Dollar |
 |---|---|---|---|---|

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Label } from './labels';
-import { CATALOG, artUrl, money, perSec, incomeOf, work } from './catalog';
+import { CATALOG, RARITY_STARS, artUrl, frameTag, money, perSec, incomeOf, work } from './catalog';
 import { ROAD } from './district';
 import type { ConvoyItem } from './api';
 import { artTextureByUrl, aspectOf, setRainbow } from './textures';
@@ -18,6 +18,11 @@ const FRAME_COLORS: Record<string, number> = {
   dore: 0xffd36b,
   diamant: 0x9fe3ff,
   arcenciel: 0xff5ea8,
+  givre: 0xc8f2ff,
+  hante: 0x7b45c9,
+  fleuri: 0xff9ecb,
+  solaire: 0xffa526,
+  festif: 0xff4f9a,
 };
 
 // ------------------------------------------------------------------ dimensions (m), camion orienté vers +x
@@ -49,7 +54,14 @@ interface Kit {
   unitPlane: THREE.PlaneGeometry;
   passeMat: THREE.Material;
   beamGeo: THREE.BufferGeometry;
+  /** Peinture de la carrosserie (remplacée sur chaque camion par une peinture à la couleur de la rareté). */
+  pearl: THREE.Material;
 }
+
+/** Peinture des camions selon la rareté de l'œuvre transportée : on sait ce qui arrive avant de lire l'étiquette. */
+const BODY_PAINT: Record<string, number> = { commun: 0xeef1f5, rare: 0x3f8fff, epique: 0xa45bff, legendaire: 0xffa81f, mythique: 0xff3b4e };
+/** Peinture des camions qui portent une mutation saisonnière. */
+const MUTATION_PAINT: Record<string, number> = { givre: 0x9fe8ff, hante: 0x5b2a9e, fleuri: 0xff8fc8, solaire: 0xffb52e, festif: 0xff4f9a };
 
 let kitCache: Kit | null = null;
 
@@ -199,6 +211,7 @@ function buildKit(): Kit {
     unitPlane: new THREE.PlaneGeometry(1, 1),
     passeMat: new THREE.MeshStandardMaterial({ color: 0xf1ede4, roughness: 0.9 }),
     beamGeo: new THREE.CylinderGeometry(1.5, 1.5, 16, 24, 1, true),
+    pearl,
   };
 }
 
@@ -228,9 +241,18 @@ class Truck {
   /** Faisceau et LED qui changent de couleur (cadre arc-en-ciel). */
   rainbowBeam = false;
 
+  /** Peinture propre à ce camion (couleur de la rareté transportée). */
+  private paint: THREE.MeshPhysicalMaterial;
+
   constructor() {
     const k = kit();
-    this.root.add(k.body.clone());
+    const body = k.body.clone();
+    this.paint = (k.pearl as THREE.MeshPhysicalMaterial).clone();
+    body.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.material === k.pearl) m.material = this.paint;
+    });
+    this.root.add(body);
     for (const x of AXLES) {
       const s = new THREE.Mesh(k.spokeGeo, k.spokeMat);
       s.position.set(x, WHEEL_R, 0);
@@ -323,10 +345,17 @@ class Truck {
       this.frameMat.roughness = item.frame === 'normal' ? 0.55 : 0.15;
     }
 
-    const color = item.frame === 'diamant' ? '#9fe3ff' : item.frame === 'dore' ? '#ffd36b' : rar.color;
+    const fr = CATALOG.frames[item.frame];
+    const color = item.frame !== 'normal' ? fr.color : rar.color;
     this.accentMat.color.set(color);
     this.rainbowBeam = item.frame === 'arcenciel';
     (this.beam.material as THREE.MeshBasicMaterial).color.set(color);
+    // carrosserie : couleur de la rareté (mutation saisonnière : sa couleur ; arc-en-ciel : peinture animée)
+    setRainbow(this.paint, item.frame === 'arcenciel');
+    if (item.frame !== 'arcenciel') {
+      this.paint.color.setHex(MUTATION_PAINT[item.frame] ?? BODY_PAINT[item.rarity] ?? BODY_PAINT.commun);
+      this.paint.metalness = item.frame === 'dore' || item.frame === 'diamant' ? 0.6 : 0.15;
+    }
 
     this.refreshLabel();
   }
@@ -336,7 +365,7 @@ class Truck {
     const wk = work(item.workId);
     const rar = CATALOG.rarities[item.rarity];
     const EVENT_TAG: Record<string, string> = { golden: '✨ HEURE DORÉE', rare: '💎 TRÉSORS RARES', soldes: '🏷 SOLDES −30 %', arcenciel: '🌈 CONVOI ARC-EN-CIEL' };
-    const tag = (item.frame === 'normal' ? rar.label : `${rar.label} · ${CATALOG.frames[item.frame].label}`) + (item.event ? ` · ${EVENT_TAG[item.event] ?? ''}` : '');
+    const fr = CATALOG.frames[item.frame];
     this.display.visible = !item.sold;
     this.beam.visible = !item.sold && (item.frame !== 'normal' || item.rarity !== 'commun');
 
@@ -344,11 +373,13 @@ class Truck {
       item.sold
         ? [{ text: 'ACQUIS', color: '#ff6b6b', size: 72, weight: 900 }]
         : [
-            { text: wk.title.length > 28 ? `${wk.title.slice(0, 26)}…` : wk.title, color: '#ffffff', size: 48, weight: 900 },
-            { text: tag.toUpperCase(), color: item.frame === 'arcenciel' ? '#ff8fd8' : item.frame === 'normal' ? rar.color : '#ffd36b', size: 38, weight: 800 },
-            { text: `${money(item.price)} pièces  ·  +${perSec(incomeOf(item.workId, item.frame))}/s`, color: '#7dff9a', size: 44, weight: 900 },
+            { text: wk.title.length > 28 ? `${wk.title.slice(0, 26)}…` : wk.title, color: '#ffffff', size: 46, weight: 900 },
+            // rareté et mutation dans des pastilles colorées : lisibles de loin
+            { text: `${RARITY_STARS[item.rarity]} ${rar.label.toUpperCase()}${item.frame !== 'normal' ? `  ·  ${frameTag(item.frame).toUpperCase()}` : ''}`, color: '#ffffff', size: 36, weight: 900, pill: item.frame !== 'normal' && item.rarity === 'commun' ? fr.color : rar.color },
+            ...(item.event && EVENT_TAG[item.event] ? [{ text: EVENT_TAG[item.event], color: '#ffd36b', size: 32, weight: 800 }] : []),
+            { text: `${money(item.price)} pièces  ·  +${perSec(incomeOf(item.workId, item.frame))}/s`, color: '#7dff9a', size: 42, weight: 900 },
           ],
-      { bg: 'rgba(10,14,24,0.92)', border: item.sold ? '#ff6b6b' : rar.color },
+      { bg: 'rgba(10,14,24,0.92)', border: item.sold ? '#ff6b6b' : item.frame !== 'normal' ? fr.color : rar.color },
     );
   }
 
