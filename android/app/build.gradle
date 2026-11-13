@@ -7,8 +7,8 @@ android {
         applicationId "fr.stealamasterpiece.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName "1.3.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +16,26 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Signature de la version à publier : clé décrite dans android/keystore.properties (jamais dans git),
+    // voir docs/MOBILE.md. Sans ce fichier, seule la version de test (debug) est construite.
+    def keystoreFile = rootProject.file('keystore.properties')
+    def keystore = new Properties()
+    if (keystoreFile.exists()) keystore.load(new FileInputStream(keystoreFile))
+    signingConfigs {
+        release {
+            if (keystoreFile.exists()) {
+                storeFile rootProject.file(keystore['storeFile'])
+                storePassword keystore['storePassword']
+                keyAlias keystore['keyAlias']
+                keyPassword keystore['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (keystoreFile.exists()) signingConfig signingConfigs.release
         }
     }
 }

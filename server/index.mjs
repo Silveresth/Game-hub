@@ -13,6 +13,7 @@ import { createGame } from './game.mjs';
 import { attachDistricts } from './district.mjs';
 import { createAuctions } from './auctions.mjs';
 import { createPush } from './push.mjs';
+import { createPayments } from './payments.mjs';
 import { clientIp } from './ip.mjs';
 
 // Filet de sécurité : une promesse rejetée oubliée est journalisée au lieu d'arrêter tout le serveur.
@@ -212,6 +213,8 @@ const game = await createGame({
   db,
 });
 const auctions = await createAuctions({ game, db, devMode: DEV });
+// achats de STH coins en argent réel (T-Money, Flooz, cartes, PayPal : voir docs/PAIEMENTS.md)
+const payments = await createPayments({ game, db, devMode: DEV });
 
 /**
  * Digital Asset Links : prouve à Android que l'APK (Trusted Web Activity, via Bubblewrap) appartient à ce site,
@@ -253,7 +256,7 @@ async function adminApi(req, res, url) {
   const ok = (body) => send(res, 200, body, undefined, { 'cache-control': 'no-store' });
   try {
     if (parts[2] === 'overview' && req.method === 'GET') {
-      return ok({ ...auctions.adminList(), stats: { players: [...game.allPlayers()].length, online: districts.stats().online, districts: districts.stats().districts }, push: push.log.slice(-20).reverse(), dev: DEV, liveEvent: game.eventAt(Date.now()).current });
+      return ok({ ...auctions.adminList(), stats: { players: [...game.allPlayers()].length, online: districts.stats().online, districts: districts.stats().districts }, push: push.log.slice(-20).reverse(), dev: DEV, liveEvent: game.eventAt(Date.now()).current, payments: payments.adminSummary() });
     }
     // « admin abuse » en direct : pluie d'or, convoi arc-en-ciel, super vitesse
     if (parts[2] === 'live' && req.method === 'POST') {
@@ -302,6 +305,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname.startsWith('/api/game/')) return await game.handle(req, res, url);
     if (url.pathname.startsWith('/api/admin/')) return await adminApi(req, res, url);
+    if (url.pathname.startsWith('/api/pay/')) return await payments.handle(req, res, url);
     if (req.method === 'GET' && url.pathname === '/api/push/key') return send(res, 200, { key: push.publicKey });
     if (req.method === 'GET' && url.pathname === '/api/config') return send(res, 200, { googleClientId: process.env.SAM_GOOGLE_CLIENT_ID || null, iceServers: ICE_SERVERS });
     if (req.method === 'GET' && url.pathname === '/.well-known/assetlinks.json') return send(res, 200, assetLinks());

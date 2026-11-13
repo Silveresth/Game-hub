@@ -18,7 +18,8 @@ Lancer :
 Tests : npm run test:server (tests/ws.mjs + tests/auction.mjs, sans navigateur) ; npm test (Playwright + Edge, lent : lancer les tests un par un avec $env:ONLY="game-multi" etc.) ; npm run test:pwa après npm start.
 Pour repartir de zéro : arrêter le serveur, supprimer server/data/players et server/data/sales.json.
 
-Règles de travail : le serveur fait autorité sur tout (argent, vols, positions) ; vérifier chaque fonctionnalité par un test automatique ; mettre à jour README.md et le paragraphe « Avancement » du cahier des charges ; incrémenter VERSION dans public/sw.js à chaque livraison ; terminer par build de production, test PWA et robocopy vers C:\Users\#NESTOR.COM\game-hub.
+Règles de travail : le serveur fait autorité sur tout (argent, vols, positions, tirages des coffres, paiements) ; vérifier chaque fonctionnalité par un test automatique ; mettre à jour README.md et le paragraphe « Avancement » du cahier des charges ; À CHAQUE LIVRAISON, ajouter une version dans src/shared/changelog.json (nouveautés, améliorations, corrections, feuille de route : affichée sur la page d'accueil et dans le jeu) et augmenter versionCode/versionName dans android/app/build.gradle ; incrémenter VERSION dans public/sw.js ; terminer par build de production, test PWA et APK (npm run android:apk).
+Paiements : docs/PAIEMENTS.md. Application Android : docs/MOBILE.md.
 
 Ce qu'il reste à faire, par ordre d'utilité :
 1. TEST AVEC DE VRAIS JOUEURS (jamais fait) : 3 à 5 personnes, sur téléphone, en conditions réelles : un vol, une vente aux enchères, une notification reçue. Corriger ce qui ressort (équilibrage des prix et des durées en priorité).

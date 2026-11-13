@@ -14,6 +14,11 @@ interface Overview {
   works: Work[];
   push: Array<{ at: number; player: string; category: string; title: string; body: string }>;
   liveEvent: { kind: string; label: string; icon: string; endsAt: number; admin?: boolean } | null;
+  payments?: {
+    providers: string[];
+    totals: Record<string, number>;
+    recent: Array<{ id: string; player: string; sth: number; amount: number; currency: string; status: string; method: string; provider: string; createdAt: number }>;
+  };
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -97,6 +102,15 @@ function render(): void {
   $('pushes').innerHTML = data.push.length
     ? data.push.map((p) => `<tr><td>${esc(p.player)}</td><td>${esc(p.title)}<div class="muted">${esc(p.body)}</div></td></tr>`).join('')
     : '<tr><td colspan="2" class="muted">Aucune notification envoyée</td></tr>';
+  // achats de STH coins : prestataires actifs, total encaissé, dernières commandes
+  const pay = data.payments;
+  const STATUS: Record<string, string> = { paid: '✅ payée', pending: '⏳ en attente', failed: '✖ refusée', expired: '⌛ expirée', error: '⚠ à vérifier' };
+  $('payInfo').textContent = pay
+    ? `Prestataires actifs : ${pay.providers.length ? pay.providers.join(', ') : 'aucun (voir docs/PAIEMENTS.md)'} · encaissé : ${Object.entries(pay.totals).map(([c, n]) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: c }).format(n)).join(' + ') || '0'}`
+    : '';
+  $('payments').innerHTML = pay?.recent.length
+    ? pay.recent.map((o) => `<tr><td>${esc(o.player)}<div class="muted">${when.format(o.createdAt)}</div></td><td>${nf.format(o.sth)} STH<div class="muted">${esc(o.method)} · ${esc(o.provider)}</div></td><td>${new Intl.NumberFormat('fr-FR', { style: 'currency', currency: o.currency }).format(o.amount)}</td><td>${STATUS[o.status] ?? esc(o.status)}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="muted">Aucun achat pour l’instant</td></tr>';
 
   // listes d'œuvres des lots (les Mythiques déjà possédées ne peuvent pas être vendues)
   document.querySelectorAll<HTMLSelectElement>('select.work').forEach((sel) => {

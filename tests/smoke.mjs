@@ -231,7 +231,7 @@ await check('game-account', '/game/', async (p) => {
   await p.click('#authGo');
   await until(p, (n) => window.__game?.state?.name === n && window.__game.state.account.email !== null && document.body.classList.contains('playing'), `Compte ${stamp}`, 60000)
     .catch(async () => { throw new Error('inscription : ' + (await p.textContent('#authMsg'))); });
-  if ((await p.textContent('#renameBtn')) !== 'Compte') throw new Error('bouton du porte-monnaie : « Compte » attendu');
+  if ((await p.textContent('#renameBtn')) !== '👤') throw new Error('bouton du porte-monnaie : « 👤 » (compte) attendu');
   // déconnexion depuis « Mon compte »
   await p.click('#renameBtn');
   await p.waitForSelector('#logoutBtn:not([hidden])', { timeout: 20000 });
@@ -448,6 +448,10 @@ await check('game-mobile', '/game/', async (p) => {
   await p.fill('#nameInput', 'Musée Mobile');
   await p.tap('#guestLink');
   await until(p, () => window.__game?.state?.name === 'Musée Mobile' && document.body.classList.contains('playing'), null, 20000);
+  // téléphone à la verticale : le jeu conseille de le tourner, on peut continuer quand même
+  if (!(await p.isVisible('#rotateHint'))) throw new Error('conseil « Tournez votre téléphone » absent en portrait');
+  await p.tap('#rotateOk');
+  await p.evaluate(() => (document.getElementById('tuto').hidden = true));
   if (!(await p.isVisible('#joy'))) throw new Error('joystick tactile absent');
   // le panneau d'objectif ne doit pas recouvrir le centre de l'écran (le personnage)
   const q = await p.locator('#quest').boundingBox();
@@ -463,6 +467,19 @@ await check('game-mobile', '/game/', async (p) => {
   await until(p, (b) => { const q = window.__game.pos; return Math.hypot(q.x - b.x, q.z - b.z) > 1; }, before, 20000)
     .catch(() => { throw new Error('le joystick ne fait pas bouger le personnage'); });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  // joystick poussé loin : le personnage court
+  const b2 = await p.evaluate(() => window.__game.pos);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cx + 50, y: cy }] });
+  await until(p, () => document.getElementById('joy').classList.contains('run'), null, 5000)
+    .catch(() => { throw new Error('joystick poussé à fond : la course ne se déclenche pas'); });
+  await until(p, (b) => { const q = window.__game.pos; return Math.hypot(q.x - b.x, q.z - b.z) > 1; }, b2, 20000);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  // inventaire et boutique tiennent dans l'écran du téléphone
+  await p.tap('#invBtn');
+  await p.waitForSelector('#inventory.open', { timeout: 10000 });
+  if (await p.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('inventaire : débordement horizontal');
+  await p.keyboard.press('Escape');
   await shot(p, 'game-5-mobile');
 }, phone);
 

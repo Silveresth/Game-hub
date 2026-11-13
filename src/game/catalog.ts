@@ -45,6 +45,27 @@ export const CATALOG = raw as unknown as {
   maxTools: number;
   upgrades: Record<'speed' | 'lock' | 'vault' | 'gloves' | 'luck', { label: string; icon: string; desc: string; unit: string; levels: Array<{ price: number; value: number }> }>;
   rebirth: { label: string; minLevel: number; baseCost: number; growth: number; incomeBonus: number };
+  premium: {
+    label: string;
+    short: string;
+    coinsPerSth: number;
+    minExchange: number;
+    maxExchange: number;
+    xofCountries: string[];
+    eurCountries: string[];
+    packs: Array<{ id: string; sth: number; bonus: number; xof: number; eur: number; usd: number; tag?: string }>;
+  };
+  chests: Record<'simple' | 'rare' | 'epique' | 'legendaire', {
+    label: string;
+    short: string;
+    color: string;
+    price: number;
+    desc: string;
+    odds: Partial<Record<RarityId, number>>;
+    frames: Partial<Record<FrameId, number>>;
+    pity?: { every: number; rarity: RarityId };
+  }>;
+  chestBulk: { qty: number; discount: number };
 };
 
 const byId = new Map(CATALOG.works.map((w) => [w.id, w]));

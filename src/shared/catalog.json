@@ -85,8 +85,72 @@
     { "code": "MA", "name": "Maroc", "flag": "🇲🇦" },
     { "code": "SN", "name": "Sénégal", "flag": "🇸🇳" },
     { "code": "CI", "name": "Côte d'Ivoire", "flag": "🇨🇮" },
-    { "code": "CM", "name": "Cameroun", "flag": "🇨🇲" }
+    { "code": "CM", "name": "Cameroun", "flag": "🇨🇲" },
+    { "code": "TG", "name": "Togo", "flag": "🇹🇬" },
+    { "code": "BJ", "name": "Bénin", "flag": "🇧🇯" },
+    { "code": "BF", "name": "Burkina Faso", "flag": "🇧🇫" },
+    { "code": "ML", "name": "Mali", "flag": "🇲🇱" },
+    { "code": "NE", "name": "Niger", "flag": "🇳🇪" },
+    { "code": "GN", "name": "Guinée", "flag": "🇬🇳" },
+    { "code": "GA", "name": "Gabon", "flag": "🇬🇦" },
+    { "code": "CG", "name": "Congo", "flag": "🇨🇬" },
+    { "code": "CD", "name": "RD Congo", "flag": "🇨🇩" },
+    { "code": "TD", "name": "Tchad", "flag": "🇹🇩" },
+    { "code": "GH", "name": "Ghana", "flag": "🇬🇭" },
+    { "code": "NG", "name": "Nigeria", "flag": "🇳🇬" },
+    { "code": "MG", "name": "Madagascar", "flag": "🇲🇬" },
+    { "code": "TN", "name": "Tunisie", "flag": "🇹🇳" },
+    { "code": "DZ", "name": "Algérie", "flag": "🇩🇿" },
+    { "code": "HT", "name": "Haïti", "flag": "🇭🇹" },
+    { "code": "LU", "name": "Luxembourg", "flag": "🇱🇺" }
   ],
+  "premium": {
+    "label": "STH coins",
+    "short": "STH",
+    "coinsPerSth": 150000,
+    "minExchange": 10,
+    "maxExchange": 100000,
+    "xofCountries": ["TG", "BJ", "SN", "CI", "BF", "ML", "NE", "GW", "CM", "GA", "CG", "TD", "CF", "GQ"],
+    "eurCountries": ["FR", "BE", "DE", "IT", "ES", "LU", "PT", "NL", "AT", "IE", "FI", "GR"],
+    "packs": [
+      { "id": "p100", "sth": 100, "bonus": 0, "xof": 500, "eur": 0.99, "usd": 1.09 },
+      { "id": "p550", "sth": 500, "bonus": 50, "xof": 2500, "eur": 4.99, "usd": 5.49 },
+      { "id": "p1200", "sth": 1000, "bonus": 200, "xof": 5000, "eur": 9.99, "usd": 10.99, "tag": "Populaire" },
+      { "id": "p2600", "sth": 2000, "bonus": 600, "xof": 10000, "eur": 19.99, "usd": 21.99 },
+      { "id": "p7000", "sth": 5000, "bonus": 2000, "xof": 25000, "eur": 49.99, "usd": 54.99, "tag": "Meilleure offre" },
+      { "id": "p15000", "sth": 10000, "bonus": 5000, "xof": 50000, "eur": 99.99, "usd": 109.99 }
+    ]
+  },
+  "chests": {
+    "simple": {
+      "label": "Lucky coffre", "short": "Simple", "color": "#c98a4b", "price": 60,
+      "desc": "Des toiles pour bien démarrer, et parfois une belle surprise.",
+      "odds": { "commun": 60, "rare": 32, "epique": 7, "legendaire": 1 },
+      "frames": { "dore": 10, "diamant": 1.5, "arcenciel": 0.1 },
+      "pity": { "every": 12, "rarity": "epique" }
+    },
+    "rare": {
+      "label": "Lucky coffre rare", "short": "Rare", "color": "#4aa3ff", "price": 180,
+      "desc": "Jamais de Commune : au moins une Rare, souvent mieux.",
+      "odds": { "rare": 70, "epique": 25, "legendaire": 5 },
+      "frames": { "dore": 15, "diamant": 3, "arcenciel": 0.3 },
+      "pity": { "every": 12, "rarity": "legendaire" }
+    },
+    "epique": {
+      "label": "Lucky coffre épique", "short": "Épique", "color": "#b46bff", "price": 450,
+      "desc": "Au moins une Épique. Une chance de Légendaire, et même de Mythique.",
+      "odds": { "epique": 82, "legendaire": 17.5, "mythique": 0.5 },
+      "frames": { "dore": 20, "diamant": 5, "arcenciel": 0.6 },
+      "pity": { "every": 8, "rarity": "legendaire" }
+    },
+    "legendaire": {
+      "label": "Lucky coffre légendaire", "short": "Légendaire", "color": "#ffb020", "price": 1200,
+      "desc": "Une Légendaire garantie. 3 % de chance de décrocher une Mythique unique.",
+      "odds": { "legendaire": 97, "mythique": 3 },
+      "frames": { "dore": 25, "diamant": 8, "arcenciel": 1.5 }
+    }
+  },
+  "chestBulk": { "qty": 5, "discount": 0.1 },
   "colors": ["#f2b632", "#ff5e62", "#3d8bff", "#4cc38a", "#b46bff", "#ff9f43", "#f2ede1", "#3a3f4d"],
   "quests": [
     { "id": "first-buy", "label": "Achetez votre première œuvre au convoi", "hint": "Approchez-vous d’un camion sur la route et appuyez sur E.", "metric": "owned", "target": 1, "reward": 200 },

@@ -1,6 +1,7 @@
 // Page d'accueil : barre live, joueurs en ligne, planning des ventes, cartels de la collection, installation PWA.
 import { API_BASE, formatCountdown, mountLiveBar, parisTime, setupPwa, type LiveStats } from '../shared/live';
-import { CATALOG, incomeOf, money, perSec, work, type FrameId } from '../game/catalog';
+import { CATALOG, incomeOf, money, perSec, work, type FrameId, type RarityId } from '../game/catalog';
+import { CHANGELOG, roadmapHtml, versionHtml } from '../shared/changelog';
 
 // Page hébergée à part (Vercel) : les boutons « Jouer » mènent au jeu sur son propre domaine (Render)
 const GAME_URL = `${API_BASE}/game/`;
@@ -30,6 +31,37 @@ if (intro) intro.textContent = intro.textContent!.replace(/^\d+/, String(CATALOG
 /** Couleurs de rareté assombries : lisibles sur le cartel ivoire. */
 function darkRarity(id: string): string {
   return ({ commun: '#5b6270', rare: '#1f6fc4', epique: '#7a35c8', legendaire: '#a8650a', mythique: '#c0102f' } as Record<string, string>)[id] ?? '#2b1d12';
+}
+
+// ---------------------------------------------------------------- Lucky coffres : prix et probabilités tirés du catalogue
+
+const CHEST_ICONS: Record<string, string> = { simple: '🎁', rare: '💎', epique: '🔮', legendaire: '👑' };
+const chestList = $('chestList');
+if (chestList) {
+  chestList.innerHTML = Object.entries(CATALOG.chests).map(([id, c]) => {
+    const odds = (Object.entries(c.odds) as Array<[RarityId, number]>).map(([r, p]) => `<li><b style="color:${CATALOG.rarities[r].color}">${CATALOG.rarities[r].label}</b> : ${String(p).replace('.', ',')} %</li>`).join('');
+    return `<article class="chest" style="--cc:${c.color}"><span class="ico">${CHEST_ICONS[id] ?? '🎁'}</span><h3>${c.label}</h3>
+      <p class="price">${nf.format(c.price)} STH</p><p class="muted" style="font-size:14.5px">${c.desc}</p><ul>${odds}</ul></article>`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------- journal des versions et feuille de route
+
+const versionList = $('versionList');
+if (versionList) {
+  let all = false;
+  const render = () => {
+    versionList.innerHTML = CHANGELOG.versions.slice(0, all ? undefined : 4).map((v, i) => versionHtml(v, i === 0)).join('');
+    const more = $('moreVersions');
+    if (more) more.hidden = all || CHANGELOG.versions.length <= 4;
+  };
+  render();
+  $('moreVersions')?.addEventListener('click', () => {
+    all = true;
+    render();
+  });
+  const roadmap = $('roadmap');
+  if (roadmap) roadmap.innerHTML = roadmapHtml();
 }
 
 // ---------------------------------------------------------------- en direct : joueurs en ligne et ventes

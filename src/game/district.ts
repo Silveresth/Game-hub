@@ -55,6 +55,25 @@ function tileTexture(base: string, line: string, tiles: number, noise = 0.05): T
   return t;
 }
 
+/** Pelouse : vert franc, brins plus clairs et plus sombres, quelques fleurettes. */
+function grassTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#4fa63f';
+  g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 5000; i++) {
+    const v = Math.random();
+    g.fillStyle = v < 0.45 ? 'rgba(120,200,80,0.35)' : v < 0.9 ? 'rgba(30,90,30,0.3)' : 'rgba(255,240,140,0.5)';
+    g.fillRect(Math.random() * 256, Math.random() * 256, v < 0.9 ? 1.5 : 2.5, v < 0.9 ? 3 : 2.5);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
 function textTexture(lines: Array<[string, string, number]>, w = 1024, h = 256, bg = '#141826'): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = w;
@@ -261,17 +280,18 @@ export class District {
   private buildGround(): void {
     // Grand dallage minéral et allées structurées en plaques de pierre
     // 1. Dalle de fondation globale en pierre beige/grège chaleureuse
-    const baseStone = tileTexture('#5a5245', 'rgba(30,25,20,0.45)', 8, 0.04);
-    baseStone.repeat.set(50, 50);
-    this.plane(240, 180, 0, 0, std(0xffffff, { map: baseStone, roughness: 0.9 }), -0.05);
+    // (couleurs ravivées : l'ancien sol brun-gris rendait toute la scène terne)
+    const baseStone = grassTexture();
+    baseStone.repeat.set(40, 30);
+    this.plane(240, 180, 0, 0, std(0xffffff, { map: baseStone, roughness: 0.95 }), -0.05);
 
-    // 2. Parvis central majestueux en pavés de pierre ambrée chaleureuse
-    const pav = tileTexture('#948470', 'rgba(40,35,28,0.5)', 4, 0.03);
+    // 2. Parvis central majestueux en pavés de pierre blonde, lumineux
+    const pav = tileTexture('#d4b98c', 'rgba(120,90,55,0.55)', 4, 0.035);
     pav.repeat.set(170 / 4, 48 / 4);
     this.plane(170, 48, 0, 0, std(0xffffff, { map: pav, roughness: 0.8 }), -0.01);
 
-    // 3. Trottoirs piétons d'accès le long de la place (nord et sud) en pierre dorée
-    const walkwayMat = std(0xa89984, { roughness: 0.75 });
+    // 3. Trottoirs piétons d'accès le long de la place (nord et sud) en pierre claire
+    const walkwayMat = std(0xe6d6b8, { roughness: 0.75 });
     this.plane(160, 4.0, 0, -5.5, walkwayMat, 0.01);
     this.plane(160, 4.0, 0, 5.5, walkwayMat, 0.01);
 

@@ -211,6 +211,46 @@
     .finale p { margin: 14px auto 30px; max-width: 46ch; color: var(--ivory-dim); font-size: 19px; }
     .finale .actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
 
+    /* Lucky coffres */
+    .chests { margin-top: 40px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+    .chest { padding: 20px 18px; border: 1px solid color-mix(in srgb, var(--cc) 60%, transparent); border-radius: 6px; background: linear-gradient(180deg, color-mix(in srgb, var(--cc) 18%, transparent), rgba(0,0,0,.2)); }
+    .chest .ico { font-size: 34px; }
+    .chest h3 { margin-top: 8px; font-size: 19px; color: var(--ivory); }
+    .chest .price { color: var(--gilt-hi); font-weight: 700; }
+    .chest ul { list-style: none; margin-top: 10px; display: flex; flex-direction: column; gap: 3px; font-size: 14.5px; color: var(--ivory-dim); }
+    .chest li b { color: var(--ivory); }
+    @media (max-width: 900px) { .chests { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 520px) { .chests { grid-template-columns: 1fr; } }
+
+    /* journal des versions et feuille de route */
+    .versions { margin-top: 36px; display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 36px; align-items: start; }
+    @media (max-width: 860px) { .versions { grid-template-columns: 1fr; } }
+    .timeline { position: relative; display: flex; flex-direction: column; gap: 12px; padding-left: 26px; }
+    .timeline::before { content: ''; position: absolute; left: 8px; top: 8px; bottom: 8px; border-left: 2px dashed rgba(246,220,150,.3); }
+    .cl-version { position: relative; border: 1px solid rgba(246,220,150,.22); border-radius: 6px; background: rgba(0,0,0,.18); }
+    .cl-version::before { content: ''; position: absolute; left: -24px; top: 18px; width: 14px; height: 14px; border-radius: 50%; background: var(--wine); border: 2px solid var(--gilt); }
+    .cl-version:first-child::before { background: var(--gilt-hi); box-shadow: 0 0 12px var(--gilt); }
+    .cl-version summary { cursor: pointer; list-style: none; padding: 14px 16px; display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: baseline; }
+    .cl-version summary::-webkit-details-marker { display: none; }
+    .cl-num { font-family: var(--display); font-weight: 800; color: var(--gilt-hi); font-size: 18px; }
+    .cl-title { font-weight: 700; color: var(--ivory); }
+    .cl-date { color: var(--ivory-dim); font-size: 13.5px; text-align: right; }
+    .cl-counts { grid-column: 2 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+    .cl-counts i { font-style: normal; font-size: 12px; padding: 1px 8px; border-radius: 99px; }
+    .cl-version ul { list-style: none; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+    .cl-version li { display: grid; grid-template-columns: 86px 1fr; gap: 10px; font-size: 15px; color: var(--ivory-dim); line-height: 1.5; }
+    .cl-tag { align-self: start; text-align: center; font-size: 11.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: .03em; text-transform: uppercase; background: rgba(255,255,255,.08); color: var(--ivory); }
+    .cl-new { background: rgba(76,195,138,.18) !important; color: #8ff0bd !important; }
+    .cl-improved { background: rgba(74,163,255,.18) !important; color: #a8d2ff !important; }
+    .cl-fixed { background: rgba(255,176,32,.18) !important; color: #ffd08a !important; }
+    .cl-roadmap { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .cl-roadmap li { display: grid; grid-template-columns: 120px 1fr; gap: 10px; font-size: 15px; color: var(--ivory-dim); padding: 12px 14px; border: 1px solid rgba(246,220,150,.2); border-radius: 6px; }
+    .cl-roadmap .rm-next .cl-tag { background: rgba(255,45,85,.2); color: #ff9fb3; }
+    .cl-roadmap .rm-planned .cl-tag { background: rgba(216,166,74,.2); color: var(--gilt-hi); }
+    .versions h3 { font-size: 21px; color: var(--ivory); margin-bottom: 14px; }
+    .more-versions { margin-top: 6px; align-self: flex-start; }
+    @media (max-width: 560px) { .cl-version li, .cl-roadmap li { grid-template-columns: 1fr; gap: 4px; } .cl-tag { justify-self: start; } .cl-version summary { grid-template-columns: auto 1fr; } .cl-date { grid-column: 1 / -1; text-align: left; } }
+
     footer.foot { padding: 34px 0 48px; background: var(--wine); color: var(--ivory-dim); font-size: 14px; }
     footer.foot .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px 30px; align-items: center; }
     footer.foot nav { display: flex; gap: 20px; flex-wrap: wrap; }
@@ -227,7 +267,8 @@
         <a href="#collection">La collection</a>
         <a href="#casse">Le casse</a>
         <a href="#ventes">Les ventes</a>
-        <a href="#amis">Entre amis</a>
+        <a href="#coffres">Lucky coffres</a>
+        <a href="#versions">Versions</a>
       </nav>
     </div>
   </header>
@@ -342,13 +383,42 @@
       </div>
     </section>
 
+    <!-- Lucky coffres -->
+    <section class="part alt" id="coffres" aria-labelledby="coffres-t">
+      <div class="wrap">
+        <h2 id="coffres-t">Les Lucky coffres</h2>
+        <p class="intro prose">Une œuvre d’art dans chaque coffre. Achetez-les avec des STH coins, gardez-les dans votre inventaire et ouvrez-les quand vous voulez. Les probabilités sont affichées avant l’achat.</p>
+        <div class="chests" id="chestList"></div>
+        <p class="muted" style="margin-top:18px;font-size:15px">STH coins : par T-Money, Flooz / Moov Money, carte Visa ou Mastercard, PayPal, ou en échangeant vos pièces du jeu.</p>
+      </div>
+    </section>
+
+    <!-- Journal des versions et feuille de route -->
+    <section class="part" id="versions" aria-labelledby="versions-t">
+      <div class="wrap">
+        <h2 id="versions-t">Journal des versions</h2>
+        <p class="intro prose">Chaque mise à jour du jeu : ce qui est nouveau, ce qui a été amélioré, les bugs corrigés. Et ce qui arrive ensuite.</p>
+        <div class="versions">
+          <div>
+            <h3>Versions</h3>
+            <div class="timeline" id="versionList"></div>
+            <button class="plaque quiet more-versions" type="button" id="moreVersions">Voir tout l’historique</button>
+          </div>
+          <div>
+            <h3>À venir</h3>
+            <div id="roadmap"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Questions -->
     <section class="part alt" id="questions" aria-labelledby="questions-t">
       <div class="wrap">
         <h2 id="questions-t">Questions</h2>
         <div class="faq">
-          <details><summary>Est-ce vraiment gratuit ?</summary><p>Oui. Il n’y a ni publicité ni achat avec de l’argent réel : tout s’achète avec les pièces gagnées en jeu.</p></details>
-          <details><summary>Faut-il créer un compte ?</summary><p>Non. Choisissez un nom de musée et jouez. Votre musée est retrouvé automatiquement sur cet appareil ; liez-le à un compte Google si vous voulez le retrouver ailleurs.</p></details>
+          <details><summary>Est-ce vraiment gratuit ?</summary><p>Oui, le jeu est gratuit et sans publicité, et tout se gagne en jouant. Les STH coins, facultatifs, servent à acheter des Lucky coffres : on peut les payer (T-Money, Flooz, carte, PayPal) ou les obtenir en échangeant ses pièces du jeu.</p></details>
+          <details><summary>Faut-il créer un compte ?</summary><p>Non. Choisissez un nom de musée et jouez. Votre musée est retrouvé automatiquement sur cet appareil ; créez un compte (e-mail ou Google) pour le retrouver ailleurs.</p></details>
           <details><summary>Que devient mon musée quand je ne joue pas ?</summary><p>Il reste dans le quartier, endormi. La caisse continue de se remplir à moitié vitesse. On peut vous voler au plus une œuvre toutes les deux heures, et vos gardes travaillent pendant votre absence.</p></details>
           <details><summary>Ça marche sur téléphone ?</summary><p>Oui, avec un joystick tactile. Vous pouvez aussi installer le jeu sur l’écran d’accueil pour l’ouvrir comme une application.</p></details>
           <details><summary>Les œuvres sont-elles de vraies œuvres ?</summary><p>Oui : des œuvres du domaine public, photographiées par les musées et partagées sur Wikimedia Commons.</p></details>

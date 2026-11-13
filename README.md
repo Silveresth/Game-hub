@@ -2,7 +2,32 @@
 
 Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâtir le plus grand musée du monde, acheter des chefs-d’œuvre aux enchères, les protéger… et voler ceux des autres. Voir le cahier des charges pour la conception complète et la roadmap.
 
-**État : phases 0 à 6 terminées, prêt à mettre en ligne** (voir [docs/LANCEMENT.md](docs/LANCEMENT.md)).
+**État : phases 0 à 6 terminées, prêt à mettre en ligne** (voir [docs/LANCEMENT.md](docs/LANCEMENT.md)). Version actuelle : **1.3.0**.
+
+**Journal des versions** : `src/shared/changelog.json` (versions, nouveautés, corrections, feuille de route), affiché sur
+la page d'accueil (section « Journal des versions ») et dans le jeu (menu ☰ → Nouveautés). **À compléter à chaque livraison.**
+
+**Version 1.3 — Lucky coffres, inventaire, nouvelle prise en main :**
+- **STH coins** (monnaie premium) : en argent réel (T-Money, Flooz / Moov Money, cartes Visa / Mastercard, PayPal) ou en
+  échangeant ses pièces (1 000 STH = 150 M). Offres de 100 à 15 000 STH, prix en FCFA, euros ou dollars selon le pays.
+  Paiements vérifiés par le serveur auprès du prestataire, crédités une seule fois : [docs/PAIEMENTS.md](docs/PAIEMENTS.md).
+- **Lucky coffres** (simple 60, rare 180, épique 450, légendaire 1 200 STH ; lot de 5 à −10 %) : une œuvre par coffre,
+  probabilités affichées avant l'achat et l'ouverture, garantie après une série malchanceuse, Mythique seulement si elle
+  est libre. Les coffres attendent dans l'inventaire ; ouverture animée selon la rareté (suspense, rayons, éclat, carte).
+- **Inventaire** (🎒, touche I) : coffres, œuvres exposées (ranger, vendre), réserve (exposer, remplacer une œuvre au choix),
+  outils du marché noir, album de la collection.
+- **Tutoriel interactif** au premier lancement (déplacement, caméra, saut, achat au convoi, accrochage, caisse, inventaire,
+  coffres) avec une flèche dorée en 3D ; menu ☰ → Tutoriel pour le revoir.
+- **Prise en main** : caméra au clic gauche ou droit qui se replace derrière le personnage ; course par défaut (Maj pour
+  marcher) ; saut plus franc (gravité plus forte à la descente, saut mémorisé, pose en l'air, écrasement à l'atterrissage,
+  vrille au double saut) ; cadence des pas accordée à la vitesse ; champ de vision élargi en pleine course.
+- **Couleurs** : rendu « Neutral » au lieu d'ACES (qui délavait), lumière plus claire, pelouse et pavés lumineux.
+- **Interface compacte** : porte-monnaie sur une ligne (pièces, revenu, STH ; détails au toucher), objectif réductible,
+  menu ☰ (voix, son, graphismes, commandes, tutoriel, nouveautés).
+- **Téléphone** : joystick qui apparaît sous le pouce (moitié gauche de l'écran) et court dès 60 % d'inclinaison, boutons
+  d'action redessinés, conseil « tournez votre téléphone » en portrait, application Android en paysage (`npm run android:apk`).
+- **Pays** : Togo, Bénin, Burkina Faso, Mali, Niger, Guinée, Gabon, Congo, RD Congo, Tchad, Ghana, Nigeria… (devinés à
+  l'inscription d'après la langue du navigateur).
 
 **Phase 9 — plus vivant, plus fun :**
 - **Coup de parapluie ☂** (touche F, bouton violet sur mobile) : le joueur le plus proche (2,6 m, même étage) est projeté en arrière et sonné 1,1 s. Un voleur touché lâche l'œuvre, qui retourne aussitôt chez son propriétaire. Recharge 2,5 s ; impossible de voler pendant qu'on est sonné. Tout est décidé par le serveur.
@@ -185,21 +210,23 @@ Variables utiles :
 | `SAM_CLIENT_IP_HEADER` | en-tête de l'hébergeur portant l'adresse du client (avec `SAM_TRUST_PROXY=1`) |
 | `SAM_GAME_URL` | (build de la page d'accueil seule, `npm run build:landing`) adresse du jeu, ex. `https://jouer.mondomaine.fr` |
 | `SAM_ICE_SERVERS` | serveurs ICE de la voix, en JSON (ex. `[{"urls":"turn:turn.exemple.fr:3478","username":"u","credential":"p"}]`) ; par défaut un STUN public |
-| `SAM_DEV=1` | mode test : routes `/api/game/dev/*`, pas de contrôle de vitesse. **Jamais en production** |
+| `FEDAPAY_SECRET_KEY`, `FEDAPAY_ENV`, `PAYGATE_AUTH_TOKEN`, `CINETPAY_API_KEY`, `CINETPAY_SITE_ID`, `PAYPAL_CLIENT_ID`, `PAYPAL_SECRET`, `PAYPAL_ENV` | paiements des STH coins (T-Money, Flooz, cartes, PayPal) : voir [docs/PAIEMENTS.md](docs/PAIEMENTS.md) |
+| `SAM_DEV=1` | mode test : routes `/api/game/dev/*`, faux prestataire de paiement « test », pas de contrôle de vitesse. **Jamais en production** |
 
 ## Commandes
 
 | Touche | Action |
 | --- | --- |
-| ZQSD / WASD / flèches, Maj | marcher, courir |
+| ZQSD / WASD / flèches, Maj | courir (par défaut), marcher (Maj maintenue) |
 | Espace (deux fois) | sauter, double saut |
 | **F** | coup de parapluie ☂ |
-| Clic droit + souris, molette | tourner la caméra, zoomer |
+| Clic gauche ou droit + souris, molette | tourner la caméra, zoomer (elle se replace aussi derrière le personnage) |
+| **I** | inventaire : coffres, œuvres exposées, réserve, outils, album |
 | **E** | acheter au convoi, accrocher / déplacer une œuvre, voler (maintenir), monter l'escalier, entrer (hôtel des ventes, marché noir) |
 | **R** | revendre une œuvre (deux appuis), descendre l'escalier, décor de la salle |
 | **T** | décor de la salle (ambiance, 5 000 pièces) |
 | **G** | panneau Sécurité |
-| **B** | boutique (améliorations, récompense du jour, Renaissance) |
+| **B** | boutique (Lucky coffres, STH coins, améliorations, récompense du jour, Renaissance) |
 | **Entrée** | écrire au quartier (Échap pour fermer) |
 | **V** | couper / rétablir son micro (discussion vocale activée par 🎙) |
 | **1 à 6** | outils du marché noir (brouilleur, fumigène, pied-de-biche, leurre, pince, déguisement) |
@@ -214,6 +241,10 @@ admin/index.html           panneau admin des ventes (src/admin/)
 src/shared/                catalog.json (œuvres, prix, règles), layout.json (géométrie), live.ts (barre live, PWA), theme.css
 src/game/                  client du jeu : main.ts (boucle, HUD, interactions), museumView.ts (musées), district.ts (quartier),
                            net.ts (WebSocket), api.ts (REST), guards.ts, convoy.ts, auction.ts, remote.ts…
+                           premium.ts (Lucky coffres, STH coins, paiement, animation d'ouverture), inventory.ts, tutorial.ts
+src/shared/changelog.json  journal des versions et feuille de route (accueil + jeu)
+server/payments.mjs        paiements des STH coins (FedaPay, PayGate, CinetPay, PayPal) vérifiés serveur à serveur
+tools/build-apk.mjs        APK Android (npm run android:apk)
 server/index.mjs           HTTP : API, barre live (SSE), fichiers statiques
 server/game.mjs            économie (le serveur fait autorité), comptes, classements
 server/district.mjs        quartiers temps réel, vols, outils, verrou, billets
@@ -238,6 +269,9 @@ tests/                     ws.mjs et auction.mjs (serveur), smoke.mjs (navigateu
 | POST | `/api/game/security` | `{ item: guards\|cameras\|lasers\|generator\|dog\|insurance\|vitrine, tier?, slot? }` : acheter une protection |
 | POST | `/api/game/blackmarket` | `{ tool }` (ou `{ tool: 'repro', workId }`) : acheter un outil ou une reproduction |
 | POST | `/api/game/upgrade`, `/rebirth`, `/daily` | boutique `{ id: speed\|lock\|vault\|gloves\|luck }`, Renaissance, récompense du jour |
+| POST | `/api/game/store`, `/place` | inventaire : ranger une œuvre en réserve `{ uid }`, l'exposer sur le premier emplacement libre `{ uid }` (remplacer : `/move`) |
+| POST | `/api/game/sth/exchange`, `/chest/buy`, `/chest/open` | STH coins contre pièces `{ sth }`, achat de coffres `{ id: simple\|rare\|epique\|legendaire, qty: 1\|5 }`, ouverture `{ id }` |
+| GET/POST | `/api/pay/config`, `/api/pay/create`, `/api/pay/order?id=`, `/api/pay/notify/:prestataire` | paiements des STH : moyens disponibles et offres, commande `{ pack, method, currency, phone? }`, suivi (vérifié auprès du prestataire), notifications des prestataires |
 | POST | `/api/game/push/subscribe`, `/api/game/push/prefs` | abonner un appareil aux notifications, régler les catégories |
 | GET | `/api/push/key`, `/api/config` | clé publique VAPID, configuration publique (Google) |
 | GET/POST/DELETE | `/api/admin/overview`, `/api/admin/sales[/:id[/announce\|/start]]`, `/api/admin/live` | panneau admin (en-tête `x-admin-token`) ; `start` seulement en mode test ; `live` : POST `{ kind: pluie\|arcenciel\|vitesse, minutes? }` lance un événement en direct, DELETE l'arrête |
@@ -258,6 +292,7 @@ $env:SAM_DEV="1"; npm run server
 Puis :
 
 ```bash
+npm run test:shop   # sans navigateur : STH coins, Lucky coffres (garantie), inventaire, paiements en mode test
 npm run test:server # sans navigateur :
                     #   tests/ws.mjs      vol, arrestation, cellule, verrou, musée endormi, gardes, caméras, vitrines, outils, étages,
                     #                     socles de statues, billet, Mythique, chasseur de primes, déguisement, reproductions, clés interdites

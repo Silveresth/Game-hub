@@ -222,8 +222,18 @@ export class Character {
     this.mixer.timeScale = k;
   }
 
+  /**
+   * Pose de saut (0 = au sol, 1 = en l'air) : les modèles humains n'ont pas d'animation de saut,
+   * on replie donc les jambes (genou avant levé, l'autre jambe tirée en arrière), comme un saut de course.
+   */
+  setAir(k: number): void {
+    this.air = Math.max(0, Math.min(1, k));
+  }
+
+  private air = 0;
+
   update(dt: number): void {
-    // pose assise de l'image précédente retirée avant l'animation (sinon, sur un os que l'animation
+    // pose de l'image précédente retirée avant l'animation (sinon, sur un os que l'animation
     // ne pilote pas, la rotation s'additionnerait à chaque image)
     if (this.legPose.length) this.legs.forEach((b, i) => b.quaternion.copy(this.legPose[i]));
     this.mixer.update(dt);
@@ -231,6 +241,14 @@ export class Character {
       this.legPose = this.legs.map((b) => b.quaternion.clone());
       // cuisses à l'horizontale (UpperLeg.*), genoux pliés (LowerLeg.*)
       this.legs.forEach((b) => b.rotateX(b.name.startsWith('Upper') ? SIT_THIGH : SIT_KNEE));
+    } else if (this.air > 0.01) {
+      this.legPose = this.legs.map((b) => b.quaternion.clone());
+      const a = this.air;
+      this.legs.forEach((b) => {
+        const left = b.name.endsWith('L');
+        if (b.name.startsWith('Upper')) b.rotateX((left ? -1.1 : 0.35) * a);
+        else b.rotateX((left ? 1.45 : 1.05) * a);
+      });
     } else this.legPose = [];
   }
 

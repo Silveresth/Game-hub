@@ -99,3 +99,8 @@ app/src/main/assets/public
 app/src/main/assets/capacitor.config.json
 app/src/main/assets/capacitor.plugins.json
 app/src/main/res/xml/config.xml
+
+# clé de signature de l'application (à garder précieusement, jamais dans git)
+keystore.properties
+*.jks
+*.keystore

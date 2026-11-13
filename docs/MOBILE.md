@@ -5,35 +5,64 @@ Le jeu se met à jour sans republier l'application : seule la coque (icône, ple
 
 Ce que fait la coque :
 - plein écran immersif : barres d'état et de navigation masquées (un balayage depuis le bord les fait réapparaître un instant) ;
+- **écran à l'horizontale** (paysage, dans les deux sens) : joystick à gauche, actions à droite ;
 - l'écran reste allumé pendant la partie, et l'affichage va jusque sous l'encoche de la caméra ;
 - permission du micro pour la discussion vocale (demandée seulement quand le joueur touche 🎙) ;
 - une page « Le musée est injoignable » si le serveur ne répond pas ;
-- icône et écran de démarrage tirés du logo (`npm run android:assets` les régénère).
+- icône et écran de démarrage tirés du logo (`npm run android:assets` les régénère) ;
+- les pages de paiement (FedaPay, CinetPay, PayPal) s'ouvrent dans le navigateur du téléphone ; au retour dans
+  l'application, les STH coins sont crédités tout seuls.
 
 Fichiers : `capacitor.config.ts` (adresse du jeu, identifiant `fr.stealamasterpiece.app`), `mobile/www/` (page de repli),
-`android/` (projet Android Studio), `android/app/src/main/java/fr/stealamasterpiece/app/MainActivity.java` (plein écran).
+`android/` (projet Android Studio), `android/app/src/main/java/fr/stealamasterpiece/app/MainActivity.java` (plein écran),
+`android/app/src/main/AndroidManifest.xml` (orientation paysage), `tools/build-apk.mjs` (construction).
 
-## Construire l'application Android
+## Construire l'APK en une commande
 
-Prérequis : Android Studio (avec le SDK Android), et le jeu déjà en ligne sur Render.
+Prérequis (déjà présents sur ce poste) : JDK 17 (`JAVA_HOME`), SDK Android (`ANDROID_HOME`). Le jeu doit être en ligne.
 
-1. Indiquez l'adresse du jeu, puis copiez la configuration dans le projet Android :
+```powershell
+$env:SAM_GAME_URL="https://jouer.mondomaine.fr"; npm run android:apk
+```
+
+Sans `SAM_GAME_URL`, l'application ouvre `https://steal-a-masterpiece.onrender.com` (l'adresse que Render donne au
+service de `render.yaml`). **Refaites la commande si l'adresse de votre jeu est différente.**
+
+Résultat dans `dist-apk/` :
+- `steal-a-masterpiece-<version>-test.apk` : version de test, à copier sur un téléphone Android et à installer
+  (autoriser « sources inconnues »). Elle est signée avec la clé de débogage de cet ordinateur : les mises à jour
+  suivantes construites ici s'installent par-dessus.
+- avec une clé de publication (ci-dessous) : `steal-a-masterpiece-<version>.apk` et `.aab` (Google Play).
+
+## Version à publier (clé de signature)
+
+1. Créez votre clé **une seule fois** et gardez-la précieusement (sans elle, impossible de publier une mise à jour) :
    ```powershell
-   $env:SAM_GAME_URL="https://jouer.mondomaine.fr"; npm run android:sync
+   keytool -genkeypair -v -keystore android/sam-release.jks -alias sam -keyalg RSA -keysize 2048 -validity 10000
    ```
-2. Ouvrez le projet : `npm run android:open` (Android Studio s'ouvre sur `android/`).
-3. Essai : branchez un téléphone (mode développeur, débogage USB) et cliquez sur ▶ *Run*.
-4. Version à publier : *Build → Generate Signed App Bundle / APK*, choisissez *Android App Bundle*, créez votre clé de signature
-   (gardez-la précieusement : sans elle, impossible de publier une mise à jour), puis envoyez le fichier `.aab` sur la Google Play Console.
+2. Créez `android/keystore.properties` (ignoré par git) :
+   ```
+   storeFile=sam-release.jks
+   storePassword=VOTRE_MOT_DE_PASSE
+   keyAlias=sam
+   keyPassword=VOTRE_MOT_DE_PASSE
+   ```
+3. `npm run android:apk` construit alors aussi l'APK et l'AAB signés. Envoyez le `.aab` sur la Google Play Console.
 
-Refaites l'étape 1 chaque fois que l'adresse du jeu change. Pour changer l'icône ou l'écran de démarrage : modifiez
-`public/icons/icon.svg` ou `public/logo.svg`, puis `npm run android:assets`.
+Avant chaque nouvelle publication, augmentez `versionCode` (et `versionName`) dans `android/app/build.gradle`.
+
+## Ouvrir le projet dans Android Studio
+
+`npm run android:sync` (après avoir changé `SAM_GAME_URL`), puis `npm run android:open`. ▶ *Run* sur un téléphone branché
+(mode développeur, débogage USB).
 
 ## À savoir
 
+- **Paiements et Google Play** : pour une application publiée sur le Play Store, Google impose son propre système de
+  paiement pour les achats numériques (les STH coins). L'APK installé directement n'est pas concerné. Voir
+  [PAIEMENTS.md](PAIEMENTS.md).
 - **Connexion Google** : Google refuse la connexion dans une vue web intégrée ; le bouton est donc masqué dans l'application.
-  Les joueurs se connectent avec leur e-mail et leur mot de passe. Un compte créé avec Google sur le site peut ajouter
-  un e-mail et un mot de passe dans « Compte », puis se connecter avec eux dans l'application.
+  Les joueurs se connectent avec leur e-mail et leur mot de passe.
 - **iPhone** : il faut un Mac avec Xcode. `npm install --save-dev @capacitor/ios@6.2.0`, `npx cap add ios`, puis `npx cap open ios`.
   Apple refuse parfois les applications qui ne font qu'afficher un site web (règle 4.2) ; la version web installable
   (écran d'accueil de Safari) reste une alternative sans magasin.

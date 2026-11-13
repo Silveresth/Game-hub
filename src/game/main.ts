@@ -24,6 +24,10 @@ import { Pedestrians, Visitors } from './visitors';
 import { Input } from './input';
 import { Sfx } from './sfx';
 import { CATALOG, incomeOf, money, perSec, work } from './catalog';
+import { Premium } from './premium';
+import { Inventory, type InvTab } from './inventory';
+import { Tutorial, type TutoFacts } from './tutorial';
+import { CHANGELOG, GAME_VERSION, roadmapHtml, versionHtml } from '../shared/changelog';
 
 const liveBar = mountLiveBar();
 setupPwa('../sw.js');
@@ -37,16 +41,18 @@ const canvas = $<HTMLCanvasElement>('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
 renderer.setSize(innerWidth, innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// « Neutre » (Khronos PBR Neutral) au lieu d'ACES : les couleurs gardent leur saturation (ACES les délavait)
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.08;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#7ea2c6', 90, 260); // Ciel azur avec brume atmosphérique
+scene.fog = new THREE.Fog('#9cc6ee', 100, 280); // Ciel azur avec brume atmosphérique légère
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.5;
-scene.add(new THREE.HemisphereLight(0x7ab2ff, 0x5a4a35, 1.3));
-const sun = new THREE.DirectionalLight(0xfff4e0, 2.8);
+scene.environmentIntensity = 0.45;
+scene.add(new THREE.HemisphereLight(0x9cd0ff, 0x6f8f4a, 1.45));
+const sun = new THREE.DirectionalLight(0xfff0d6, 3.0);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 });
@@ -88,20 +94,44 @@ $('qualityBtn').onclick = () => {
 };
 applyQuality();
 
-const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 1200);
+const BASE_FOV = 58;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.1, 1200);
 const orbit = new OrbitControls(camera, canvas);
 orbit.enableDamping = true;
+orbit.dampingFactor = 0.14; // (0,05 par défaut : la caméra « glissait » longtemps, sensation de mollesse)
+orbit.rotateSpeed = matchMedia('(pointer: coarse)').matches ? 1.15 : 0.85;
 orbit.enablePan = false;
 orbit.minDistance = 4;
 orbit.maxDistance = 24;
 orbit.minPolarAngle = 0.35;
 orbit.maxPolarAngle = 1.32;
-// Contrôle caméra style Roblox / jeu d'exploration : clic droit pour pivoter, molette pour zoomer
+// Caméra : cliquer-glisser avec le bouton gauche OU droit pour tourner (avant : clic droit maintenu seulement), molette pour zoomer
 orbit.mouseButtons = {
-  LEFT: null,
+  LEFT: THREE.MOUSE.ROTATE,
   MIDDLE: THREE.MOUSE.DOLLY,
   RIGHT: THREE.MOUSE.ROTATE,
 };
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+/** Le joueur tourne la caméra lui-même : la caméra automatique (derrière le personnage) attend qu'il ait fini. */
+let camDragging = false;
+let camReleasedAt = -1e9;
+/** Rotation de caméra faite par le joueur (radians cumulés), pour le tutoriel. */
+let camTurnTotal = 0;
+let lastAzimuth = 0;
+orbit.addEventListener('start', () => {
+  camDragging = true;
+  lastAzimuth = orbit.getAzimuthalAngle();
+});
+orbit.addEventListener('end', () => {
+  camDragging = false;
+  camReleasedAt = performance.now();
+});
+orbit.addEventListener('change', () => {
+  if (!camDragging) return;
+  const a = orbit.getAzimuthalAngle();
+  camTurnTotal += Math.abs(Math.atan2(Math.sin(a - lastAzimuth), Math.cos(a - lastAzimuth)));
+  lastAzimuth = a;
+});
 
 const hall = new AuctionHall();
 hall.resize(innerWidth, innerHeight);
@@ -280,10 +310,19 @@ function applyState(s: PlayerState): void {
   renderToolbar();
   if ($('security').classList.contains('open')) renderSecurity();
   if ($('market').classList.contains('open')) renderMarket();
-  if ($('shop').classList.contains('open')) renderShop();
+  if ($('shop').classList.contains('open')) renderShopPane();
+  if ($('inventory').classList.contains('open')) inventory.render();
+  // STH coins et coffres à ouvrir (pastille du bouton 🎒)
+  $('sthCoins').textContent = money(s.sth ?? 0);
+  $('shopSth').textContent = (s.sth ?? 0).toLocaleString('fr-FR');
+  $('invSth').textContent = (s.sth ?? 0).toLocaleString('fr-FR');
+  const toOpen = Inventory.chestCount(s);
+  $('invBadge').hidden = !toOpen;
+  $('invBadge').textContent = String(toOpen);
   // invité : on l'invite à créer un compte pour ne pas perdre son musée
   const guestNow = !s.account.email && !s.account.google;
-  $('renameBtn').textContent = guestNow ? 'Sauvegarder' : 'Compte';
+  $('renameBtn').textContent = guestNow ? '💾 Sauver' : '👤';
+  $('renameBtn').title = guestNow ? 'Sauvegarder : créez un compte pour retrouver votre musée partout' : 'Compte : nom, apparence, connexion';
   $('renameBtn').classList.toggle('save', guestNow);
   $('dailyBtn').hidden = !s.daily.claimable;
   $('dailyBtn').title = s.daily.claimable ? `Récompense du jour : +${money(s.daily.reward)} (série ${s.daily.streak})` : '';
@@ -318,7 +357,7 @@ function renderHud(): void {
     $('questClaim').textContent = `Récupérer ${money(q.reward)} pièces`;
     $('quest').classList.toggle('done', q.done);
   }
-  $('museumName').textContent = state.name;
+  $('museumName').textContent = `${state.name} · niveau ${state.level}`;
   $('coins').textContent = money(state.coins);
   $('income').textContent = `+${perSec(state.income)} /s`;
   $('slotsInfo').textContent = `${shown}/${state.slots} œuvres`;
@@ -379,26 +418,144 @@ let crowbarArmed = false;
 let decorRoomIndex: number | null = null;
 
 /** Panneaux superposés (un seul ouvert à la fois). */
-const OVERLAYS = ['security', 'market', 'help', 'boards', 'decor', 'shop', 'social'] as const;
-const anyOverlayOpen = () => OVERLAYS.some((id) => $(id).classList.contains('open')) || $('welcome').classList.contains('open');
+const OVERLAYS = ['security', 'market', 'help', 'boards', 'decor', 'shop', 'social', 'inventory', 'news'] as const;
+const anyOverlayOpen = () => OVERLAYS.some((id) => $(id).classList.contains('open')) || $('welcome').classList.contains('open') || !$('chestOpen').hidden;
 
-function openOverlay(id: 'security' | 'market' | 'decor' | 'shop' | 'social'): void {
+function openOverlay(id: 'security' | 'market' | 'decor' | 'shop' | 'social' | 'inventory' | 'news'): void {
   if (!state) return;
   if (chat.isOpen) chat.close();
+  for (const o of OVERLAYS) if (o !== id) $(o).classList.remove('open');
+  $('menu').hidden = true;
   $(id).classList.add('open');
   input.enabled = false;
   if (id === 'security') renderSecurity();
   else if (id === 'market') renderMarket();
   else if (id === 'decor') renderDecor();
-  else if (id === 'shop') renderShop();
-  else if (id === 'social') renderSocial();
+  else if (id === 'shop') {
+    tuto.shopOpened = true;
+    renderShopPane();
+  } else if (id === 'social') renderSocial();
+  else if (id === 'inventory') {
+    tuto.inventoryOpened = true;
+    inventory.render();
+  } else if (id === 'news') renderNews();
 }
 function closeOverlays(): void {
   for (const id of OVERLAYS) $(id).classList.remove('open');
   if (!$('welcome').classList.contains('open')) input.enabled = true;
 }
 document.querySelectorAll<HTMLElement>('[data-close]').forEach((b) => (b.onclick = closeOverlays));
-for (const id of ['security', 'market', 'boards', 'decor', 'shop', 'social']) $(id).addEventListener('pointerdown', (e) => e.target === $(id) && closeOverlays());
+for (const id of ['security', 'market', 'boards', 'decor', 'shop', 'social', 'inventory', 'news', 'help']) $(id).addEventListener('pointerdown', (e) => e.target === $(id) && closeOverlays());
+
+// ---------------------------------------------------------------- menu ☰, nouveautés, tutoriel
+
+$('menuBtn').onclick = (e) => {
+  e.stopPropagation();
+  $('menu').hidden = !$('menu').hidden;
+};
+addEventListener('pointerdown', (e) => {
+  if (!$('menu').hidden && !(e.target as HTMLElement).closest('#menu, #menuBtn')) $('menu').hidden = true;
+});
+$('verLabel').textContent = `Version ${GAME_VERSION}`;
+$('newsBtn').onclick = () => openOverlay('news');
+function renderNews(): void {
+  $('newsBody').innerHTML = `<p>Version actuelle : <b>${GAME_VERSION}</b></p>${CHANGELOG.versions.slice(0, 4).map((v, i) => versionHtml(v, i === 0)).join('')}
+    <h2>À venir</h2>${roadmapHtml()}`;
+}
+
+/** Faits observés pour valider les étapes du tutoriel. */
+const tuto = { moved: 0, jumps: 0, runTime: 0, collected: 0, inventoryOpened: false, shopOpened: false };
+const tutorial = new Tutorial($('tuto'), document.body.classList.contains('touch'));
+function startTutorial(): void {
+  closeOverlays();
+  $('menu').hidden = true;
+  tuto.inventoryOpened = false;
+  tuto.shopOpened = false;
+  tutorial.start();
+}
+$('tutoBtn').onclick = startTutorial;
+$('helpTuto').onclick = () => {
+  $('help').classList.remove('open');
+  startTutorial();
+};
+$('rotateOk').onclick = () => document.body.classList.add('rotate-ok');
+// l'objectif se réduit d'un appui sur son titre
+$('quest').querySelector('.qhead')!.addEventListener('click', () => {
+  $('quest').classList.toggle('mini');
+  renderTimers();
+});
+
+// ---------------------------------------------------------------- boutique : onglets, Lucky coffres, STH coins ; inventaire
+
+let shopTab: 'chests' | 'sth' | 'upgrades' = 'chests';
+const premium = new Premium(
+  {
+    state: () => state,
+    apply: (s) => applyState(s),
+    guarded: (fn) => guarded(fn),
+    toast: (m) => toast(m),
+    banner: (t, s) => banner(t, s),
+    sfx,
+    celebrate: (n) => confetti(pos.clone().setY(floor * FLOOR_H), n),
+    openInventory: (tab) => openInventory((tab as InvTab) ?? 'chests'),
+    refresh: () => refreshState(),
+    inNativeApp: !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.(),
+  },
+  $('shopChests'),
+  $('shopSthPane'),
+);
+premium.onNeedSth = () => setShopTab('sth');
+premium.opener.onAgain = (id) => void premium.openChest(id);
+premium.opener.onInventory = () => openInventory('chests');
+
+function setShopTab(tab: typeof shopTab): void {
+  shopTab = tab;
+  $('shopTabs').querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  $('shopChests').hidden = tab !== 'chests';
+  $('shopSthPane').hidden = tab !== 'sth';
+  $('shopBody').hidden = tab !== 'upgrades';
+  renderShopPane();
+}
+function renderShopPane(): void {
+  if (shopTab === 'chests') premium.renderChests();
+  else if (shopTab === 'sth') premium.renderSth();
+  else renderShop();
+}
+$('shopTabs').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]');
+  if (b) setShopTab(b.dataset.tab as typeof shopTab);
+});
+function openShop(tab: typeof shopTab = shopTab): void {
+  openOverlay('shop');
+  setShopTab(tab);
+}
+$('sthChip').addEventListener('click', (e) => {
+  e.stopPropagation();
+  openShop('sth');
+});
+
+const inventory = new Inventory(
+  {
+    state: () => state,
+    apply: (s) => applyState(s),
+    guarded: (fn) => guarded(fn),
+    toast: (m) => toast(m),
+    sfx,
+    slotWhere: (slot) => slotWhere(slot),
+    openChest: (id) => {
+      closeOverlays();
+      void premium.openChest(id);
+    },
+    openShop: (tab) => openShop(tab),
+  },
+  $('invTabs'),
+  $('invBody'),
+);
+function openInventory(tab?: InvTab): void {
+  if (tab) inventory.tab = tab;
+  openOverlay('inventory');
+}
+$('invBtn').onclick = () => openInventory();
 
 // ---------------------------------------------------------------- panneau « Amis et quartier »
 
@@ -840,6 +997,9 @@ addEventListener('keydown', (e) => {
   } else if (e.code === 'KeyB' && !e.repeat) {
     if ($('shop').classList.contains('open')) closeOverlays();
     else if (!anyOpen) openOverlay('shop');
+  } else if (e.code === 'KeyI' && !e.repeat) {
+    if ($('inventory').classList.contains('open')) closeOverlays();
+    else if (!anyOpen) openInventory();
   } else if (e.code === 'KeyT' && !e.repeat) {
     if ($('decor').classList.contains('open')) closeOverlays();
     else if (!anyOpen && currentRoom !== null) {
@@ -946,12 +1106,24 @@ function setPrompt(items: Array<{ key: string; text: string; poor?: boolean }>):
 }
 
 $('muteBtn').onclick = () => ($('muteBtn').textContent = sfx.toggleMute() ? '🔇' : '🔊');
-$('helpBtn').onclick = () => $('help').classList.add('open');
+$('helpBtn').onclick = () => {
+  $('menu').hidden = true;
+  $('help').classList.add('open');
+};
 $('helpClose').onclick = () => $('help').classList.remove('open');
 addEventListener('pointerdown', () => sfx.unlock());
 addEventListener('keydown', (e) => {
   sfx.unlock();
   if (e.code === 'Escape') {
+    // 0. animation d'ouverture d'un coffre, menu ☰
+    if (!$('chestOpen').hidden) {
+      premium.opener.close();
+      return;
+    }
+    if (!$('menu').hidden) {
+      $('menu').hidden = true;
+      return;
+    }
     // 1. un panneau ouvert se ferme d'abord (sans toucher à l'œuvre que l'on tient en mains)
     if (OVERLAYS.some((id) => $(id).classList.contains('open'))) {
       closeOverlays();
@@ -1042,6 +1214,7 @@ async function doCollect(): Promise<void> {
   if (!r) return;
   applyState(r.state);
   if (r.collected > 0) {
+    tuto.collected++;
     sfx.coin(Math.ceil(Math.log10(r.collected + 1)));
     bumpWallet();
     if (myView) {
@@ -1942,7 +2115,7 @@ net.onStatus = (ok) => {
 setInterval(() => {
   if (!playing || !net.connected) return;
   const sp = vel.length();
-  net.send({ t: 'pos', x: Math.round(pos.x * 100) / 100, z: Math.round(pos.z * 100) / 100, f: floor, ry: Math.round(facing * 100) / 100, anim: pos.y > 0.05 ? 'Jump' : sp > 5.6 ? 'Running' : sp > 0.3 ? 'Walking' : 'Idle' });
+  net.send({ t: 'pos', x: Math.round(pos.x * 100) / 100, z: Math.round(pos.z * 100) / 100, f: floor, ry: Math.round(facing * 100) / 100, anim: pos.y > 0.05 ? 'Jump' : sp > 6.2 ? 'Running' : sp > 0.3 ? 'Walking' : 'Idle' });
 }, 100);
 
 // ================================================================== démarrage
@@ -1996,16 +2169,27 @@ async function start(name?: string, color?: string, country?: string, pre?: Awai
   else if (r.offlineGain > 0) banner('Bon retour !', `Votre caisse a gagné ${money(r.offlineGain)} pièces en votre absence`);
   else banner(`Bon retour, ${r.state.name}`);
   if (r.state.daily.claimable) setTimeout(() => toast(`🎁 Récompense du jour : +${money(r.state.daily.reward)} (bouton 🎁 ou boutique)`), 3600);
-  // nouveautés expliquées une seule fois : parapluie et double saut
-  try {
-    if (!localStorage.getItem('sam-tip-bonk')) {
-      localStorage.setItem('sam-tip-bonk', '1');
-      const touch = document.body.classList.contains('touch');
-      setTimeout(() => toast(touch ? '☂ Bouton violet : coup de parapluie ! Un voleur touché lâche son butin.' : '☂ Touche F : coup de parapluie ! Un voleur touché lâche son butin. Espace deux fois : double saut.'), 7500);
+  // tutoriel : automatique pour un nouveau joueur (ou un joueur qui débute) ; proposé une fois aux autres
+  if (!Tutorial.seen()) {
+    if (r.created || (r.state.quest?.index ?? 99) < 3) setTimeout(startTutorial, 1800);
+    else {
+      setTimeout(() => toast('🎓 Nouveau : un tutoriel et les Lucky coffres ! Menu ☰ → Tutoriel'), 4500);
+      try {
+        localStorage.setItem('sam-tuto-v2', '1');
+      } catch {
+        /* stockage indisponible */
+      }
     }
-  } catch {
-    /* stockage indisponible */
   }
+  // retour de la page de paiement (/game/?pay=…) ou paiement en attente : suivi jusqu'au crédit des STH
+  {
+    const params = new URLSearchParams(location.search);
+    const pay = params.get('pay');
+    if (pay) history.replaceState(null, '', location.pathname);
+    premium.resume(pay && /^sth_[A-Za-z0-9_-]{10,40}$/.test(pay) ? pay : null);
+    if (pay) setTimeout(() => openShop('sth'), 600);
+  }
+  void premium.loadConfig();
   setInterval(() => void refreshConvoy(), 5000);
   setInterval(() => void refreshState(), 15000);
   setInterval(() => void refreshBoard(), 10000);
@@ -2059,6 +2243,22 @@ if (countriesEl && CATALOG.countries) {
     b.onclick = () => markCountry(c.code);
     countriesEl.appendChild(b);
   }
+}
+/** Pays proposé à l'inscription : la région de la langue du navigateur (fr-TG → Togo), sinon la France. */
+function detectCountry(): string {
+  const known = new Set((CATALOG.countries ?? []).map((c) => c.code));
+  for (const lang of navigator.languages ?? [navigator.language]) {
+    const region = /[-_]([A-Za-z]{2})$/.exec(lang)?.[1]?.toUpperCase();
+    if (region && known.has(region)) return region;
+  }
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const byTz: Record<string, string> = { 'Africa/Lome': 'TG', 'Africa/Porto-Novo': 'BJ', 'Africa/Abidjan': 'CI', 'Africa/Dakar': 'SN', 'Africa/Ouagadougou': 'BF', 'Africa/Bamako': 'ML', 'Africa/Niamey': 'NE', 'Africa/Douala': 'CM', 'Africa/Libreville': 'GA', 'Africa/Brazzaville': 'CG', 'Africa/Kinshasa': 'CD', 'Africa/Accra': 'GH', 'Africa/Lagos': 'NG', 'Africa/Conakry': 'GN', 'Africa/Casablanca': 'MA' };
+    if (byTz[tz] && known.has(byTz[tz])) return byTz[tz];
+  } catch {
+    /* pas de fuseau horaire */
+  }
+  return 'FR';
 }
 function markCountry(c: string): void {
   chosenCountry = c;
@@ -2128,7 +2328,7 @@ function openAuth(mode: AuthMode): void {
     markSkin(state.skin ?? 0);
   } else if (mode === 'signup') {
     markColor(CATALOG.colors[0]);
-    markCountry('FR');
+    markCountry(detectCountry());
     markSkin(0);
   }
   $('welcome').classList.add('open');
@@ -2375,12 +2575,16 @@ function updatePlayer(dt: number): void {
   const jailed = jailUntil > serverNow();
   // baskets de sprint (boutique) et « super vitesse » : mêmes bonus que ceux que le serveur autorise
   const boost = (1 + (state?.upgrades.speed.value ?? 0)) * (liveKind() === 'vitesse' ? 1.6 : 1);
-  const speed = (input.running() ? 8.6 : 5.4) * boost * (heist ? 0.72 : 1) * (stealing || jailed ? 0 : 1);
-  // sonné : on glisse sur l'élan du coup reçu, sans pouvoir se diriger
-  const responsiveness = stunned ? 3 : mag > 0.05 ? 26 : 18;
+  const running = input.running();
+  const speed = (running ? 8.6 : 5.0) * boost * (heist ? 0.72 : 1) * (stealing || jailed ? 0 : 1);
+  // sonné : on glisse sur l'élan du coup reçu, sans pouvoir se diriger ; en l'air, un peu moins de contrôle (élan)
+  const air = pos.y > 0.05;
+  const responsiveness = stunned ? 3 : mag > 0.05 ? (air ? 11 : 24) : air ? 4 : 20;
   const k = 1 - Math.exp(-responsiveness * dt);
-  vel.x += ((mag > 0.05 ? (dx / mag) * speed * mag : 0) - vel.x) * k;
-  vel.y += ((mag > 0.05 ? (dz / mag) * speed * mag : 0) - vel.y) * k;
+  // au tactile, l'inclinaison du joystick dose la vitesse ; au clavier, pleine vitesse tout de suite
+  const amount = Math.min(1, mag * (running ? 1.15 : 1));
+  vel.x += ((mag > 0.05 ? (dx / mag) * speed * amount : 0) - vel.x) * k;
+  vel.y += ((mag > 0.05 ? (dz / mag) * speed * amount : 0) - vel.y) * k;
 
   const nx = pos.x + vel.x * dt;
   const nz = pos.z + vel.y * dt;
@@ -2395,32 +2599,55 @@ function updatePlayer(dt: number): void {
     vel.x = 0;
   } else vel.set(0, 0);
 
-  // saut, puis double saut en l'air (petit nuage sous les pieds)
-  if (input.consume('jump') && !stunned && !stealing && !jailed) {
-    if (pos.y <= 0.001) {
-      vy = 7.2;
+  // saut, puis double saut en l'air (petit nuage sous les pieds).
+  // « Coyote time » (on peut encore sauter 0,1 s après avoir quitté le sol) et saut mémorisé 0,15 s avant d'atterrir :
+  // le saut part toujours quand on appuie, il ne « rate » plus.
+  const now = performance.now();
+  if (pos.y <= 0.001) groundedAt = now;
+  const wantJump = input.consume('jump') || (now - input.jumpAt < 150 && pos.y <= 0.001 && jumps === 0 && input.jumpAt > lastJumpAt);
+  if (wantJump && !stunned && !stealing && !jailed) {
+    if (pos.y <= 0.001 || (now - groundedAt < 100 && jumps === 0)) {
+      vy = 8.4;
       jumps = 1;
+      lastJumpAt = now;
       sfx.jump();
-      player.gesture('Jump', 'Idle');
+      squash = -0.22; // étirement au décollage
+      dust(pos.clone().setY(floor * FLOOR_H), 4, 0.5);
+      tuto.jumps++;
     } else if (jumps === 1) {
-      vy = 6.6;
+      vy = 7.6;
       jumps = 2;
+      lastJumpAt = now;
       sfx.jump2();
-      dust(pos.clone().setY(floor * FLOOR_H + pos.y), 5, 0.6);
-      player.gesture('Jump', 'Idle');
+      squash = -0.18;
+      spin = Math.PI * 2; // petite vrille au double saut
+      dust(pos.clone().setY(floor * FLOOR_H + pos.y), 6, 0.6);
+      tuto.jumps++;
     }
   }
-  vy -= 20 * dt;
+  // gravité plus forte à la descente : saut franc, pas « flottant »
+  vy -= (vy > 0 ? 23 : 30) * dt;
   pos.y = Math.max(0, pos.y + vy * dt);
   if (pos.y > 0.05) airborne = true;
   if (pos.y === 0) {
-    if (airborne && vy < -4) dust(pos.clone().setY(floor * FLOOR_H), 6, 0.7); // atterrissage
+    if (airborne && vy < -4) {
+      dust(pos.clone().setY(floor * FLOOR_H), 7, 0.75); // atterrissage
+      squash = Math.min(0.3, -vy * 0.025); // écrasement à l'atterrissage
+    }
     airborne = false;
     vy = 0;
     jumps = 0;
   }
+  // pose en l'air (jambes repliées), écrasement / étirement, vrille du double saut
+  airPose += ((pos.y > 0.08 ? 1 : 0) - airPose) * (1 - Math.exp(-dt * (pos.y > 0.08 ? 16 : 22)));
+  player.setAir(airPose);
+  squash += (0 - squash) * (1 - Math.exp(-dt * 12));
+  spin = Math.max(0, spin - dt * 14);
+  player.root.scale.set(1 + squash * 0.5, 1 - squash, 1 + squash * 0.5);
 
   const sp = vel.length();
+  if (sp > 0.5 && pos.y === 0) tuto.moved += sp * dt;
+  if (sp > 6.2) tuto.runTime += dt;
   // poussière de course
   if (sp > 6.4 && pos.y === 0) {
     dustAcc += dt;
@@ -2429,7 +2656,8 @@ function updatePlayer(dt: number): void {
       dust(pos.clone().setY(floor * FLOOR_H).addScaledVector(new THREE.Vector3(vel.x, 0, vel.y).normalize(), -0.3));
     }
   }
-  // sonné : il titube
+  // sonné : il titube (ordre YXZ : l'inclinaison avant se fait dans le repère du personnage)
+  player.root.rotation.order = 'YXZ';
   player.root.rotation.z = stunned ? Math.sin(performance.now() / 55) * 0.12 : 0;
   if (sp > 0.25 && !stunned) {
     // Orientation rapide et nette vers la direction de course
@@ -2438,11 +2666,22 @@ function updatePlayer(dt: number): void {
     d = Math.atan2(Math.sin(d), Math.cos(d));
     facing += d * Math.min(1, dt * 20);
   }
-  player.play(sp > 5.8 ? 'Running' : sp > 0.25 ? 'Walking' : 'Idle');
+  const anim = sp > 6.2 ? 'Running' : sp > 0.25 ? 'Walking' : 'Idle';
+  player.play(anim);
+  // cadence des pas accordée à la vitesse (sinon les pieds glissent et le personnage paraît mou)
+  player.setTimeScale(anim === 'Running' ? Math.min(1.5, Math.max(0.95, sp / 7.4)) : anim === 'Walking' ? Math.min(1.45, Math.max(0.8, sp / 3.9)) : 1);
   player.root.position.copy(pos);
   player.root.position.y += floor * FLOOR_H;
-  player.root.rotation.y = facing;
+  player.root.rotation.y = facing + spin;
+  // légère inclinaison vers l'avant en courant
+  player.root.rotation.x = stunned ? 0 : Math.min(0.12, sp * 0.011) * (pos.y > 0.05 ? 0.4 : 1);
 }
+
+let groundedAt = 0;
+let lastJumpAt = 0;
+let airPose = 0;
+let squash = 0;
+let spin = 0;
 
 /** Escalier : E pour monter, R pour descendre (le serveur vérifie qu'on est bien au pied de l'escalier). */
 function stairsInteraction(items: Array<{ key: string; text: string; poor?: boolean }>): boolean {
@@ -2573,7 +2812,7 @@ function interactions(): void {
     items.push({ key: 'E', text: 'Marché noir : brouilleur, fumigène, pied-de-biche, leurre, pince, déguisement' });
     if (input.consume('action')) openOverlay('market');
   } else if (shopD < 2.8) {
-    items.push({ key: 'E', text: 'Boutique : améliorations permanentes, récompense du jour, Renaissance' });
+    items.push({ key: 'E', text: 'Boutique : Lucky coffres, STH coins, améliorations, Renaissance' });
     if (input.consume('action')) openOverlay('shop');
   } else if (lockD < 1.2) {
     if (museum.isLocked(now)) items.push({ key: '🔒', text: `Portes verrouillées encore ${Math.ceil((museum.lockedUntil - now) / 1000)} s` });
@@ -2673,10 +2912,32 @@ const camDir = new THREE.Vector3();
 
 function updateCamera(dt: number): void {
   const target = pos.clone().add(new THREE.Vector3(0, 1.5 + floor * FLOOR_H, 0));
-  focus.lerp(target, 1 - Math.exp(-10 * dt));
+  // suivi plus serré (16 au lieu de 10) : la caméra ne traîne plus derrière le personnage
+  focus.lerp(target, 1 - Math.exp(-16 * dt));
   const delta = focus.clone().sub(orbit.target);
   orbit.target.add(delta);
   camera.position.add(delta);
+  // Caméra automatique : quand le personnage avance et que le joueur ne tourne pas la caméra lui-même,
+  // elle se replace doucement derrière lui (sauf s'il court vers la caméra : elle ne fait pas demi-tour).
+  const sp = vel.length();
+  if (playing && !camDragging && performance.now() - camReleasedAt > 1400 && sp > 1.5 && !stealing) {
+    const az = Math.atan2(camera.position.x - orbit.target.x, camera.position.z - orbit.target.z);
+    const behind = facing + Math.PI;
+    const d = Math.atan2(Math.sin(behind - az), Math.cos(behind - az));
+    if (Math.abs(d) < 2.3) {
+      const rate = (viewAt() ? 0.8 : 1.7) * Math.min(1, sp / 8);
+      const step = d * (1 - Math.exp(-rate * dt));
+      const off = camera.position.clone().sub(orbit.target);
+      off.applyAxisAngle(THREE.Object3D.DEFAULT_UP, step);
+      camera.position.copy(orbit.target).add(off);
+    }
+  }
+  // un peu plus de champ en pleine course : sensation de vitesse
+  const fov = BASE_FOV + (sp > 7 ? Math.min(7, (sp - 7) * 2.2) : 0);
+  if (Math.abs(camera.fov - fov) > 0.05) {
+    camera.fov += (fov - camera.fov) * (1 - Math.exp(-4 * dt));
+    camera.updateProjectionMatrix();
+  }
   // Dans un musée (sans toit), la caméra monte pour regarder par-dessus les murs ; dehors, elle redescend.
   const inside = !!viewAt();
   orbit.maxPolarAngle += ((inside ? 0.72 : 1.32) - orbit.maxPolarAngle) * (1 - Math.exp(-3 * dt));
@@ -2696,6 +2957,61 @@ function updateCamera(dt: number): void {
   if (hit) camera.position.copy(orbit.target).addScaledVector(camDir, Math.max(0.3, hit.distance - 0.3));
   sun.position.copy(focus).add(new THREE.Vector3(26, 42, 14));
   sun.target.position.copy(focus);
+}
+
+// ================================================================== flèche guide du tutoriel
+
+const guide = new THREE.Group();
+{
+  const gold = new THREE.MeshStandardMaterial({ color: 0xffc83d, emissive: 0xffa21a, emissiveIntensity: 0.9, metalness: 0.3, roughness: 0.35 });
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.1, 20), gold);
+  cone.rotation.x = Math.PI; // pointe vers le bas
+  cone.position.y = 0.55;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.9, 12), gold);
+  shaft.position.y = 1.5;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.07, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.85 }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.name = 'ring';
+  guide.add(cone, shaft, ring);
+  guide.visible = false;
+  scene.add(guide);
+}
+const guideTarget = new THREE.Vector3();
+
+/** Tutoriel : faits observés, puis position de la flèche dorée (camion, musée, caisse). */
+function updateTutorial(t: number): void {
+  if (!tutorial.active || !state) {
+    guide.visible = false;
+    return;
+  }
+  const facts: TutoFacts = {
+    moved: tuto.moved,
+    camTurn: camTurnTotal,
+    jumps: tuto.jumps,
+    runTime: tuto.runTime,
+    owned: state.artworks.length,
+    shown: state.artworks.filter((a) => a.slot !== null).length,
+    holding: !!(boughtToPlace || reorgSelected),
+    collected: tuto.collected,
+    inventoryOpened: tuto.inventoryOpened,
+    shopOpened: tuto.shopOpened,
+  };
+  tutorial.update(facts);
+  const kind = tutorial.target();
+  let at: THREE.Vector3 | null = null;
+  if (kind === 'truck') {
+    const n = convoy.nearest(pos, 200);
+    if (n) at = n.truck.artworkWorld().clone().setY(4.6);
+  } else if (kind === 'museum' && myView && !myView.contains(pos, floor)) at = spawnOf(myView.plot).clone().setY(0.2);
+  else if (kind === 'register' && myView && floor === 0) at = myView.registerPos.clone().setY(0.15);
+  guide.visible = !!at;
+  if (!at) return;
+  guideTarget.lerp(at, guideTarget.lengthSq() ? 0.2 : 1);
+  guide.position.copy(guideTarget);
+  guide.children.forEach((c) => {
+    if (c.name !== 'ring') c.position.y = (c === guide.children[0] ? 0.55 : 1.5) + 1.2 + Math.sin(t * 4) * 0.3;
+  });
+  guide.rotation.y = t * 2;
 }
 
 // ================================================================== boucle
@@ -2777,6 +3093,7 @@ renderer.setAnimationLoop(() => {
     renderTimers();
   }
   updateCoins(dt);
+  if (playing) updateTutorial(t);
   if (!camFrozen) updateCamera(dt);
   input.endFrame();
   // secousse (coup reçu) : décalage ajouté le temps du rendu seulement, pour ne pas dériver

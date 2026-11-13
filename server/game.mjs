@@ -1,6 +1,6 @@
 // Économie de Steal a Masterpiece (phase 1, solo) — le serveur fait autorité :
 // argent, caisse, revenus (en ligne / hors ligne), convoi, achats, agrandissement, revente, classement.
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { cleanSubscription } from './push.mjs';
 import { clientIp } from './ip.mjs';
@@ -266,6 +266,12 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     // code d'invitation à partager (jamais l'identifiant du compte)
     p.inviteCode ??= randomBytes(5).toString('base64url');
     p.skin ??= 0; // tenue du personnage (0 à 3)
+    // monnaie premium (STH coins), Lucky coffres non ouverts, compteurs de garantie, achats en argent réel
+    if (!Number.isFinite(p.sth) || p.sth < 0) p.sth = 0;
+    p.chests ??= {};
+    p.pity ??= {};
+    p.purchases ??= [];
+    p.stats.chests ??= 0;
     // une œuvre restée « en cours de vol » (serveur arrêté pendant un vol) revient à son propriétaire
     for (const a of p.artworks) delete a.carriedBy;
     return p;
@@ -433,11 +439,89 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   /** Une œuvre unique (Mythique) déjà possédée par un joueur ne peut pas repasser en vente. */
   const ownerOf = (workId) => [...players.values()].find((p) => p.artworks.some((a) => a.workId === workId && !a.repro)) ?? null;
 
+  // ---------------------------------------------------------------- monnaie premium (STH coins) et Lucky coffres
+
+  const PREMIUM = catalog.premium ?? { coinsPerSth: 150_000, minExchange: 10, maxExchange: 100_000, packs: [] };
+  const CHESTS = catalog.chests ?? {};
+  const BULK = catalog.chestBulk ?? { qty: 5, discount: 0.1 };
+  const RARITY_ORDER = ['commun', 'rare', 'epique', 'legendaire', 'mythique'];
+  const rank = (r) => RARITY_ORDER.indexOf(r);
+  /** Tirage équitable (générateur cryptographique) : un nombre dans [0, 1). */
+  const fairRandom = () => randomInt(0, 1_000_000_000) / 1_000_000_000;
+
+  /** Mythiques uniques que personne ne possède (recalculé au plus toutes les 2 s, et après chaque changement). */
+  let mythicCache = { at: 0, list: /** @type {any[]} */ ([]) };
+  function freeMythics() {
+    const now = Date.now();
+    if (now - mythicCache.at > 2000) mythicCache = { at: now, list: catalog.works.filter((w) => w.unique && !ownerOf(w.id)) };
+    return mythicCache.list;
+  }
+
+  /** Prix d'un achat de coffres : un lot (×5) bénéficie d'une remise. */
+  const chestCost = (id, qty) => Math.round(CHESTS[id].price * qty * (qty >= BULK.qty ? 1 - BULK.discount : 1));
+
+  /**
+   * Ouvre un coffre : rareté tirée selon les probabilités affichées, garantie (« pity ») si elle est due,
+   * œuvre au hasard dans cette rareté, cadre spécial selon les chances du coffre.
+   * Une Mythique n'est possible que si l'une d'elles est libre (unique sur tout le serveur), sinon c'est une Légendaire.
+   */
+  function rollChest(p, id) {
+    const c = CHESTS[id];
+    const entries = Object.entries(c.odds).filter(([, w]) => w > 0);
+    const total = entries.reduce((s, [, w]) => s + w, 0);
+    let r = fairRandom() * total;
+    let rarity = entries[entries.length - 1][0];
+    for (const [k, w] of entries) {
+      r -= w;
+      if (r < 0) {
+        rarity = k;
+        break;
+      }
+    }
+    let pityUsed = false;
+    if (c.pity) {
+      p.pity[id] = (p.pity[id] ?? 0) + 1;
+      if (rank(rarity) < rank(c.pity.rarity) && p.pity[id] >= c.pity.every) {
+        rarity = c.pity.rarity;
+        pityUsed = true;
+      }
+      if (rank(rarity) >= rank(c.pity.rarity)) p.pity[id] = 0;
+    }
+    let pool = [];
+    if (rarity === 'mythique') {
+      pool = freeMythics();
+      if (!pool.length) rarity = 'legendaire';
+    }
+    if (rarity !== 'mythique') pool = catalog.works.filter((w) => w.rarity === rarity && !w.unique);
+    const w = pool[Math.floor(fairRandom() * pool.length)];
+    let frame = 'normal';
+    if (!w.unique) {
+      const f = fairRandom() * 100;
+      const fr = c.frames ?? {};
+      if (f < (fr.arcenciel ?? 0)) frame = 'arcenciel';
+      else if (f < (fr.arcenciel ?? 0) + (fr.diamant ?? 0)) frame = 'diamant';
+      else if (f < (fr.arcenciel ?? 0) + (fr.diamant ?? 0) + (fr.dore ?? 0)) frame = 'dore';
+    }
+    return { workId: w.id, rarity, frame, pityUsed };
+  }
+
+  /** Crédit de STH coins après un paiement confirmé : une seule fois par commande (idempotent). */
+  function creditSth(playerId, sth, orderId, meta = {}) {
+    const p = players.get(playerId);
+    if (!p || !Number.isInteger(sth) || sth <= 0) return null;
+    if (p.purchases.some((x) => x.order === orderId)) return { already: true, sth: p.sth };
+    p.sth += sth;
+    p.purchases = [...p.purchases.slice(-49), { order: orderId, sth, at: Date.now(), ...meta }];
+    touch(p);
+    return { already: false, sth: p.sth };
+  }
+
   // ---------------------------------------------------------------- vols (appelés par le gestionnaire de quartiers)
 
   const listeners = [];
   const changed = (p) => {
     rankCache.at = 0; // une valeur de musée a pu changer : le classement est recalculé à la prochaine demande
+    mythicCache.at = 0; // une Mythique a pu changer de main
     listeners.forEach((fn) => fn(p));
   };
   const shielded = (p, now = Date.now()) => now - p.createdAt < BEGINNER_MS && value(p) < BEGINNER_VALUE;
@@ -711,6 +795,11 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       event: eventAt(Date.now()),
       inviteCode: p.inviteCode,
       skin: p.skin ?? 0,
+      // monnaie premium et inventaire des Lucky coffres
+      sth: Math.floor(p.sth),
+      chests: Object.fromEntries(Object.keys(CHESTS).map((id) => [id, p.chests[id] ?? 0])),
+      pity: Object.fromEntries(Object.keys(CHESTS).filter((id) => CHESTS[id].pity).map((id) => [id, { count: p.pity[id] ?? 0, every: CHESTS[id].pity.every, rarity: CHESTS[id].pity.rarity }])),
+      freeMythics: freeMythics().map((w) => w.id),
       // compte : l'e-mail n'est envoyé qu'à son propriétaire ; jamais le mot de passe ni son empreinte
       account: { email: p.email ?? null, password: !!p.passwordHash, google: !!p.googleKey },
     };
@@ -1308,6 +1397,92 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       return json(res, 200, { reward: d.reward, streak: d.streak, state: state(p) });
     }
 
+    // ------------------------------------------------------------ inventaire : réserve et emplacements
+
+    if (route === 'store' && req.method === 'POST') {
+      // ranger une œuvre exposée dans la réserve (elle ne rapporte plus tant qu'elle n'est pas raccrochée)
+      const a = p.artworks.find((x) => x.uid === body.uid);
+      if (!a) return json(res, 404, { error: 'Œuvre introuvable' });
+      if (a.carriedBy) return json(res, 409, { error: 'Cette œuvre est en train d’être volée !' });
+      if (a.slot === null) return json(res, 409, { error: 'Cette œuvre est déjà en réserve' });
+      accrue(p);
+      a.slot = null;
+      touch(p);
+      changed(p);
+      return json(res, 200, { state: state(p) });
+    }
+
+    if (route === 'place' && req.method === 'POST') {
+      // exposer une œuvre de la réserve sur le premier emplacement libre (pour remplacer une œuvre : route « move »)
+      const a = p.artworks.find((x) => x.uid === body.uid);
+      if (!a) return json(res, 404, { error: 'Œuvre introuvable' });
+      if (a.slot !== null) return json(res, 409, { error: 'Cette œuvre est déjà exposée' });
+      const slot = freeSlot(p, a.workId);
+      if (slot === null) return json(res, 409, { error: 'Aucun emplacement libre : choisissez une œuvre à remplacer, ou agrandissez votre musée' });
+      accrue(p);
+      a.slot = slot;
+      touch(p);
+      changed(p);
+      return json(res, 200, { slot, state: state(p) });
+    }
+
+    // ------------------------------------------------------------ STH coins et Lucky coffres
+
+    if (route === 'sth/exchange' && req.method === 'POST') {
+      // échange de pièces du jeu contre des STH coins (taux volontairement très élevé)
+      const sth = Number(body.sth);
+      const min = PREMIUM.minExchange ?? 10;
+      const max = PREMIUM.maxExchange ?? 100_000;
+      if (!Number.isInteger(sth) || sth < min || sth > max) return json(res, 422, { error: `Entre ${min} et ${max.toLocaleString('fr-FR')} STH par échange` });
+      const cost = sth * PREMIUM.coinsPerSth;
+      if (!validPrice(cost)) return json(res, 422, { error: 'Montant invalide' });
+      accrue(p);
+      if (p.coins < cost) return json(res, 402, { error: `Il vous manque ${Math.ceil(cost - p.coins).toLocaleString('fr-FR')} pièces` });
+      p.coins -= cost;
+      p.sth += sth;
+      touch(p);
+      return json(res, 200, { sth, cost, state: state(p) });
+    }
+
+    if (route === 'chest/buy' && req.method === 'POST') {
+      // le coffre va dans l'inventaire : il s'ouvre plus tard, quand le joueur le décide
+      if (!own(CHESTS, body.id)) return json(res, 422, { error: 'Coffre inconnu' });
+      const qty = Number(body.qty ?? 1);
+      if (qty !== 1 && qty !== BULK.qty) return json(res, 422, { error: 'Quantité invalide' });
+      const cost = chestCost(body.id, qty);
+      if (!validPrice(cost)) return json(res, 422, { error: 'Prix invalide' });
+      if (p.sth < cost) return json(res, 402, { error: `Il vous manque ${Math.ceil(cost - p.sth)} STH coins`, missingSth: Math.ceil(cost - p.sth) });
+      p.sth -= cost;
+      p.chests[body.id] = (p.chests[body.id] ?? 0) + qty;
+      touch(p);
+      return json(res, 200, { id: body.id, qty, cost, state: state(p) });
+    }
+
+    if (route === 'chest/open' && req.method === 'POST') {
+      if (!own(CHESTS, body.id)) return json(res, 422, { error: 'Coffre inconnu' });
+      if (!((p.chests[body.id] ?? 0) > 0)) return json(res, 409, { error: 'Vous n’avez pas ce coffre : achetez-le dans la boutique' });
+      accrue(p);
+      const roll = rollChest(p, body.id);
+      p.chests[body.id]--;
+      const now = Date.now();
+      const artwork = { uid: randomBytes(6).toString('base64url'), workId: roll.workId, frame: roll.frame, slot: freeSlot(p, roll.workId), boughtAt: now, chest: body.id };
+      p.artworks.push(artwork);
+      p.stats.chests++;
+      if (roll.rarity !== 'commun') p.stats.rare++;
+      if (rank(roll.rarity) >= rank('epique')) p.stats.epic++;
+      if (roll.frame !== 'normal') p.stats.framed++;
+      touch(p);
+      changed(p);
+      return json(res, 200, { chest: body.id, artwork, rarity: roll.rarity, frame: roll.frame, pityUsed: roll.pityUsed, state: state(p) });
+    }
+
+    if (devMode && route === 'dev/sth' && req.method === 'POST') {
+      // tests : STH coins offerts
+      p.sth += Math.max(0, Math.floor(Number(body.sth) || 0));
+      touch(p);
+      return json(res, 200, { state: state(p) });
+    }
+
     if (devMode && route === 'dev/yesterday' && req.method === 'POST') {
       // tests : la dernière récompense quotidienne date d'hier (la série continue)
       p.daily = { day: dayKey(Date.now() - 86_400_000), streak: p.daily.streak || 1 };
@@ -1448,6 +1623,10 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     guardCount, vitrineMult, publicSecurity, useTool, noteAttempt,
     hold, release, award, ownerOf, notify, workValue, catalog, ticketPrice, payTicket, bounty,
     setPresence: (fn) => (isOnline = fn),
+    /** Paiements : crédit des STH coins (idempotent par commande), joueur authentifié d'une requête, offres. */
+    creditSth,
+    authReq: auth,
+    premium: PREMIUM,
     workById: (id) => works.get(id) ?? null,
     roomCount: (p) => levelInfo(p).rooms,
     floorCount: (p) => levelInfo(p).floors ?? 1,

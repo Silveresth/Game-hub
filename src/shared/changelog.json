@@ -1,0 +1,145 @@
+{
+  "current": "1.3.0",
+  "versions": [
+    {
+      "version": "1.3.0",
+      "date": "2026-11-13",
+      "title": "Lucky coffres, inventaire et nouvelle prise en main",
+      "items": [
+        { "type": "new", "text": "Lucky coffres : simple, rare, épique et légendaire. Une œuvre d’art dans chaque coffre, animation d’ouverture selon la rareté, probabilités affichées avant l’achat et avant l’ouverture, garantie après une série malchanceuse." },
+        { "type": "new", "text": "STH coins, la monnaie premium : par T-Money, Flooz / Moov Money, carte Visa ou Mastercard, PayPal, ou en échangeant ses pièces (1 000 STH = 150 M de pièces)." },
+        { "type": "new", "text": "Inventaire (🎒, touche I) : coffres à ouvrir, œuvres exposées, réserve, outils du marché noir et album de la collection. On choisit quelle œuvre exposer ou remplacer." },
+        { "type": "new", "text": "Tutoriel interactif au premier lancement, avec une flèche dorée qui montre où aller. On peut le revoir depuis le menu ☰." },
+        { "type": "new", "text": "Journal des versions sur la page d’accueil et dans le jeu (menu ☰ → Nouveautés)." },
+        { "type": "new", "text": "Nouveaux pays : Togo, Bénin, Burkina Faso, Mali, Niger, Guinée, Gabon, Congo, RD Congo, Tchad, Ghana, Nigeria et d’autres." },
+        { "type": "improved", "text": "Caméra : clic gauche ou droit pour la tourner, et elle se replace toute seule derrière le personnage quand il avance." },
+        { "type": "improved", "text": "Déplacements plus nerveux : on court par défaut (Maj pour marcher), caméra plus réactive, saut plus franc avec une vraie pose en l’air." },
+        { "type": "improved", "text": "Couleurs plus vives : nouveau rendu des lumières, pelouse et pavés plus lumineux." },
+        { "type": "improved", "text": "Interface plus compacte : porte-monnaie sur une ligne (détails au toucher), objectif réduit, menu ☰ pour les réglages." },
+        { "type": "improved", "text": "Téléphone : joystick qui apparaît sous le pouce, boutons d’action redessinés, mode paysage conseillé (et imposé dans l’application Android)." },
+        { "type": "fixed", "text": "On ne pouvait pas courir sur téléphone (il fallait pousser le joystick tout au bord)." },
+        { "type": "fixed", "text": "Le saut paraissait figé : le personnage montait sans bouger les jambes." },
+        { "type": "fixed", "text": "Tourner la caméra sur ordinateur obligeait à maintenir le clic droit." }
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-11-13",
+      "title": "Échanges d’œuvres et convoi plus vivant",
+      "items": [
+        { "type": "improved", "text": "Échanger deux œuvres au mur : celle qu’on décroche passe dans les mains du joueur au lieu de disparaître." },
+        { "type": "improved", "text": "Un camion toutes les 8 secondes, cinq sur la route en même temps." },
+        { "type": "new", "text": "Nouveau camion vitrine : l’œuvre est exposée en grand, visible des deux côtés." },
+        { "type": "new", "text": "Vidéo de présentation du jeu (format téléphone, deux voix)." }
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "date": "2026-11-13",
+      "title": "Parapluie, événements en direct, cadre arc-en-ciel",
+      "items": [
+        { "type": "new", "text": "Coup de parapluie ☂ : le joueur touché est sonné, un voleur lâche l’œuvre." },
+        { "type": "new", "text": "Événements en direct : pluie d’or, convoi arc-en-ciel, super vitesse, chaque soir à 21 h." },
+        { "type": "new", "text": "Cadre arc-en-ciel (valeur ×10) et 4 tenues au choix pour son personnage." },
+        { "type": "improved", "text": "Double saut, course plus rapide, poussière sous les pieds, ciel avec nuages." }
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-11-12",
+      "title": "Comptes joueurs et application Android",
+      "items": [
+        { "type": "new", "text": "Comptes : inscription par e-mail, connexion sur tous les appareils, mot de passe oublié, connexion Google." },
+        { "type": "new", "text": "Application Android (plein écran, écran toujours allumé)." },
+        { "type": "improved", "text": "Interface compacte sur téléphone." }
+      ]
+    },
+    {
+      "version": "0.9.0",
+      "date": "2026-11-12",
+      "title": "Refonte du quartier",
+      "items": [
+        { "type": "new", "text": "Musées classiques avec toits et frontons, grand mur d’enceinte, avenues pavées." },
+        { "type": "new", "text": "Personnages humains en 3D à la place du robot." },
+        { "type": "improved", "text": "Portes intérieures animées, barre live en capsule au centre." },
+        { "type": "fixed", "text": "Retour des vraies œuvres d’art et de l’architecture d’origine après un essai raté." }
+      ]
+    },
+    {
+      "version": "0.8.0",
+      "date": null,
+      "title": "Social et vie de la place",
+      "items": [
+        { "type": "new", "text": "Discussion du quartier, émotes, voix de proximité, invitations d’amis." },
+        { "type": "new", "text": "Guirlandes, fleurs, bancs, jets de la fontaine et confettis aux grands moments." }
+      ]
+    },
+    {
+      "version": "0.7.0",
+      "date": null,
+      "title": "Progression",
+      "items": [
+        { "type": "new", "text": "Boutique d’améliorations, Renaissance, récompense du jour, événements du convoi." },
+        { "type": "improved", "text": "Textures des salles (classique, moderne, futuriste, zen), statues célèbres." }
+      ]
+    },
+    {
+      "version": "0.6.0",
+      "date": null,
+      "title": "Billet d’entrée et Mythiques",
+      "items": [
+        { "type": "new", "text": "Billet d’entrée chez les rivaux, vol des Mythiques avec prime pour qui arrête le voleur." },
+        { "type": "new", "text": "Déguisement d’employé, chien de garde, reproductions des Mythiques." }
+      ]
+    },
+    {
+      "version": "0.5.0",
+      "date": null,
+      "title": "Étages et classements",
+      "items": [
+        { "type": "new", "text": "Étages et toit-terrasse des statues, 4 classements, 40 œuvres au catalogue." },
+        { "type": "improved", "text": "Performance mobile : bâtiments fusionnés, mode Éco automatique." }
+      ]
+    },
+    {
+      "version": "0.4.0",
+      "date": null,
+      "title": "Enchères et notifications",
+      "items": [
+        { "type": "new", "text": "Hôtel des ventes en direct, notifications push, panneau d’administration." }
+      ]
+    },
+    {
+      "version": "0.3.0",
+      "date": null,
+      "title": "Sécurité et marché noir",
+      "items": [
+        { "type": "new", "text": "Gardes, caméras, lasers, vitrines, générateur, assurance et leurs failles ; outils du marché noir." }
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "date": null,
+      "title": "Multijoueur et vol",
+      "items": [
+        { "type": "new", "text": "Quartiers en temps réel, vol d’œuvres, arrestations, musées endormis." }
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "date": null,
+      "title": "Première version jouable",
+      "items": [
+        { "type": "new", "text": "Votre musée, le convoi, la caisse, l’agrandissement, les objectifs guidés." }
+      ]
+    }
+  ],
+  "roadmap": [
+    { "status": "next", "text": "Activer les paiements réels (clés des prestataires) et tester un achat de bout en bout." },
+    { "status": "next", "text": "Partie test avec de vrais joueurs sur téléphone, puis équilibrage des prix et des coffres." },
+    { "status": "planned", "text": "Coffres d’événement en édition limitée et récompenses de connexion en STH." },
+    { "status": "planned", "text": "Saisons avec classement remis à zéro et récompenses." },
+    { "status": "planned", "text": "Application iPhone." },
+    { "status": "idea", "text": "Le faussaire : vendre des copies comme si c’étaient des vraies." }
+  ]
+}

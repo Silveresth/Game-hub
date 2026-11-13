@@ -26,6 +26,8 @@ class Remote {
   /** Projection (coup de parapluie) : décalage qui s'amortit, ajouté à la position interpolée. */
   knock = new THREE.Vector3();
   stunUntil = 0;
+  /** Pose de saut (0 au sol, 1 en l'air). */
+  air = 0;
 
   constructor(scene: THREE.Scene, readonly p: NetPlayer) {
     this.ch = new Character(parseInt(p.color.slice(1), 16), { skin: p.skin ?? 0 });
@@ -190,7 +192,11 @@ export class RemotePlayers {
       // sonné : il titube sur place
       r.ch.root.rotation.z = performance.now() < r.stunUntil ? Math.sin(t * 18) * 0.12 : 0;
       r.ch.root.visible = !this.hidden(pos.x, pos.z, r.floor);
-      r.ch.play(['Idle', 'Walking', 'Running', 'Jump'].includes(r.anim) ? r.anim : 'Idle');
+      // (pas d'animation de saut dans les modèles humains : on garde la course et on replie les jambes)
+      const jumping = r.anim === 'Jump';
+      r.ch.play(jumping ? 'Running' : ['Idle', 'Walking', 'Running'].includes(r.anim) ? r.anim : 'Idle');
+      r.air = (r.air ?? 0) + ((jumping ? 1 : 0) - (r.air ?? 0)) * Math.min(1, dt * 14);
+      r.ch.setAir(r.air);
       r.ch.update(dt);
       r.bubble.update();
       if (r.carry) r.carry.rotation.y = Math.sin(t * 2) * 0.2;

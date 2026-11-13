@@ -78,7 +78,21 @@ export interface PlayerState {
   inviteCode: string;
   /** Compte : e-mail et mot de passe, ou Google ; sans l'un ni l'autre, c'est un invité (musée sur cet appareil). */
   account: { email: string | null; password: boolean; google: boolean };
+  /** STH coins : monnaie premium (argent réel, ou échange de pièces à un taux très élevé). */
+  sth: number;
+  /** Lucky coffres achetés, pas encore ouverts. */
+  chests: Record<ChestId, number>;
+  /** Garantie de chaque coffre : nombre de coffres ouverts depuis la dernière rareté garantie. */
+  pity: Partial<Record<ChestId, { count: number; every: number; rarity: RarityId }>>;
+  /** Mythiques encore libres (possibles dans les coffres). */
+  freeMythics: string[];
 }
+
+export type ChestId = 'simple' | 'rare' | 'epique' | 'legendaire';
+export type PayMethodId = 'tmoney' | 'flooz' | 'card' | 'paypal';
+export interface PayMethod { id: PayMethodId; label: string; icon: string; currencies: string[]; provider: string; needsPhone: boolean }
+export interface PayPack { id: string; sth: number; bonus: number; xof: number; eur: number; usd: number; tag?: string }
+export interface PayOrder { id: string; pack: string; sth: number; method: PayMethodId; amount: number; currency: string; status: 'pending' | 'paid' | 'failed' | 'expired' | 'error'; hint: string | null; createdAt: number; test: boolean }
 
 export type UpgradeId = 'speed' | 'lock' | 'vault' | 'gloves' | 'luck';
 export interface DailyInfo {
@@ -162,10 +176,10 @@ function loadSession(): { id: string; token: string } | null {
   }
 }
 
-async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function call<T>(path: string, init: RequestInit = {}, prefix = '/api/game/'): Promise<T> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (session) Object.assign(headers, { 'x-player-id': session.id, 'x-player-token': session.token });
-  const res = await fetch(`/api/game/${path}`, { ...init, headers });
+  const res = await fetch(`${prefix}${path}`, { ...init, headers });
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw Object.assign(new Error(data.error ?? `Erreur ${res.status}`), { status: res.status });
   return data;
@@ -256,5 +270,20 @@ export const rebirth = () => post<{ rebirths: number; incomeMult: number; state:
 export const claimDaily = () => post<{ reward: number; streak: number; state: PlayerState }>('daily');
 export const pushSubscribe = (subscription: unknown) => post<{ state: PlayerState }>('push/subscribe', { subscription });
 export const pushPrefs = (prefs: Partial<PushPrefs>) => post<{ state: PlayerState }>('push/prefs', { prefs });
+// inventaire : réserve et emplacements
+export const storeArtwork = (uid: string) => post<{ state: PlayerState }>('store', { uid });
+export const placeArtwork = (uid: string) => post<{ slot: number; state: PlayerState }>('place', { uid });
+// STH coins et Lucky coffres
+export const exchangeSth = (sth: number) => post<{ sth: number; cost: number; state: PlayerState }>('sth/exchange', { sth });
+export const buyChest = (id: ChestId, qty: number) => post<{ id: ChestId; qty: number; cost: number; state: PlayerState }>('chest/buy', { id, qty });
+export const openChest = (id: ChestId) => post<{ chest: ChestId; artwork: OwnedArtwork; rarity: RarityId; frame: FrameId; pityUsed: boolean; state: PlayerState }>('chest/open', { id });
+// paiements en argent réel (STH coins)
+const payPost = <T>(path: string, body: unknown) => call<T>(path, { method: 'POST', body: JSON.stringify(body) }, '/api/pay/');
+export const payConfig = () => call<{ methods: PayMethod[]; packs: PayPack[]; test: boolean }>('config', {}, '/api/pay/');
+export const payCreate = (pack: string, method: PayMethodId, currency: string, phone?: string) =>
+  payPost<{ order: PayOrder; url: string | null; push: boolean; test: boolean }>('create', { pack, method, currency, phone });
+export const payOrder = (id: string) => call<{ order: PayOrder; sth: number }>(`order?id=${encodeURIComponent(id)}`, {}, '/api/pay/');
+export const payTestComplete = (id: string) => payPost<{ order: PayOrder; sth: number }>('test/complete', { id });
+
 export type Board = 'value' | 'weekly' | 'theft' | 'auction' | 'countries';
 export const leaderboard = (board: Board = 'value', country?: string) => call<Array<{ name: string; value: number; level: number; artworks: number; country?: string; flag?: string; me?: boolean }>>(`leaderboard?board=${board}${country ? `&country=${country}` : ''}`);

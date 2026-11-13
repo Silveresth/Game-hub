@@ -32,6 +32,22 @@ services:
         sync: false # facultatif : connexion Google
       - key: SAM_ICE_SERVERS
         sync: false # facultatif : serveur TURN pour la voix (JSON)
+      - key: FEDAPAY_SECRET_KEY
+        sync: false # paiements STH : T-Money, Moov / Flooz, cartes (docs/PAIEMENTS.md)
+      - key: FEDAPAY_ENV
+        sync: false # live ou sandbox
+      - key: PAYGATE_AUTH_TOKEN
+        sync: false # facultatif : PayGate Global (T-Money, Flooz)
+      - key: CINETPAY_API_KEY
+        sync: false # facultatif : CinetPay
+      - key: CINETPAY_SITE_ID
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false # facultatif : PayPal
+      - key: PAYPAL_SECRET
+        sync: false
+      - key: PAYPAL_ENV
+        sync: false # live ou sandbox
       - key: SAM_ANDROID_PACKAGE
         sync: false # facultatif : APK Android
       - key: SAM_ANDROID_SHA256
