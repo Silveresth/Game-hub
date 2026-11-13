@@ -243,7 +243,8 @@ export const buy = (window: number) => post<{ artwork: OwnedArtwork; state: Play
 export const collect = () => post<{ collected: number; state: PlayerState }>('collect');
 export const expand = () => post<{ state: PlayerState }>('expand');
 export const sell = (uid: string) => post<{ gain: number; state: PlayerState }>('sell', { uid });
-export const moveArtwork = (uid: string, slot: number) => post<{ state: PlayerState; swapped: boolean }>('move', { uid, slot });
+/** `swappedUid` : l'œuvre qui occupait l'emplacement, décrochée et repartie à l'ancienne place de celle qu'on accroche. */
+export const moveArtwork = (uid: string, slot: number) => post<{ state: PlayerState; swapped: boolean; swappedUid?: string | null }>('move', { uid, slot });
 export const setDecor = (room: number, theme: string) => post<{ state: PlayerState; room: number; theme: string; cost: number }>('decor', { room, theme });
 export const rename = (name: string, color?: string, country?: string, skin?: number) => post<{ state: PlayerState }>('name', { name, color, country, skin });
 export const claim = (quest: string) => post<{ reward: number; state: PlayerState }>('claim', { quest });

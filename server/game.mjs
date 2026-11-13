@@ -7,8 +7,9 @@ import { clientIp } from './ip.mjs';
 import { createDatabase } from './db.mjs';
 import { cleanEmail, hashPassword, newToken, passwordProblem, sendResetEmail, verifyPassword } from './accounts.mjs';
 
-const WINDOW_MS = 20_000; // un nouveau camion du convoi toutes les 20 s
+const WINDOW_MS = 8_000; // un nouveau camion du convoi toutes les 8 s (environ 29 m entre deux camions)
 const TRAVEL_MS = 40_000; // durée de traversée de la place
+const BUY_GRACE_MS = 1_000; // latence réseau : un camion qui sort tout juste de la place reste achetable un instant
 const ONLINE_GRACE_S = 60; // au-delà d'une minute sans nouvelle, le joueur est considéré hors ligne
 const OFFLINE_RATE = 0.5;
 const CASH_HOURS = 2;
@@ -1006,17 +1007,18 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     if (route === 'convoy' && req.method === 'GET') {
       const now = Date.now();
       const w = Math.floor(now / WINDOW_MS);
-      return json(res, 200, {
-        serverTime: now, intervalMs: WINDOW_MS, travelMs: TRAVEL_MS,
-        items: [w - 1, w, w + 1].map((x) => convoyItem(p, x)),
-      });
+      // tous les camions encore sur la route, plus le prochain départ
+      const items = [];
+      for (let x = Math.ceil((now - TRAVEL_MS) / WINDOW_MS); x <= w + 1; x++) items.push(convoyItem(p, x));
+      return json(res, 200, { serverTime: now, intervalMs: WINDOW_MS, travelMs: TRAVEL_MS, items });
     }
 
     if (route === 'buy' && req.method === 'POST') {
       const now = Date.now();
-      const w = Math.floor(now / WINDOW_MS);
       const window = Number(body.window);
-      if (!Number.isInteger(window) || (window !== w && window !== w - 1)) return json(res, 409, { error: 'Ce camion est déjà parti' });
+      // achetable seulement pendant que le camion traverse la place
+      const onRoad = Number.isInteger(window) && window * WINDOW_MS <= now && now <= window * WINDOW_MS + TRAVEL_MS + BUY_GRACE_MS;
+      if (!onRoad) return json(res, 409, { error: 'Ce camion est déjà parti' });
       if (p.bought.includes(window)) return json(res, 409, { error: 'Déjà vendu' });
       const item = convoyItem(p, window);
       accrue(p, now);
@@ -1024,7 +1026,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       p.coins -= item.price;
       const artwork = { uid: randomBytes(6).toString('base64url'), workId: item.workId, frame: item.frame, slot: freeSlot(p, item.workId), boughtAt: now };
       p.artworks.push(artwork);
-      p.bought = [...p.bought.slice(-9), window];
+      // assez d'historique pour couvrir tous les camions visibles en même temps (jamais deux achats du même camion)
+      p.bought = [...p.bought.slice(-19), window];
       if (item.rarity !== 'commun') p.stats.rare++;
       if (item.rarity === 'epique') p.stats.epic++;
       if (item.frame !== 'normal') p.stats.framed++;
@@ -1091,7 +1094,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       a.slot = slot;
       touch(p);
       changed(p);
-      return json(res, 200, { state: state(p), swapped: !!other });
+      // swappedUid : l'œuvre décrochée, que le joueur reprend en mains (sinon elle semblerait disparaître)
+      return json(res, 200, { state: state(p), swapped: !!other, swappedUid: other?.uid ?? null });
     }
 
     if (route === 'decor' && req.method === 'POST') {

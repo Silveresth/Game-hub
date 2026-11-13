@@ -133,7 +133,7 @@ Jeu de gestion multijoueur en 3D, dans le navigateur et installable en PWA : bâ
 - **Quartier :** place centrale, route du convoi, fontaine, classement géant des musées les plus riches, musées rivaux, hôtel des ventes (phase 4) et tente du marché noir (ouverte en phase 3).
 - **Votre musée :** un local qui s’agrandit jusqu’à 9 salles (niveaux 1 à 5), emplacements muraux, revenu affiché au-dessus de chaque œuvre, visiteurs PNJ qui viennent admirer les œuvres.
 - **Économie, entièrement calculée par le serveur :**
-  - **Convoi :** un camion toutes les 20 s, raretés Commun / Rare / Épique, cadres dorés (×2) et diamant (×5).
+  - **Convoi :** un camion toutes les 8 s (traversée de 40 s, cinq camions sur la route en même temps), raretés Commun / Rare / Épique, cadres dorés (×2) et diamant (×5). L’œuvre est exposée en grand dans une vitrine vitrée des deux côtés.
   - **Caisse :** elle se remplit selon le revenu, avec un plafond de 2 h ; 50 % du rythme hors ligne.
   - **Encaissement :** on marche sur le cercle doré.
   - **Agrandissement et revente :** agrandissement payant, revente à 50 %.

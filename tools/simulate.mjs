@@ -1,10 +1,11 @@
 // Simulation d'équilibrage : un joueur « raisonnable » joue en continu, on mesure quand il atteint chaque étape.
-// Usage : node tools/simulate.mjs [minutes=180] [parties=200]
+// Usage : node tools/simulate.mjs [minutes=180] [parties=200] [secondes entre deux camions=8]
 import { readFileSync } from 'node:fs';
 
 const cat = JSON.parse(readFileSync('src/shared/catalog.json', 'utf8'));
 const MINUTES = Number(process.argv[2] ?? 180);
 const RUNS = Number(process.argv[3] ?? 200);
+const WINDOW_S = Number(process.argv[4] ?? 8); // un camion du convoi toutes les 8 s (server/game.mjs, WINDOW_MS)
 const pool = Object.entries(cat.rarities).filter(([, r]) => r.convoyWeight > 0);
 const total = pool.reduce((s, [, r]) => s + r.convoyWeight, 0);
 const rate = cat.incomeRate;
@@ -25,9 +26,9 @@ function run() {
   const shown = []; // valeurs exposées
   const marks = {};
   const mark = (k, t) => { if (marks[k] === undefined) marks[k] = t; };
-  for (let t = 0; t < MINUTES * 60; t += 20) {
-    // revenu de la fenêtre de 20 s (le joueur encaisse au fil de l'eau)
-    coins += shown.reduce((s, v) => s + v.value * v.rate, 0) * 20;
+  for (let t = 0; t < MINUTES * 60; t += WINDOW_S) {
+    // revenu entre deux camions (le joueur encaisse au fil de l'eau)
+    coins += shown.reduce((s, v) => s + v.value * v.rate, 0) * WINDOW_S;
     const slots = cat.levels[level - 1].slots;
     const item = convoyItem();
     // achète si une place est libre, ou remplace la moins chère si l'œuvre vaut au moins 3× plus

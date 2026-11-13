@@ -961,8 +961,9 @@ addEventListener('keydown', (e) => {
     if (reorgSelected) {
       if (myView && reorgSelected.uid) myView.hiddenUid = null;
       setCarry(null);
+      // œuvre reprise lors d'un échange : elle est déjà accrochée (côté serveur) à la place libérée
+      toast(reorgSelected.fromSwap ? `« ${work(reorgSelected.workId).title} » reste accrochée ${slotWhere(reorgSelected.slot)}` : 'Déplacement annulé');
       reorgSelected = null;
-      toast('Déplacement annulé');
       return;
     }
     if (boughtToPlace) {
@@ -1084,10 +1085,24 @@ async function doClaim(): Promise<void> {
 $('questClaim').onclick = () => void doClaim();
 
 let sellArmed: { uid: string; until: number } | null = null;
-let reorgSelected: { uid: string; workId: string; slot: number } | null = null;
+/**
+ * Œuvre portée en mains pour la déplacer. `fromSwap` : décrochée par un échange (déjà accrochée à `slot` côté serveur) ;
+ * `lockSlot` : l'emplacement que l'on vient de remplir, ignoré tant que l'on ne s'en est pas éloigné.
+ */
+let reorgSelected: { uid: string; workId: string; slot: number; fromSwap?: boolean; lockSlot?: number } | null = null;
 let boughtToPlace: { uid: string; workId: string; tempSlot: number } | null = null;
 
+/** « dans la salle #3 (1er étage) » : où se trouve un emplacement de votre musée. */
+function slotWhere(slot: number): string {
+  if (!myView) return 'à sa nouvelle place';
+  const s = myView.slotWorld(slot);
+  const room = myView.roomIndexOf(s.p.clone().addScaledVector(s.normal, 1.2), s.floor);
+  const level = s.floor === 0 ? 'rez-de-chaussée' : s.floor >= 3 ? 'toit-terrasse' : s.floor === 1 ? '1er étage' : `${s.floor}e étage`;
+  return room === null ? `sur le ${level}` : `dans la salle #${room + 1} (${level})`;
+}
+
 async function doMove(uid: string, targetSlot: number): Promise<void> {
+  const placedWorkId = reorgSelected?.uid === uid ? reorgSelected.workId : boughtToPlace?.uid === uid ? boughtToPlace.workId : null;
   const r = await guarded(() => api.moveArtwork(uid, targetSlot));
   if (!r) return;
   reorgSelected = null;
@@ -1096,7 +1111,17 @@ async function doMove(uid: string, targetSlot: number): Promise<void> {
   setCarry(null);
   applyState(r.state);
   sfx.whoosh();
-  toast(r.swapped ? 'Œuvres interverties !' : 'Œuvre accrochée au mur !');
+  // Échange : l'œuvre qui était au mur passe dans les mains du joueur (au lieu de partir, invisible, à l'ancienne
+  // place de celle qu'il tenait, parfois dans une autre salle ou à un autre étage).
+  const other = r.swappedUid ? r.state.artworks.find((a) => a.uid === r.swappedUid && a.slot !== null && !a.carried) : undefined;
+  if (other && other.slot !== null) {
+    reorgSelected = { uid: other.uid, workId: other.workId, slot: other.slot, fromSwap: true, lockSlot: targetSlot };
+    if (myView) myView.hiddenUid = other.uid;
+    setCarry({ workId: other.workId, frame: other.frame });
+    toast(`${placedWorkId ? `« ${work(placedWorkId).title} » accrochée. ` : ''}Vous tenez maintenant « ${work(other.workId).title} » : approchez-vous d’un emplacement (Échap pour la laisser ${slotWhere(other.slot)})`);
+    return;
+  }
+  toast('Œuvre accrochée au mur !');
 }
 
 async function doSell(uid: string): Promise<void> {
@@ -1449,7 +1474,8 @@ async function refreshConvoy(): Promise<void> {
     offset = c.serverTime - Date.now();
     convoy.setItems(c.items, c.travelMs);
     const next = convoy.upcoming(serverNow());
-    if (next && !announced.has(next.window)) {
+    // un camion toutes les 8 s : on n'annonce que les pièces remarquables (rareté ou cadre)
+    if (next && !announced.has(next.window) && (next.rarity !== 'commun' || next.frame !== 'normal')) {
       announced.add(next.window);
       const wk = work(next.workId);
       const tag = next.frame !== 'normal' ? CATALOG.frames[next.frame].label : CATALOG.rarities[next.rarity].label;
@@ -2531,6 +2557,9 @@ function interactions(): void {
   const lockD = ground ? Math.hypot(pos.x - museum.lockPos.x, pos.z - museum.lockPos.z) : Infinity;
   const regD = ground ? Math.hypot(pos.x - museum.registerPos.x, pos.z - museum.registerPos.z) : Infinity;
   const art = !truck && signD > 1.6 && lockD > 1.2 && museum.contains(pos, floor) ? museum.nearestArtwork(pos, 1.6, floor) : null;
+  // œuvre en mains devant un emplacement : accrocher passe avant le panneau « Agrandir » (posé tout près d'un mur)
+  const held = reorgSelected ?? boughtToPlace;
+  const slotFirst = !!held && museum.nearestSlot(pos, 2.2, floor, state.slots, work(held.workId).kind === 'statue') !== null;
   const now = serverNow();
   const marketD = Math.hypot(pos.x - BLACK_MARKET.x, pos.z - BLACK_MARKET.z);
   const shopD = Math.hypot(pos.x - BOUTIQUE.x, pos.z - BOUTIQUE.z);
@@ -2557,17 +2586,23 @@ function interactions(): void {
     const wk = work(truck.item.workId);
     items.push({ key: 'E', text: `Acheter « ${wk.title} » — ${money(truck.item.price)}`, poor: state.coins < truck.item.price });
     if (input.consume('action')) void doBuy(truck.item, truck.truck.artworkWorld());
-  } else if (signD < 1.6) {
+  } else if (signD < 1.6 && !slotFirst) {
     if (state.next) {
       items.push({ key: 'E', text: `Agrandir : ${state.next.rooms} salles, ${state.next.slots} places — ${money(state.next.cost)}`, poor: state.coins < state.next.cost });
       if (input.consume('action')) void doExpand();
     } else items.push({ key: '✓', text: 'Votre musée est au maximum de cette version' });
   } else if (reorgSelected) {
-    const nearSlot = museum.nearestSlot(pos, 2.0, floor, state.slots, work(reorgSelected.workId).kind === 'statue');
+    let nearSlot = museum.nearestSlot(pos, 2.0, floor, state.slots, work(reorgSelected.workId).kind === 'statue');
+    // juste après un échange, on est encore devant l'emplacement rempli : un second appui (double tap au tactile,
+    // réseau lent) échangerait aussitôt dans l'autre sens. Il compte de nouveau une fois qu'on s'en est éloigné.
+    if (reorgSelected.lockSlot !== undefined) {
+      if (nearSlot === reorgSelected.lockSlot) nearSlot = null;
+      else reorgSelected.lockSlot = undefined;
+    }
     if (nearSlot !== null && nearSlot !== reorgSelected.slot) {
       const occupant = state.artworks.find((a) => a.slot === nearSlot);
       if (occupant) {
-        items.push({ key: 'E', text: `Échanger « ${work(reorgSelected.workId).title} » avec « ${work(occupant.workId).title} »` });
+        items.push({ key: 'E', text: `Échanger : accrocher « ${work(reorgSelected.workId).title} » et prendre « ${work(occupant.workId).title} » en mains` });
       } else {
         items.push({ key: 'E', text: `Accrocher « ${work(reorgSelected.workId).title} » ici` });
       }
@@ -2575,13 +2610,13 @@ function interactions(): void {
     } else {
       items.push({ key: '…', text: `Transport de « ${work(reorgSelected.workId).title} » : approchez-vous d’un emplacement` });
     }
-    items.push({ key: 'Échap', text: 'Annuler le déplacement' });
+    items.push({ key: 'Échap', text: reorgSelected.fromSwap ? 'La laisser à la place libérée' : 'Annuler le déplacement' });
   } else if (boughtToPlace) {
     const nearSlot = museum.nearestSlot(pos, 2.2, floor, state.slots, work(boughtToPlace.workId).kind === 'statue');
     if (nearSlot !== null) {
       const occupant = state.artworks.find((a) => a.slot === nearSlot && a.uid !== boughtToPlace?.uid);
       if (occupant) {
-        items.push({ key: 'E', text: `Échanger et accrocher « ${work(boughtToPlace.workId).title} » ici` });
+        items.push({ key: 'E', text: `Échanger : accrocher « ${work(boughtToPlace.workId).title} » et prendre « ${work(occupant.workId).title} » en mains` });
       } else {
         items.push({ key: 'E', text: `Accrocher « ${work(boughtToPlace.workId).title} » sur ce mur` });
       }

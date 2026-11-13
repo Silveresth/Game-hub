@@ -56,7 +56,8 @@ const roomCenter = (plot) => ({ x: plot.x, z: plot.z });
 const A = await newPlayer('Musée Alpha');
 await http('dev/grant', { coins: 1_000_000 }, A);
 const convoy = await http('convoy', null, A);
-const w = Math.floor(convoy.serverTime / 20000);
+ok(convoy.intervalMs <= 10_000 && convoy.items.filter((i) => i.startsAt <= convoy.serverTime && convoy.serverTime <= i.startsAt + convoy.travelMs).length >= 4,
+  `convoi : un camion toutes les ${convoy.intervalMs / 1000} s, ${convoy.items.length} camions annoncés`);
 for (const it of convoy.items) {
   try { await http('buy', { window: it.window }, A); } catch {}
 }
@@ -353,7 +354,7 @@ cD2.ws.close();
   // --- vol d'une Mythique : 20 s, alerte serveur, chasseur de primes ---
   // M reçoit La Joconde (vraie) : on achète au convoi puis on transforme l'œuvre (raccourci de test)
   const cvM = await http('convoy', null, M);
-  await http('buy', { window: Math.floor(cvM.serverTime / 20000) }, M);
+  await http('buy', { window: Math.floor(cvM.serverTime / cvM.intervalMs) }, M);
   const sM = await http('state', null, M);
   const real = sM.artworks.find((a) => !a.repro);
   const mythic = await http('dev/mythic', { uid: real.uid, workId: 'joconde' }, M);
@@ -401,7 +402,7 @@ cD2.ws.close();
   for (let i = 0; i < 6; i++) sH = (await http('expand', {}, H)).state;
   ok(sH.level === 7 && sH.floors === 3 && sH.slots === 214, `musée à 3 étages (niveau ${sH.level}, ${sH.slots} places)`);
   const cv = await http('convoy', null, H);
-  await http('buy', { window: Math.floor(cv.serverTime / 20000) }, H);
+  await http('buy', { window: Math.floor(cv.serverTime / cv.intervalMs) }, H);
   sH = await http('state', null, H);
   const art = sH.artworks[0];
   const moved = await http('dev/move', { uid: art.uid, slot: 75 }, H);
@@ -457,10 +458,15 @@ cD2.ws.close();
   // Achat d'une 2e œuvre et interversion (swap) de deux tableaux
   await http('dev/grant', { coins: 10_000_000 }, H);
   const cv2 = await http('convoy', null, H);
-  const bought2 = await http('buy', { window: cv2.items.find((i) => !i.sold && i.window <= Math.floor(cv2.serverTime / 20000)).window }, H);
+  const bought2 = await http('buy', { window: cv2.items.find((i) => !i.sold && i.window <= Math.floor(cv2.serverTime / cv2.intervalMs)).window }, H);
   const art2 = bought2.artwork;
+  const tempSlot = art2.slot;
   const swapped = await http('move', { uid: art2.uid, slot: 75 }, H);
   ok(swapped.swapped && swapped.state?.artworks.find((a) => a.uid === art2.uid)?.slot === 75, 'interversion (swap) d’œuvres réussie');
+  // l'œuvre décrochée n'est jamais perdue : elle est signalée au client (qui la met en mains) et accrochée à la place libérée
+  const unhooked = swapped.state?.artworks.find((a) => a.uid === art.uid);
+  ok(swapped.swappedUid === art.uid && unhooked?.slot === tempSlot && swapped.state.artworks.length === sH.artworks.length + 1,
+    `l’œuvre décrochée reste au joueur (emplacement ${unhooked?.slot}, ${swapped.state?.artworks.length} œuvres)`);
   // Une statue va sur un socle du toit-terrasse
   await http('dev/mythic', { uid: art.uid, workId: 'penseur' }, H);
   const mvTerrace = await http('move', { uid: art.uid, slot: 214 }, H);
