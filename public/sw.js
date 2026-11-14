@@ -1,5 +1,5 @@
 // Service worker de Steal a Masterpiece : jeu disponible hors connexion, API jamais mise en cache.
-const VERSION = 'sam-v11';
+const VERSION = 'sam-v12';
 // Le prototype /museum/ n'existe plus ; le personnage humain est le modèle principal (le robot sert de secours).
 const CORE = ['./', './game/', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './models/human_male.glb', './models/robot.glb'];
 

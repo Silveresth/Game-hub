@@ -12,6 +12,12 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const context = await browser.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 1 });
+/**
+ * Les tests de partie entrent directement en jeu, sans l'écran titre (comme après un rechargement interne du jeu) ;
+ * l'écran titre et les options ont leur propre test (« game-title »), dans un contexte sans ce raccourci.
+ */
+const skipTitle = () => sessionStorage.setItem('sam-autoplay', '1');
+await context.addInitScript(skipTitle);
 
 let failures = 0;
 /** Erreurs attendues par test (ex. le 401 d'un mauvais mot de passe, que le navigateur journalise). */
@@ -262,6 +268,7 @@ await check('game-account', '/game/', async (p) => {
 
 // ---------------------------------------------------------------- multijoueur : un vrai cambriolage à deux navigateurs
 const ctxB = await browser.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 1 });
+await ctxB.addInitScript(skipTitle);
 ctxB.setDefaultNavigationTimeout(120000); // deux pages en rendu logiciel en même temps : chargement lent
 context.setDefaultNavigationTimeout(120000);
 await check('game-multi', '/game/', async (pA) => {
@@ -441,6 +448,7 @@ await check('game-floors', '/game/', async (p) => {
 });
 
 const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+await phone.addInitScript(skipTitle);
 await check('game-mobile', '/game/', async (p) => {
   await p.evaluate(() => localStorage.removeItem('sam-player'));
   await p.reload({ waitUntil: 'load' });
@@ -482,6 +490,48 @@ await check('game-mobile', '/game/', async (p) => {
   await p.keyboard.press('Escape');
   await shot(p, 'game-5-mobile');
 }, phone);
+
+// ---------------------------------------------------------------- écran titre (Jouer, Options) : téléphone à l'horizontale
+const landscape = await browser.newContext({ viewport: { width: 800, height: 380 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+await check('game-title', '/game/', async (p) => {
+  // nouveau joueur : écran titre, options, puis Jouer ouvre la création du musée
+  await p.evaluate(() => localStorage.clear());
+  await p.reload({ waitUntil: 'load' });
+  await p.waitForSelector('#title:not([hidden])', { timeout: 30000 * SLOW });
+  if (await p.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('écran titre : débordement horizontal');
+  await shot(p, 'title-1');
+  await p.tap('#titleOptions');
+  await p.waitForSelector('#options.open', { timeout: 10000 });
+  await p.evaluate(() => {
+    const el = document.getElementById('optMusic');
+    el.value = '80';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await p.tap('#optQuality [data-q="high"]');
+  await p.tap('#optAutoCam');
+  await shot(p, 'title-2-options');
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('sam-settings')));
+  if (saved.music !== 80 || saved.quality !== 'high' || saved.autoCam !== false) throw new Error('options non enregistrées : ' + JSON.stringify(saved));
+  await p.tap('#optDone');
+  await p.tap('#titlePlay');
+  await p.waitForSelector('#welcome.open', { timeout: 10000 });
+  await p.fill('#nameInput', 'Musée Titre');
+  await p.tap('#guestLink');
+  await until(p, () => window.__game?.state?.name === 'Musée Titre' && document.body.classList.contains('playing'), null, 30000);
+  // joueur qui revient : l'écran titre le reconnaît, Jouer l'emmène directement dans le quartier
+  await p.reload({ waitUntil: 'load' });
+  await p.waitForSelector('#title:not([hidden])', { timeout: 30000 * SLOW });
+  await until(p, () => /Musée Titre/.test(document.getElementById('titleWho').textContent), null, 20000);
+  if ((await p.evaluate(() => JSON.parse(localStorage.getItem('sam-settings')).music)) !== 80) throw new Error('réglages perdus après rechargement');
+  await p.tap('#titlePlay');
+  await until(p, () => document.body.classList.contains('playing') && window.__game.myPlot >= 0, null, 30000);
+  // le menu ☰ rouvre les mêmes options en jeu
+  await p.tap('#menuBtn');
+  await p.tap('#optionsBtn');
+  await p.waitForSelector('#options.open', { timeout: 10000 });
+  if (!(await p.evaluate(() => document.querySelector('#optQuality [data-q="high"]').classList.contains('on')))) throw new Error('options en jeu : qualité choisie non affichée');
+  await p.keyboard.press('Escape');
+}, landscape);
 
 await check('hub-mobile', '/', async (p) => {
   await p.setViewportSize({ width: 390, height: 844 });

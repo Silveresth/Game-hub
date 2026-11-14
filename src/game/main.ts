@@ -29,6 +29,7 @@ import { Seasons } from './seasons';
 import { Inventory, type InvTab } from './inventory';
 import { Tutorial, type TutoFacts } from './tutorial';
 import { CHANGELOG, GAME_VERSION, roadmapHtml, versionHtml } from '../shared/changelog';
+import { loadSettings, saveSettings } from './settings';
 
 const liveBar = mountLiveBar();
 setupPwa('../sw.js');
@@ -63,16 +64,12 @@ Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, n
 sun.shadow.bias = -0.0004;
 scene.add(sun, sun.target);
 
+/** Réglages de l'écran Options (musique, son, graphismes, caméra), gardés sur l'appareil. */
+const settings = loadSettings();
+
 // Qualité graphique : « Éco » (sans ombres, résolution 1×) par défaut sur les téléphones et petites machines
 type Quality = 'high' | 'low';
-function savedQuality(): Quality | null {
-  try {
-    return localStorage.getItem('sam-quality') as Quality | null;
-  } catch {
-    return null;
-  }
-}
-let quality: Quality = savedQuality() ?? (matchMedia('(pointer: coarse)').matches || (navigator.hardwareConcurrency ?? 8) <= 4 ? 'low' : 'high');
+let quality: Quality = settings.quality;
 function applyQuality(): void {
   const high = quality === 'high';
   renderer.setPixelRatio(high ? Math.min(devicePixelRatio, 1.75) : 1);
@@ -83,20 +80,17 @@ function applyQuality(): void {
     const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
     (Array.isArray(m) ? m : m ? [m] : []).forEach((x) => (x.needsUpdate = true));
   });
-  $('qualityBtn').textContent = high ? 'HD' : 'Éco';
-  $('qualityBtn').title = high ? 'Qualité haute (cliquer pour le mode économie)' : 'Mode économie (cliquer pour la qualité haute)';
 }
-$('qualityBtn').onclick = () => {
-  quality = quality === 'high' ? 'low' : 'high';
-  try {
-    localStorage.setItem('sam-quality', quality);
-  } catch {
-    /* stockage indisponible */
-  }
+/** Choix fait dans les options : appliqué tout de suite et gardé pour les prochaines parties. */
+function setQuality(q: Quality): void {
+  quality = q;
+  settings.quality = q;
+  settings.qualityChosen = true;
+  saveSettings(settings);
   applyQuality();
   pedestrians.setCount(pedestrianCount());
   seasons.setQuality(quality);
-};
+}
 applyQuality();
 
 const BASE_FOV = 58;
@@ -104,7 +98,9 @@ const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0
 const orbit = new OrbitControls(camera, canvas);
 orbit.enableDamping = true;
 orbit.dampingFactor = 0.14; // (0,05 par défaut : la caméra « glissait » longtemps, sensation de mollesse)
-orbit.rotateSpeed = matchMedia('(pointer: coarse)').matches ? 1.15 : 0.85;
+/** Vitesse de base de la caméra, multipliée par le réglage des options. */
+const CAM_SPEED = matchMedia('(pointer: coarse)').matches ? 1.15 : 0.85;
+orbit.rotateSpeed = CAM_SPEED * (settings.camSpeed / 100);
 orbit.enablePan = false;
 orbit.minDistance = 4;
 orbit.maxDistance = 24;
@@ -164,6 +160,8 @@ remotes.hidden = (x, z, f) => hiddenAt(x, z, f);
 guards.hidden = (x, z, f) => hiddenAt(x, z, f);
 const input = new Input();
 const sfx = new Sfx();
+sfx.setVolumes(settings.sfx, settings.music);
+sfx.setMuted(settings.muted);
 let player: Character | null = null;
 
 /** Les 7 parcelles du quartier ; `myView` est la vôtre (attribuée par le serveur). */
@@ -447,7 +445,7 @@ let crowbarArmed = false;
 let decorRoomIndex: number | null = null;
 
 /** Panneaux superposés (un seul ouvert à la fois). */
-const OVERLAYS = ['security', 'market', 'help', 'boards', 'decor', 'shop', 'social', 'inventory', 'news'] as const;
+const OVERLAYS = ['security', 'market', 'help', 'boards', 'decor', 'shop', 'social', 'inventory', 'news', 'options'] as const;
 const anyOverlayOpen = () => OVERLAYS.some((id) => $(id).classList.contains('open')) || $('welcome').classList.contains('open') || !$('chestOpen').hidden;
 
 function openOverlay(id: 'security' | 'market' | 'decor' | 'shop' | 'social' | 'inventory' | 'news'): void {
@@ -474,7 +472,7 @@ function closeOverlays(): void {
   if (!$('welcome').classList.contains('open')) input.enabled = true;
 }
 document.querySelectorAll<HTMLElement>('[data-close]').forEach((b) => (b.onclick = closeOverlays));
-for (const id of ['security', 'market', 'boards', 'decor', 'shop', 'social', 'inventory', 'news', 'help']) $(id).addEventListener('pointerdown', (e) => e.target === $(id) && closeOverlays());
+for (const id of ['security', 'market', 'boards', 'decor', 'shop', 'social', 'inventory', 'news', 'help', 'options']) $(id).addEventListener('pointerdown', (e) => e.target === $(id) && closeOverlays());
 
 // ---------------------------------------------------------------- menu ☰, nouveautés, tutoriel
 
@@ -508,6 +506,149 @@ $('helpTuto').onclick = () => {
   startTutorial();
 };
 $('rotateOk').onclick = () => document.body.classList.add('rotate-ok');
+
+// ---------------------------------------------------------------- options : musique, son, graphismes, caméra
+
+/** Plein écran possible : navigateur de téléphone (l'application Android est déjà en plein écran, l'iPhone ne le permet pas). */
+const canFullscreen = () => !inNativeApp && document.body.classList.contains('touch') && !!document.fullscreenEnabled;
+
+function openOptions(): void {
+  if (chat.isOpen) chat.close();
+  for (const o of OVERLAYS) $(o).classList.remove('open');
+  $('menu').hidden = true;
+  renderOptions();
+  $('options').classList.add('open');
+  input.enabled = false;
+}
+
+function renderOptions(): void {
+  const slider = (id: string, v: number, min: number, max: number, text: string) => {
+    const el = $<HTMLInputElement>(id);
+    el.value = String(v);
+    el.style.setProperty('--p', `${((v - min) / (max - min)) * 100}%`);
+    $(`${id}Val`).textContent = text;
+  };
+  slider('optMusic', settings.music, 0, 100, settings.music ? `${settings.music} %` : 'coupée');
+  slider('optSfx', settings.sfx, 0, 100, settings.sfx ? `${settings.sfx} %` : 'coupés');
+  slider('optCam', settings.camSpeed, 50, 200, `${settings.camSpeed} %`);
+  document.querySelectorAll<HTMLButtonElement>('#optQuality button').forEach((b) => b.classList.toggle('on', b.dataset.q === quality));
+  $<HTMLInputElement>('optAutoCam').checked = settings.autoCam;
+  $<HTMLInputElement>('optFull').checked = settings.fullscreen;
+  $('optFullWrap').hidden = !canFullscreen();
+}
+
+/** Volumes : appliqués en direct (la musique change pendant qu'on bouge le curseur). */
+function onVolume(): void {
+  settings.music = Number($<HTMLInputElement>('optMusic').value);
+  settings.sfx = Number($<HTMLInputElement>('optSfx').value);
+  // monter un volume alors que tout est coupé : on rétablit le son, sinon le réglage semblerait sans effet
+  if (settings.muted && (settings.music > 0 || settings.sfx > 0)) setMuted(false);
+  sfx.unlock();
+  sfx.setVolumes(settings.sfx, settings.music);
+  saveSettings(settings);
+  renderOptions();
+}
+$('optMusic').addEventListener('input', onVolume);
+$('optSfx').addEventListener('input', onVolume);
+$('optSfx').addEventListener('change', () => sfx.coin(2)); // aperçu du volume des bruitages
+$('optCam').addEventListener('input', () => {
+  settings.camSpeed = Number($<HTMLInputElement>('optCam').value);
+  orbit.rotateSpeed = CAM_SPEED * (settings.camSpeed / 100);
+  saveSettings(settings);
+  renderOptions();
+});
+$('optQuality').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-q]');
+  if (!b) return;
+  setQuality(b.dataset.q as Quality);
+  renderOptions();
+});
+$('optAutoCam').addEventListener('change', () => {
+  settings.autoCam = $<HTMLInputElement>('optAutoCam').checked;
+  saveSettings(settings);
+});
+$('optFull').addEventListener('change', () => {
+  settings.fullscreen = $<HTMLInputElement>('optFull').checked;
+  saveSettings(settings);
+  if (!settings.fullscreen && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+});
+$('optionsBtn').onclick = openOptions;
+$('optClose').onclick = closeOverlays;
+$('optDone').onclick = closeOverlays;
+
+/** Plein écran et écran à l'horizontale (navigateur de téléphone), à demander pendant un clic. */
+function goFullscreen(): void {
+  if (!settings.fullscreen || !canFullscreen() || document.fullscreenElement) return;
+  document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(
+    () => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => undefined),
+    () => undefined,
+  );
+}
+
+// ---------------------------------------------------------------- écran titre : Jouer, Options, Commandes, Nouveautés
+
+/** Connexion à la partie enregistrée, lancée dès l'écran titre (on entre plus vite en appuyant sur Jouer). */
+let titleLogin: Promise<Awaited<ReturnType<typeof api.login>>> | null = null;
+
+function showTitle(): void {
+  document.body.classList.add('on-title');
+  $('title').hidden = false;
+  document.getElementById('loading')?.setAttribute('hidden', '');
+  $('titleVer').textContent = `Version ${GAME_VERSION}`;
+  const who = $('titleWho');
+  if (!api.hasSavedSession()) {
+    who.textContent = 'Nouveau ? Votre musée est prêt en 10 secondes.';
+    return;
+  }
+  who.textContent = 'Connexion à votre musée…';
+  titleLogin = api.login();
+  titleLogin.then(
+    (r) => {
+      const b = document.createElement('b');
+      b.textContent = r.state.name;
+      who.replaceChildren('Bon retour, ', b, ` ! 💰 ${money(r.state.coins)}`);
+    },
+    () => (who.textContent = 'Connexion impossible pour l’instant : nouvel essai en appuyant sur Jouer.'),
+  );
+}
+
+function playFromTitle(): void {
+  sfx.unlock();
+  goFullscreen();
+  closeOverlays();
+  document.body.classList.remove('on-title');
+  $('title').hidden = true;
+  const pending = titleLogin;
+  titleLogin = null;
+  if (pending || api.hasSavedSession()) {
+    // le personnage n'est peut-être pas encore téléchargé : l'écran de chargement le montre
+    document.getElementById('loading')?.removeAttribute('hidden');
+    void (pending ?? api.login()).then((r) => start(undefined, undefined, undefined, r), () => start());
+  } else openAuth('signup');
+}
+
+$('titlePlay').onclick = playFromTitle;
+$('titleOptions').onclick = openOptions;
+$('titleHelp').onclick = () => {
+  closeOverlays();
+  $('help').classList.add('open');
+};
+$('titleNews').onclick = () => {
+  closeOverlays();
+  renderNews();
+  $('news').classList.add('open');
+};
+
+/** Recharge la page et revient directement en jeu, sans repasser par l'écran titre (changement de compte…). */
+function reloadIntoGame(): void {
+  try {
+    sessionStorage.setItem('sam-autoplay', '1');
+  } catch {
+    /* stockage indisponible : l'écran titre s'affichera */
+  }
+  location.reload();
+}
+
 // l'objectif se réduit d'un appui sur son titre
 $('quest').querySelector('.qhead')!.addEventListener('click', () => {
   $('quest').classList.toggle('mini');
@@ -1235,7 +1376,15 @@ function setPrompt(items: Array<{ key: string; text: string; poor?: boolean }>):
   $('tR').hidden = !items.some((i) => i.key === 'R');
 }
 
-$('muteBtn').onclick = () => ($('muteBtn').textContent = sfx.toggleMute() ? '🔇' : '🔊');
+/** Son coupé ou rétabli (bouton 🔊 du menu, ou en montant un volume dans les options). */
+function setMuted(muted: boolean): void {
+  settings.muted = muted;
+  saveSettings(settings);
+  sfx.setMuted(muted);
+  $('muteBtn').textContent = muted ? '🔇' : '🔊';
+}
+$('muteBtn').textContent = settings.muted ? '🔇' : '🔊';
+$('muteBtn').onclick = () => setMuted(!settings.muted);
 $('helpBtn').onclick = () => {
   $('menu').hidden = true;
   $('help').classList.add('open');
@@ -1953,7 +2102,7 @@ function applyPlot(info: PlotInfo): void {
 
 function onWelcome(m: Extract<ServerMsg, { t: 'welcome' }>): void {
   if (welcomed && m.you.plot !== myPlot) {
-    location.reload(); // parcelle réattribuée après une longue coupure : on repart proprement
+    reloadIntoGame(); // parcelle réattribuée après une longue coupure : on repart proprement
     return;
   }
   offset = m.now - Date.now();
@@ -2335,7 +2484,7 @@ async function start(name?: string, color?: string, country?: string, pre?: Awai
   if (started) {
     // déjà en jeu et nouvelle session (connexion Google après coup) : on repart proprement avec la session enregistrée,
     // plutôt que de garder le quartier de l'ancien compte et de doubler les minuteries
-    location.reload();
+    reloadIntoGame();
     return;
   }
   started = true;
@@ -2576,7 +2725,7 @@ async function authCall<T>(fn: () => Promise<T>): Promise<T | null> {
 /** Session ouverte (inscription, connexion, nouveau mot de passe) : on joue, ou on recharge si un autre musée était ouvert. */
 function enterWith(r: Awaited<ReturnType<typeof api.login>>): void {
   closeAuth();
-  if (started) location.reload();
+  if (started) reloadIntoGame();
   else void start(undefined, undefined, undefined, r);
 }
 
@@ -2730,6 +2879,21 @@ async function boot(): Promise<void> {
     history.replaceState(null, '', location.pathname);
     $('loading').hidden = true;
     openAuth('reset');
+    return;
+  }
+  // retour direct en jeu, sans écran titre : rechargement interne (changement de compte…) ou retour de la page de paiement
+  let direct = new URLSearchParams(location.search).has('pay');
+  try {
+    if (sessionStorage.getItem('sam-autoplay')) {
+      direct = true;
+      sessionStorage.removeItem('sam-autoplay');
+    }
+  } catch {
+    /* stockage indisponible */
+  }
+  if (!direct) {
+    // écran titre : Jouer, Options… (le personnage se télécharge pendant ce temps)
+    showTitle();
     return;
   }
   if (api.hasSavedSession()) {
@@ -2926,8 +3090,7 @@ function protection(v: MuseumView, now: number): string | null {
   if (!o || !state) return 'Rien à voler ici';
   if (o.shielded) return 'Protégé : bouclier débutant';
   if (o.immuneUntil > now) return `Protégé encore ${Math.ceil((o.immuneUntil - now) / 60_000)} min (déjà cambriolé)`;
-  if (o.value < state.value * 0.5) return 'Cible trop modeste pour vous';
-  // même règle que le serveur : un propriétaire absent ne perd qu'une œuvre toutes les 2 h
+  // même règle que le serveur : un propriétaire absent ne perd qu'une œuvre toutes les 10 min
   if (!v.online && (o.robbedUntil ?? 0) > now) return `musée protégé : son propriétaire est absent et s’est déjà fait voler une œuvre (encore ${fmtDur((o.robbedUntil ?? 0) - now)})`;
   return null;
 }
@@ -3155,7 +3318,7 @@ function updateCamera(dt: number): void {
   // Caméra automatique : quand le personnage avance et que le joueur ne tourne pas la caméra lui-même,
   // elle se replace doucement derrière lui (sauf s'il court vers la caméra : elle ne fait pas demi-tour).
   const sp = vel.length();
-  if (playing && !camDragging && performance.now() - camReleasedAt > 1400 && sp > 1.5 && !stealing) {
+  if (settings.autoCam && playing && !camDragging && performance.now() - camReleasedAt > 1400 && sp > 1.5 && !stealing) {
     const az = Math.atan2(camera.position.x - orbit.target.x, camera.position.z - orbit.target.z);
     const behind = facing + Math.PI;
     const d = Math.atan2(Math.sin(behind - az), Math.cos(behind - az));
@@ -3258,7 +3421,7 @@ let camFrozen = false;
  * Performance mobile : si le jeu tourne sous 26 images/s en qualité haute, on passe en Éco
  * (une seule fois, et seulement si le joueur n'a pas choisi lui-même).
  */
-const fpsProbe = { frames: 0, since: 0, done: savedQuality() !== null };
+const fpsProbe = { frames: 0, since: 0, done: settings.qualityChosen };
 function probeFps(): void {
   if (fpsProbe.done || !playing || hall.active) return;
   const now = performance.now();
@@ -3273,7 +3436,7 @@ function probeFps(): void {
     quality = 'low';
     applyQuality();
     pedestrians.setCount(pedestrianCount());
-    toast(`Mode Éco activé pour la fluidité (${Math.round(fps)} images/s). Bouton HD pour revenir.`);
+    toast(`Mode Économie activé pour la fluidité (${Math.round(fps)} images/s). Menu ☰ → Options pour revenir.`);
   }
 }
 

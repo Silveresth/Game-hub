@@ -18,8 +18,9 @@ const SELL_RATE = 0.5;
 // Règles de vol (cahier des charges, « Sécurité et vols »)
 const BEGINNER_MS = 24 * 3600_000; // bouclier débutant : 24 h…
 const BEGINNER_VALUE = 100_000; // … tant que le musée vaut moins de 100 000
-const IMMUNE_MS = 15 * 60_000; // immunité après un vol réussi
-const OFFLINE_LOSS_MS = 2 * 3600_000; // hors ligne : au plus une œuvre perdue toutes les 2 h
+// (avant : 15 min d'immunité et 2 h pour un absent, jugé beaucoup trop long : on doit pouvoir voler souvent)
+const IMMUNE_MS = 5 * 60_000; // courte pause après un vol réussi
+const OFFLINE_LOSS_MS = 10 * 60_000; // hors ligne : au plus une œuvre perdue toutes les 10 min
 const FINE_RATE = 0.1; // amende du voleur arrêté, versée au propriétaire
 const STATUE_SLOT_FROM = 214; // emplacements 214+ : socles du toit-terrasse (tools/gen-layout.mjs)
 const ID_RE = /^[A-Za-z0-9_-]{8,32}$/;
@@ -552,9 +553,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     if (thief.id === victim.id) return 'C’est votre propre musée';
     if (shielded(victim, now)) return 'Bouclier débutant : ce musée est protégé';
     if (victim.immuneUntil > now) return `Musée déjà cambriolé : protégé encore ${Math.ceil((victim.immuneUntil - now) / 60_000)} min`;
-    if (value(victim) < value(thief) * 0.5) return 'Cible trop modeste : elle vaut moins de la moitié de votre musée';
-    // (avant : « a déjà été volé récemment », compris comme « cette œuvre a déjà été volée »)
-    if (!victimOnline && now - victim.lastOfflineLoss < OFFLINE_LOSS_MS) return `Musée protégé : son propriétaire est absent et s’est déjà fait voler une œuvre il y a moins de 2 h (encore ${waitText(victim.lastOfflineLoss + OFFLINE_LOSS_MS - now)})`;
+    // (plus de règle « cible trop modeste » : on vole qui on veut, quelle que soit la valeur de son musée)
+    if (!victimOnline && now - victim.lastOfflineLoss < OFFLINE_LOSS_MS) return `Musée protégé : son propriétaire est absent et s’est déjà fait voler une œuvre il y a moins de ${OFFLINE_LOSS_MS / 60_000} min (encore ${waitText(victim.lastOfflineLoss + OFFLINE_LOSS_MS - now)})`;
     return null;
   }
 

@@ -1,6 +1,18 @@
 {
-  "current": "1.5.0",
+  "current": "1.6.0",
   "versions": [
+    {
+      "version": "1.6.0",
+      "date": "2026-11-14",
+      "title": "Musique, écran d’accueil et vols plus libres",
+      "items": [
+        { "type": "new", "text": "Musique de fond : un petit air de cambriolage joyeux, avec une mélodie qui change à chaque tour. Elle se met en pause quand le jeu passe en arrière-plan." },
+        { "type": "new", "text": "Écran d’accueil : Jouer, Options, Commandes et Nouveautés avant d’entrer dans le quartier. Il vous reconnaît quand vous revenez." },
+        { "type": "new", "text": "Options : volume de la musique et des bruitages, graphismes (haute qualité ou économie), vitesse de la caméra, caméra automatique, plein écran à l’horizontale sur téléphone. Les réglages sont gardés sur l’appareil, et le menu ☰ → Options les rouvre en jeu." },
+        { "type": "improved", "text": "Vols plus libres : on peut voler n’importe quel musée, même beaucoup plus petit que le sien (fini « cible trop modeste »)." },
+        { "type": "improved", "text": "Après un vol, le musée n’est plus protégé que 5 minutes (au lieu de 15), et un propriétaire absent peut se faire voler une œuvre toutes les 10 minutes (au lieu de 2 heures)." }
+      ]
+    },
     {
       "version": "1.5.0",
       "date": "2026-11-14",

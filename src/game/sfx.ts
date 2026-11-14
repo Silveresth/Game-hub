@@ -1,24 +1,77 @@
-/** Bruitages synthétisés en WebAudio (aucun fichier son). */
+import { Music } from './music';
+
+/** Volume réel d'un réglage de 0 à 100 (courbe au carré : le curseur suit ce que l'oreille perçoit). */
+const level = (v: number, ref: number, at: number) => ref * (v / at) ** 2;
+
+/** Bruitages synthétisés en WebAudio (aucun fichier son), et musique de fond. */
 export class Sfx {
   private ctx: AudioContext | null = null;
+  /** Coupure générale (bouton 🔊). */
   private master!: GainNode;
+  /** Bruitages. */
+  private fx!: GainNode;
+  private musicBus!: GainNode;
+  private music: Music | null = null;
   muted = false;
+  /** Volumes des options, de 0 à 100. */
+  private vol = { fx: 80, music: 50 };
 
-  /** À appeler depuis un geste utilisateur. */
+  /** À appeler depuis un geste utilisateur (le navigateur n'autorise le son qu'après un clic ou une touche). */
   unlock(): void {
     if (!this.ctx) {
-      this.ctx = new AudioContext();
+      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.6;
+      this.master.gain.value = this.muted ? 0 : 1;
       this.master.connect(this.ctx.destination);
+      this.fx = this.ctx.createGain();
+      this.fx.connect(this.master);
+      this.musicBus = this.ctx.createGain();
+      this.musicBus.connect(this.master);
+      this.applyVolumes();
+      this.music = new Music(this.ctx, this.musicBus);
+      // onglet caché, application en arrière-plan : son et musique en pause (batterie), reprise au retour
+      document.addEventListener('visibilitychange', () => {
+        if (!this.ctx) return;
+        if (document.hidden) void this.ctx.suspend();
+        else void this.ctx.resume();
+      });
     }
-    void this.ctx.resume();
+    if (!document.hidden && this.ctx.state !== 'running') void this.ctx.resume();
+    this.syncMusic();
+  }
+
+  /** Volumes des bruitages et de la musique (0 à 100) ; 0 pour la musique l'arrête. */
+  setVolumes(fx: number, music: number): void {
+    this.vol = { fx, music };
+    this.applyVolumes();
+    this.syncMusic();
+  }
+
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    if (this.ctx) this.master.gain.setTargetAtTime(muted ? 0 : 1, this.ctx.currentTime, 0.05);
+    this.syncMusic();
   }
 
   toggleMute(): boolean {
-    this.muted = !this.muted;
-    if (this.ctx) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.6, this.ctx.currentTime, 0.05);
+    this.setMuted(!this.muted);
     return this.muted;
+  }
+
+  private applyVolumes(): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.fx.gain.setTargetAtTime(level(this.vol.fx, 0.6, 80), t, 0.05);
+    // musique un peu sous les bruitages : une pièce ou une sirène doit toujours s'entendre par-dessus
+    this.musicBus.gain.setTargetAtTime(level(this.vol.music, 0.32, 50), t, 0.05);
+  }
+
+  /** La musique ne tourne que si elle s'entend (volume > 0, son non coupé) : rien n'est calculé pour rien. */
+  private syncMusic(): void {
+    if (!this.music) return;
+    if (!this.muted && this.vol.music > 0) this.music.start();
+    else this.music.stop();
   }
 
   private tone(freq: number, at: number, dur: number, type: OscillatorType = 'triangle', vol = 0.18, slide?: number): void {
@@ -32,7 +85,7 @@ export class Sfx {
     g.gain.setValueAtTime(0, c.currentTime + at);
     g.gain.linearRampToValueAtTime(vol, c.currentTime + at + 0.01);
     g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + at + dur);
-    o.connect(g).connect(this.master);
+    o.connect(g).connect(this.fx);
     o.start(c.currentTime + at);
     o.stop(c.currentTime + at + dur + 0.05);
   }
@@ -79,7 +132,7 @@ export class Sfx {
     o.frequency.exponentialRampToValueAtTime(45, c.currentTime + 0.07);
     g.gain.setValueAtTime(0.04, c.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.07);
-    o.connect(g).connect(this.master);
+    o.connect(g).connect(this.fx);
     o.start(c.currentTime);
     o.stop(c.currentTime + 0.08);
   }

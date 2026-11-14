@@ -104,7 +104,7 @@
     #menu button::after { content: attr(data-label); font: 800 10.5px var(--fun); color: #fff; opacity: .92; text-shadow: none; }
     #voiceBtn { --b1: #4fd8a0 !important; --b2: #1f9a6a !important; }
     #muteBtn { --b1: #63afff !important; --b2: #2a68e0 !important; }
-    #qualityBtn { --b1: #ffb45c !important; --b2: #e0731d !important; font-size: 14px !important; font-weight: 900; }
+    #optionsBtn { --b1: #ffb45c !important; --b2: #e0731d !important; }
     #helpBtn { --b1: #bb95ff !important; --b2: #7848e8 !important; }
     #tutoBtn { --b1: #ffd862 !important; --b2: #d99a10 !important; }
     #newsBtn { --b1: #ff92d2 !important; --b2: #d93d8b !important; }
@@ -708,7 +708,75 @@
     body[data-season="printemps"] #wallet { border-color: rgba(255, 158, 203, .7); }
     body[data-season="ete"] #wallet { border-color: rgba(255, 210, 63, .75); }
     body[data-season="fete"] #wallet { border-color: rgba(255, 63, 122, .7); }
+    /* ================================================================ écran titre */
+    body.on-title .livebar, body.on-title #helpTuto { display: none; }
+    #title { position: fixed; inset: 0; z-index: 38; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(16px, 4vh, 40px); padding: 20px max(16px, env(safe-area-inset-right)) 20px max(16px, env(safe-area-inset-left)); overflow: hidden;
+      background:
+        radial-gradient(circle at 16% 20%, rgba(255, 94, 154, .55), transparent 42%),
+        radial-gradient(circle at 86% 80%, rgba(61, 139, 255, .6), transparent 46%),
+        radial-gradient(circle at 72% 10%, rgba(255, 201, 60, .35), transparent 34%),
+        linear-gradient(160deg, rgba(64, 30, 130, .94), rgba(22, 14, 56, .96) 58%, rgba(10, 24, 64, .96)); }
+    #title[hidden] { display: none; }
+    .t-brand { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+    .t-logo { width: 104px; height: auto; filter: drop-shadow(0 12px 22px rgba(0, 0, 0, .45)); animation: tFloat 3.2s ease-in-out infinite; }
+    .t-name { font: 900 clamp(36px, 7vw, 66px)/.95 var(--fun); letter-spacing: -.02em; color: #fff; text-shadow: 0 4px 0 #6a2fd6, 0 10px 28px rgba(0, 0, 0, .4); }
+    .t-name span { display: block; background: linear-gradient(180deg, #fff3b0, #ffc93c 55%, #ff8a3d); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 4px 0 #8a4a06); }
+    .t-tag { color: #eadfff; font: 700 15px var(--fun); }
+    .t-who { color: #ffd36b; font: 800 15px var(--fun); min-height: 20px; }
+    .t-menu { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 12px; width: min(340px, 100%); }
+    .t-menu .go { width: 100%; font-size: 19px; padding: 13px 18px; border-radius: 18px; }
+    .t-menu .go.play { font-size: 27px; padding: 17px 18px; background: linear-gradient(180deg, #8dffb0, #2fcf6a); color: #073b1a; box-shadow: 0 5px 0 #138a3e, inset 0 2px 0 rgba(255, 255, 255, .55), 0 0 0 0 rgba(141, 255, 176, 0), 0 0 0 rgba(47, 207, 106, 0); animation: tPulse 1.8s ease-in-out infinite; }
+    .t-menu .go.play:active { box-shadow: 0 1px 0 #138a3e; }
+    .t-menu .go.play.wait { animation: none; filter: saturate(.6); }
+    .t-row { display: flex; gap: 10px; }
+    .t-row .go { flex: 1; font-size: 15px; padding: 11px 8px; }
+    .t-ver { position: absolute; right: var(--safe-r); bottom: max(10px, env(safe-area-inset-bottom)); color: rgba(255, 255, 255, .55); font: 700 11px var(--fun); }
+    /* petits tableaux dorés qui flottent dans le décor */
+    .t-deco i { position: absolute; border: 6px solid #ffc93c; border-radius: 6px; box-shadow: inset 0 0 0 3px #b07a12, 0 10px 24px rgba(0, 0, 0, .35); opacity: .55; animation: tDrift 9s ease-in-out infinite; }
+    .t-deco i:nth-child(1) { width: 96px; height: 74px; left: 6%; top: 12%; background: linear-gradient(135deg, #3d8bff, #4cc38a); }
+    .t-deco i:nth-child(2) { width: 70px; height: 92px; right: 8%; top: 9%; background: linear-gradient(160deg, #ff9ecb, #b46bff); animation-delay: -3s; }
+    .t-deco i:nth-child(3) { width: 84px; height: 64px; left: 10%; bottom: 12%; background: linear-gradient(135deg, #ffd36b, #ff5e62); animation-delay: -5s; }
+    .t-deco i:nth-child(4) { width: 64px; height: 64px; right: 12%; bottom: 14%; border-radius: 50%; background: radial-gradient(circle, #9fe3ff, #3d8bff); animation-delay: -7s; }
+    .t-deco i:nth-child(5) { width: 54px; height: 70px; left: 46%; top: 4%; background: linear-gradient(180deg, #4cc38a, #1d6fd8); animation-delay: -2s; opacity: .35; }
+    @keyframes tFloat { 50% { transform: translateY(-8px) rotate(-2deg); } }
+    /* halo qui respire autour de « Jouer » (sans changer la taille du bouton) */
+    @keyframes tPulse { 50% { box-shadow: 0 5px 0 #138a3e, inset 0 2px 0 rgba(255, 255, 255, .55), 0 0 0 7px rgba(141, 255, 176, .3), 0 0 30px rgba(47, 207, 106, .6); filter: brightness(1.08); } }
+    @keyframes tDrift { 0%, 100% { transform: translateY(0) rotate(-6deg); } 50% { transform: translateY(-16px) rotate(5deg); } }
+    /* téléphone à l'horizontale : le titre à gauche, les boutons à droite */
+    @media (max-height: 520px) {
+      #title { flex-direction: row; gap: clamp(20px, 6vw, 60px); }
+      .t-logo { width: 64px; }
+      .t-name { font-size: clamp(30px, 6vw, 44px); }
+      .t-tag { font-size: 13px; }
+      .t-menu { width: min(300px, 46vw); gap: 9px; }
+      .t-menu .go { font-size: 16px; padding: 10px 14px; }
+      .t-menu .go.play { font-size: 22px; padding: 13px 14px; }
+      .t-row .go { font-size: 13px; padding: 9px 6px; }
+    }
+
+    /* ================================================================ options */
+    #options .sheet { --accent: #b46bff; --accent2: #3d8bff; }
+    .opt-group { display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 18px; background: rgba(255, 255, 255, .05); border: 2px solid rgba(255, 255, 255, .08); }
+    .opt-title { font: 800 15px var(--fun); }
+    .opt { display: grid; grid-template-columns: 170px 1fr 70px; align-items: center; gap: 12px; font: 800 15px var(--fun); }
+    .opt output { text-align: right; color: #ffd36b; font-variant-numeric: tabular-nums; }
+    .sheet .opt input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 14px; padding: 0; border-radius: 99px; cursor: pointer; touch-action: pan-x;
+      background: linear-gradient(90deg, #ffc93c var(--p, 50%), rgba(255, 255, 255, .15) var(--p, 50%)); border: 2px solid rgba(255, 255, 255, .2); }
+    .opt input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #ffe08a 42%, #f2b632); border: 3px solid #fff; box-shadow: 0 3px 0 #b07a12, 0 4px 10px rgba(0, 0, 0, .4); }
+    .opt input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #ffe08a 42%, #f2b632); border: 3px solid #fff; box-shadow: 0 3px 0 #b07a12; }
+    .opt.toggle { grid-template-columns: auto 1fr; cursor: pointer; font-size: 14px; }
+    .sheet .opt.toggle input { width: 26px; height: 26px; padding: 0; border: none; accent-color: #ffc93c; cursor: pointer; }
+    .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .seg button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, .07); border: 3px solid rgba(255, 255, 255, .12); color: #fff; font: 900 16px var(--fun); cursor: pointer; text-align: left; }
+    .seg button small { font: 700 12px var(--fun); color: #b3b0c9; }
+    .seg button.on { border-color: #ffc93c; background: rgba(255, 201, 60, .16); box-shadow: 0 0 0 3px rgba(255, 201, 60, .2); }
+    @media (max-width: 560px) {
+      .opt { grid-template-columns: 1fr 64px; }
+      .opt input[type=range] { grid-column: 1 / -1; grid-row: 2; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
+      .t-logo, .t-menu .go.play, .t-deco i { animation: none !important; }
       .bm-neon, .bm-icon, .pack .gems, .chest-card .rays, .chest-svg .shine, .chest-svg .twinkle, #dailyBtn, #giftBtn, .art-card.r-mythique { animation: none !important; }
     }
   </style>
@@ -717,6 +785,26 @@
   <div id="livebar" class="livebar"></div>
   <div id="loading"><div class="load-box"><img src="/logo.svg" alt="" width="96" height="100" /><span>Ouverture du musée…</span></div></div>
   <canvas id="c" class="game"></canvas>
+
+  <!-- écran titre : Jouer, Options (avant d'entrer dans le quartier) -->
+  <div id="title" hidden>
+    <div class="t-deco" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="t-brand">
+      <img class="t-logo" src="/logo.svg" alt="" width="104" height="108" />
+      <h1 class="t-name">Steal a <span>Masterpiece</span></h1>
+      <p class="t-tag">Volez les chefs-d’œuvre. Protégez le vôtre.</p>
+      <p class="t-who" id="titleWho" aria-live="polite"></p>
+    </div>
+    <nav class="t-menu" aria-label="Menu principal">
+      <button type="button" class="go play" id="titlePlay">▶ Jouer</button>
+      <button type="button" class="go alt" id="titleOptions">⚙️ Options</button>
+      <div class="t-row">
+        <button type="button" class="go ghost" id="titleHelp">❔ Commandes</button>
+        <button type="button" class="go ghost" id="titleNews">📜 Nouveautés</button>
+      </div>
+    </nav>
+    <span class="t-ver" id="titleVer"></span>
+  </div>
 
   <!-- porte-monnaie : une ligne ; un appui déplie les détails -->
   <div id="wallet" title="Toucher pour les détails">
@@ -760,7 +848,7 @@
   <div id="menu" hidden>
     <button id="voiceBtn" data-label="Voix" title="Discussion vocale de proximité (micro)">🎙</button>
     <button id="muteBtn" data-label="Son" title="Son">🔊</button>
-    <button id="qualityBtn" data-label="Graphismes" title="Qualité graphique">HD</button>
+    <button id="optionsBtn" data-label="Options" title="Options : musique, son, graphismes, caméra">⚙️</button>
     <button id="helpBtn" data-label="Commandes" title="Commandes">❔</button>
     <button id="tutoBtn" data-label="Tutoriel" title="Revoir le tutoriel">🎓</button>
     <button id="newsBtn" data-label="Nouveautés" title="Versions du jeu">📜</button>
@@ -822,6 +910,29 @@
       <button type="button" class="linkbtn danger" id="logoutBtn" data-modes="member">Se déconnecter de cet appareil</button>
       <button type="button" class="linkbtn" id="closeAccount" data-modes="account">Fermer</button>
     </form>
+  </div>
+
+  <div id="options" class="overlay">
+    <div class="sheet">
+      <div class="sheet-head"><h1>⚙️ Options</h1><button class="close" id="optClose" type="button" aria-label="Fermer">✕</button></div>
+      <div class="opt-group">
+        <div class="opt"><label for="optMusic">🎵 Musique</label><input type="range" id="optMusic" min="0" max="100" step="5" /><output id="optMusicVal" for="optMusic"></output></div>
+        <div class="opt"><label for="optSfx">🔊 Bruitages</label><input type="range" id="optSfx" min="0" max="100" step="5" /><output id="optSfxVal" for="optSfx"></output></div>
+      </div>
+      <div class="opt-group">
+        <div class="opt-title">🖥 Graphismes</div>
+        <div class="seg" id="optQuality">
+          <button type="button" data-q="high">✨ Haute qualité<small>ombres, image nette</small></button>
+          <button type="button" data-q="low">🔋 Économie<small>plus fluide sur téléphone</small></button>
+        </div>
+      </div>
+      <div class="opt-group">
+        <div class="opt"><label for="optCam">🎥 Vitesse de la caméra</label><input type="range" id="optCam" min="50" max="200" step="10" /><output id="optCamVal" for="optCam"></output></div>
+        <label class="opt toggle"><input type="checkbox" id="optAutoCam" /><span>La caméra se replace derrière mon personnage quand j’avance</span></label>
+        <label class="opt toggle" id="optFullWrap"><input type="checkbox" id="optFull" /><span>Plein écran et écran à l’horizontale en lançant le jeu</span></label>
+      </div>
+      <button class="go" id="optDone" type="button">C’est bon !</button>
+    </div>
   </div>
 
   <div id="help" class="overlay">

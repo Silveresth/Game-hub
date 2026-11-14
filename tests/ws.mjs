@@ -161,7 +161,7 @@ ok(!sA.artworks.some((a) => a.uid === target.uid) && sB.artworks.some((a) => a.w
 ok(!sA.artworks.some((a) => a.slot === target.slot), 'la place de l’œuvre volée reste vide (aucune œuvre de la réserve ne s’y accroche toute seule)');
 const plotAfter = [...cB.inbox].reverse().find((m) => m.t === 'plot' && m.plot.index === wA.you.plot);
 ok(plotAfter && !plotAfter.plot.owner.artworks.some((a) => a.uid === target.uid || a.slot === target.slot), 'les autres joueurs ne voient plus rien à cette place');
-ok(sA.immuneUntil > Date.now(), 'A est immunisé 15 min');
+ok(sA.immuneUntil > Date.now() && sA.immuneUntil <= Date.now() + 5 * 60_000, 'A est protégé 5 min (pas plus)');
 const boardT = await http('leaderboard?board=theft');
 ok(boardT.some((r) => r.name === 'Musée Bêta' && r.value > 0), 'classement « plus gros casses » à jour');
 // B revend son butin : A redevient une cible valable quel que soit le tirage du convoi
@@ -662,7 +662,7 @@ await cC.wait((m) => m.t === 'welcome');
 cC.ws.close();
 cB.ws.close();
 
-// --- Propriétaire absent : une seule œuvre perdue toutes les 2 h, et un message clair pour les voleurs suivants ---
+// --- Propriétaire absent : une seule œuvre perdue toutes les 10 min, et un message clair pour les voleurs suivants ---
 {
   const V = await newPlayer('Musée Absent');
   await http('dev/grant', { coins: 3_000_000 }, V);
@@ -693,17 +693,57 @@ cB.ws.close();
     const h1 = plotOf(w1.you.plot);
     c1.send({ t: 'pos', x: h1.x + 2, z: h1.z, ry: 0, anim: 'Running' });
     await c1.wait((m) => m.t === 'steal' && m.phase === 'delivered' && m.thief === T1.id, 8000);
-    const last = [...c2.inbox].reverse().find((m) => m.t === 'plot' && m.plot.index === wV.you.plot);
-    ok(last && !last.plot.owner.artworks.some((a) => a.uid === shown[0].uid) && last.plot.owner.robbedUntil > Date.now() + 110 * 60_000, 'un autre joueur ne voit plus l’œuvre volée, et sait que le musée est protégé 2 h');
-    await http('dev/age', { keepOfflineLoss: true }, V); // fin des 15 min d'immunité, pas de la règle des 2 h
+    // (on attend la mise à jour de la parcelle chez l'autre joueur : elle peut arriver juste après « delivered »)
+    const last = await c2.wait((m) => m.t === 'plot' && m.plot.index === wV.you.plot && !m.plot.owner.artworks.some((a) => a.uid === shown[0].uid), 5000).catch(() => null);
+    const left = (last?.plot.owner.robbedUntil ?? 0) - Date.now();
+    ok(last && left > 9 * 60_000 && left <= 10 * 60_000, 'un autre joueur ne voit plus l’œuvre volée, et sait que le musée est protégé 10 min');
+    await http('dev/age', { keepOfflineLoss: true }, V); // fin des 5 min de pause après un vol, pas de la règle des 10 min
     goTo(c2, shown[1]);
     await sleep(300);
     c2.send({ t: 'steal', plot: wV.you.plot, uid: shown[1].uid });
     const no = await c2.wait((m) => m.t === 'steal' && ((m.phase === 'start' && m.thief === T2.id) || m.phase === 'refused'));
-    ok(no.phase === 'refused' && /absent/.test(no.error) && /moins de 2 h/.test(no.error), `second vol refusé : « ${no.error} »`);
-  } else ok(true, '(musée trop petit pour tester la règle des 2 h)');
+    ok(no.phase === 'refused' && /absent/.test(no.error) && /moins de 10 min/.test(no.error), `second vol refusé : « ${no.error} »`);
+  } else ok(true, '(musée trop petit pour tester la règle des 10 min)');
   c1.ws.close();
   c2.ws.close();
+}
+
+// --- Plus de règle « cible trop modeste » : un très grand musée peut voler un tout petit musée ---
+{
+  const Rich = await newPlayer('Musée Géant');
+  const Poor = await newPlayer('Musée Minuscule');
+  await http('dev/grant', { coins: 3_000_000 }, Rich);
+  await http('dev/grant', { coins: 3_000_000 }, Poor);
+  for (const who of [Rich, Poor]) {
+    for (let k = 0; k < 3 && !(await http('state', null, who)).artworks.length; k++) {
+      for (const it of (await http('convoy', null, who)).items) await http('buy', { window: it.window }, who).catch(() => {});
+      await sleep(300);
+    }
+  }
+  // le voleur possède une Mythique : son musée vaut des centaines de fois celui de sa cible
+  const overview = await fetch(base + '/api/admin/overview', { headers: { 'x-admin-token': 'dev-admin' } }).then((r) => r.json());
+  const mythic = overview.works?.find((w) => w.unique && !w.owner);
+  const richArt = (await http('state', null, Rich)).artworks[0];
+  if (mythic && richArt) await http('dev/mythic', { uid: richArt.uid, workId: mythic.id }, Rich);
+  await http('dev/age', {}, Poor);
+  const sRich = await http('state', null, Rich);
+  const sPoor = await http('state', null, Poor);
+  const prey = sPoor.artworks.find((a) => a.slot !== null);
+  if (prey && sRich.value > sPoor.value * 2) {
+    const cR = await connect(Rich);
+    await cR.wait((m) => m.t === 'welcome');
+    const cP = await connect(Poor);
+    const wP = await cP.wait((m) => m.t === 'welcome');
+    const pP = plotOf(wP.you.plot);
+    const w = slotWorld(pP, prey.slot);
+    cR.send({ t: 'pos', x: w.x + (pP.x - w.x) * 0.25, z: w.z + (pP.z - w.z) * 0.25, ry: 0, anim: 'Idle' });
+    await sleep(300);
+    cR.send({ t: 'steal', plot: wP.you.plot, uid: prey.uid });
+    const r = await cR.wait((m) => m.t === 'steal' && ((m.phase === 'start' && m.thief === Rich.id) || m.phase === 'refused'));
+    ok(r.phase === 'start', `un musée de ${Math.round(sRich.value).toLocaleString('fr-FR')} vole un musée de ${Math.round(sPoor.value).toLocaleString('fr-FR')}${r.error ? ` (refusé : « ${r.error} »)` : ''}`);
+    cR.ws.close();
+    cP.ws.close();
+  } else ok(true, '(convoi sans œuvre exploitable : test « grand contre petit » sauté)');
 }
 
 // --- Serveur privé : réservé à son propriétaire et à ses amis invités ---
