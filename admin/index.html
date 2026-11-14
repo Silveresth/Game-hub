@@ -52,6 +52,38 @@
     .colors-row input[type=color] { width: 70px; height: 38px; padding: 2px; }
     .colors-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .live-actions .tag { margin-left: 4px; }
+    /* joueurs */
+    .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .card-head h2 { margin: 0; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+    .toolbar input[type=search] { flex: 3; min-width: 200px; }
+    .toolbar select { flex: 1; min-width: 150px; }
+    .table-wrap { overflow-x: auto; margin-top: 8px; }
+    #pTable { min-width: 760px; }
+    #pTable td, #pTable th { vertical-align: middle; }
+    td.num, th.num { text-align: right; white-space: nowrap; }
+    #pTable tr.sel { background: rgba(232,182,76,.08); }
+    #pTable .acts { white-space: nowrap; text-align: right; }
+    #pTable .acts button { padding: 6px 10px; }
+    input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--gold); }
+    .tag.on { background: #155c2e; color: #9dffb9; }
+    .tag.guest { background: rgba(255,255,255,.06); color: #a9a49a; }
+    .pager { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 10px; }
+    .gift-kinds { display: flex; gap: 8px; flex-wrap: wrap; }
+    .gift-kinds button { background: rgba(255,255,255,.05); color: #fff; border: 2px solid rgba(255,255,255,.12); }
+    .gift-kinds button.on { border-color: var(--gold); background: rgba(232,182,76,.14); }
+    #gSummary { min-height: 18px; }
+    dialog { margin: auto; overflow: auto; width: min(720px, 100% - 24px); max-height: calc(100% - 24px); padding: 0; background: #10131d; color: #fff; border: 1px solid rgba(232,182,76,.35); border-radius: 18px; }
+    dialog::backdrop { background: rgba(0,0,0,.7); }
+    dialog form { padding: 18px; }
+    .dlg-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .dlg-head h2 { margin: 0; }
+    .dlg-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    #pDetail h3 { font: 800 15px Georgia, serif; margin: 16px 0 6px; color: #ffd36b; }
+    #pDetail .facts { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; }
+    #pDetail .facts span { color: #a9a49a; }
+    #pDetail table button { padding: 4px 9px; font-size: 12px; }
+    .danger-zone { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,90,110,.3); }
   </style>
 </head>
 <body>
@@ -75,6 +107,76 @@
           <div><b id="sDistricts">—</b><span class="muted">quartiers</span></div>
           <div><b id="sLive">—</b><span class="muted">vente en cours</span></div>
         </div>
+      </section>
+
+      <section class="card" id="playersCard">
+        <div class="card-head">
+          <h2>Joueurs</h2>
+          <button type="button" class="ghost" id="newPlayer">+ Créer un compte</button>
+        </div>
+        <div class="toolbar">
+          <input id="pSearch" type="search" placeholder="Rechercher : nom, e-mail, identifiant, code d’invitation" aria-label="Rechercher un joueur" />
+          <select id="pFilter" aria-label="Filtrer">
+            <option value="all">Tous les joueurs</option>
+            <option value="registered">Inscrits (e-mail ou Google)</option>
+            <option value="guests">Invités (sans compte)</option>
+            <option value="online">En ligne</option>
+          </select>
+          <select id="pSort" aria-label="Trier">
+            <option value="recent">Plus récents</option>
+            <option value="seen">Dernière activité</option>
+            <option value="value">Valeur du musée</option>
+            <option value="coins">Pièces</option>
+            <option value="sth">STH coins</option>
+            <option value="name">Nom (A → Z)</option>
+          </select>
+        </div>
+        <p class="muted" id="pCounts" style="margin-top:8px"></p>
+        <div class="table-wrap">
+          <table id="pTable">
+            <thead><tr>
+              <th><input type="checkbox" id="pAll" aria-label="Cocher toute la page" /></th>
+              <th>Joueur</th><th>Pays</th><th class="num">Niv.</th><th class="num">Pièces</th><th class="num">STH</th><th class="num">Valeur</th><th>Activité</th><th></th>
+            </tr></thead>
+            <tbody id="players"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button type="button" class="ghost" id="pPrev">‹ Précédents</button>
+          <span class="muted" id="pPage"></span>
+          <button type="button" class="ghost" id="pNext">Suivants ›</button>
+        </div>
+      </section>
+
+      <section class="card" id="giftCard">
+        <h2>🎁 Offrir un cadeau</h2>
+        <form id="giftForm">
+          <label>À qui
+            <select id="gTarget">
+              <option value="selected">Joueurs cochés dans la liste</option>
+              <option value="registered">Tous les inscrits</option>
+              <option value="online">Tous les joueurs en ligne</option>
+              <option value="all">Tous les joueurs (invités compris)</option>
+            </select>
+          </label>
+          <div class="gift-kinds" id="gKinds">
+            <button type="button" data-kind="coins" class="on">💰 Pièces</button>
+            <button type="button" data-kind="sth">💎 STH coins</button>
+            <button type="button" data-kind="chest">🧰 Lucky coffres</button>
+            <button type="button" data-kind="artwork">🖼 Une œuvre</button>
+          </div>
+          <div class="row">
+            <label id="gChestWrap" hidden>Coffre<select id="gChest"></select></label>
+            <label id="gWorkWrap" hidden>Œuvre<select id="gWork"></select></label>
+            <label id="gFrameWrap" hidden>Cadre<select id="gFrame"></select></label>
+            <label id="gAmountWrap">Quantité<input id="gAmount" type="number" min="1" step="1" value="10000" required /></label>
+          </div>
+          <label>Petit mot (facultatif, affiché au joueur)<input id="gMessage" maxlength="140" placeholder="Merci de jouer à Steal a Masterpiece !" /></label>
+          <p class="muted" id="gSummary"></p>
+          <button type="submit">Envoyer le cadeau</button>
+          <p id="gMsg" style="font-weight:700;min-height:20px"></p>
+          <p class="muted">Le cadeau est crédité tout de suite. Le joueur en ligne le voit à l’écran ; l’absent le découvre à sa prochaine connexion (et par notification s’il les a activées).</p>
+        </form>
       </section>
 
       <section class="card">
@@ -133,6 +235,42 @@
       </section>
     </div>
   </main>
+
+  <dialog id="pDlg" aria-labelledby="pDlgTitle">
+    <form id="pForm">
+      <div class="dlg-head">
+        <h2 id="pDlgTitle">Joueur</h2>
+        <button type="button" class="ghost" id="pDlgClose" aria-label="Fermer">✕</button>
+      </div>
+      <p class="muted" id="pDlgMeta" style="margin:6px 0 12px"></p>
+      <div id="pDlgMsg" style="min-height:20px;font-weight:700"></div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="row">
+          <label>Nom d’utilisateur<input id="fName" maxlength="24" required /></label>
+          <label>E-mail<input id="fEmail" type="email" maxlength="254" /></label>
+        </div>
+        <div class="row">
+          <label>Pays<select id="fCountry"></select></label>
+          <label id="fLevelWrap">Niveau du musée<select id="fLevel"></select></label>
+        </div>
+        <div class="row" id="fMoneyRow">
+          <label>Pièces<input id="fCoins" type="number" min="0" step="1" /></label>
+          <label>STH coins<input id="fSth" type="number" min="0" step="1" /></label>
+        </div>
+        <label><span id="fPwLabel">Nouveau mot de passe (facultatif)</span><input id="fPassword" type="text" autocomplete="off" minlength="8" maxlength="200" /></label>
+        <div class="dlg-actions">
+          <button type="submit" id="fSave">Enregistrer</button>
+          <button type="button" class="ghost" id="fGift">🎁 Offrir un cadeau</button>
+          <button type="button" class="ghost" id="fLogout">Fermer ses sessions</button>
+        </div>
+      </div>
+      <div id="pDetail"></div>
+      <div class="danger-zone" id="fDangerZone">
+        <button type="button" class="danger" id="fDelete">Supprimer ce joueur</button>
+        <span class="muted">Définitif : musée, œuvres, pièces et STH coins sont effacés.</span>
+      </div>
+    </form>
+  </dialog>
   <script type="module" src="/src/admin/main.ts"></script>
 </body>
 </html>

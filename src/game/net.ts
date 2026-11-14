@@ -1,5 +1,5 @@
 import type { FrameId } from './catalog';
-import type { SeasonState } from './api';
+import type { AdminGift, SeasonState } from './api';
 import type { MuseumSnap } from './museumView';
 
 export interface PlotInfo {
@@ -163,7 +163,8 @@ export type ServerMsg =
   | { t: 'plot'; plot: PlotInfo }
   | { t: 'lock'; plot: number; lockedUntil: number; lockReadyAt: number; error?: string }
   | { t: 'teleport'; x: number; z: number; f?: number }
-  | { t: 'kicked'; reason: string }
+  | { t: 'kicked'; reason: string; title?: string }
+  | { t: 'admin-gift'; gift: AdminGift }
   | { t: 'error'; error: string }
   | StealEvent;
 

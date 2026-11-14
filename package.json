@@ -1,7 +1,7 @@
 {
   "name": "game-hub",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,7 @@
     "start": "npm run build && node server/index.mjs",
     "test": "node tests/smoke.mjs",
     "test:pwa": "node tests/pwa.mjs",
-    "test:server": "node tests/ws.mjs && node tests/auction.mjs",
+    "test:server": "node tests/ws.mjs && node tests/auction.mjs && node tests/admin.mjs",
     "icons": "node tools/make-icons.mjs",
     "android:assets": "node tools/make-android-assets.mjs",
     "android:sync": "cap sync android",

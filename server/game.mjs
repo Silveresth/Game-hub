@@ -75,17 +75,28 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   /** @type {Map<string, any>} */
   const players = await db.loadAllPlayers(migrate);
 
-  // Écriture différée et atomique des joueurs modifiés
+  // Écriture différée et atomique des joueurs modifiés (une passe à la fois : une suppression attend la passe en cours)
   const dirty = new Set();
-  setInterval(async () => {
+  async function saveDirty() {
     for (const id of [...dirty]) {
       dirty.delete(id);
       const p = players.get(id);
       if (!p) continue;
       await db.savePlayer(id, p);
     }
+  }
+  let saving = Promise.resolve();
+  setInterval(() => {
+    saving = saving.then(saveDirty).catch((e) => console.error('Enregistrement des joueurs :', e.message));
   }, 2000).unref();
   const touch = (p) => dirty.add(p.id);
+  /** Dernière activité du joueur (affichée dans le panneau admin), notée au plus une fois par minute. */
+  function seen(p) {
+    const now = Date.now();
+    if (now - (p.lastSeen ?? 0) < 60_000) return;
+    p.lastSeen = now;
+    touch(p);
+  }
 
   // ---------------------------------------------------------------- calculs
 
@@ -662,7 +673,9 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
 
   function authenticate(id, token) {
     const p = ID_RE.test(String(id)) ? players.get(id) : null;
-    return p && tokenOk(p, token) ? p : null;
+    if (!p || !tokenOk(p, token)) return null;
+    seen(p);
+    return p;
   }
 
   // ---------------------------------------------------------------- compte Google (facultatif : SAM_GOOGLE_CLIENT_ID)
@@ -701,7 +714,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       color: colors.includes(body.color) ? body.color : colors[0],
       country: cleanCountry(body.country) ?? 'FR',
       skin: cleanSkin(body.skin) ?? 0,
-      coins: START_COINS, level: 1, artworks: [], cash: 0, lastTick: Date.now(), createdAt: Date.now(), bought: [],
+      coins: START_COINS, level: 1, artworks: [], cash: 0, lastTick: Date.now(), createdAt: Date.now(), lastSeen: Date.now(), bought: [],
     });
     players.set(id, p);
     touch(p);
@@ -719,6 +732,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     const offlineGain = accrue(p);
     const inbox = p.inbox;
     p.inbox = [];
+    seen(p);
     touch(p);
     return { id: p.id, token, state: state(p), offlineGain: Math.floor(offlineGain), created: false, inbox };
   }
@@ -999,6 +1013,268 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     };
   }
 
+  // ---------------------------------------------------------------- panneau admin : gestion des joueurs et cadeaux
+
+  /** Erreur renvoyée telle quelle au panneau admin (statut HTTP 422 par défaut). */
+  const fail = (message, status = 422) => {
+    throw Object.assign(new Error(message), { status });
+  };
+  const isRegistered = (p) => !!(p.email || p.googleKey);
+  const seenAt = (p) => p.lastSeen ?? p.lastTick ?? 0;
+  function needPlayer(id) {
+    const p = typeof id === 'string' ? players.get(id) : null;
+    if (!p) fail('Joueur introuvable', 404);
+    return p;
+  }
+
+  /** Ligne de la liste des joueurs (jamais le mot de passe, son empreinte ni les jetons de session). */
+  function adminRow(p) {
+    return {
+      id: p.id, name: p.name, email: p.email ?? null, google: !!p.googleKey, password: !!p.passwordHash, registered: isRegistered(p),
+      country: p.country ?? 'FR', color: p.color, level: p.level, maxLevel: levels.length,
+      coins: Math.floor(p.coins), sth: Math.floor(p.sth), value: Math.round(value(p)), artworks: p.artworks.length,
+      chestCount: Object.values(p.chests).reduce((s, n) => s + (Number(n) || 0), 0), rebirths: p.rebirths ?? 0,
+      createdAt: p.createdAt ?? 0, lastSeen: seenAt(p), online: isOnline(p.id), escrow: p.escrow,
+    };
+  }
+
+  /**
+   * Liste paginée des joueurs. `filter` : all | registered (e-mail ou Google) | guests | online ;
+   * `sort` : recent | seen | value | coins | sth | name ; `q` cherche dans le nom, l'e-mail, l'identifiant et le code d'invitation.
+   */
+  function adminListPlayers({ q = '', filter = 'all', sort = 'recent', page = 0, size = 50 } = {}) {
+    const needle = String(q).trim().toLowerCase().slice(0, 100);
+    const all = [...players.values()];
+    let list = all;
+    if (filter === 'registered') list = list.filter(isRegistered);
+    else if (filter === 'guests') list = list.filter((p) => !isRegistered(p));
+    else if (filter === 'online') list = list.filter((p) => isOnline(p.id));
+    if (needle) {
+      list = list.filter((p) => p.name.toLowerCase().includes(needle) || (p.email ?? '').includes(needle) || p.id.toLowerCase() === needle || p.inviteCode?.toLowerCase() === needle);
+    }
+    const key = { recent: (p) => p.createdAt ?? 0, seen: seenAt, value, coins: (p) => p.coins, sth: (p) => p.sth }[sort];
+    if (key) list = list.map((p) => [key(p), p]).sort((a, b) => b[0] - a[0]).map(([, p]) => p);
+    else list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+    const n = Math.max(10, Math.min(200, Math.floor(Number(size)) || 50));
+    const pages = Math.max(1, Math.ceil(list.length / n));
+    const pg = Math.max(0, Math.min(pages - 1, Math.floor(Number(page)) || 0));
+    const registered = all.filter(isRegistered).length;
+    return {
+      total: list.length, page: pg, pages, size: n,
+      counts: { all: all.length, registered, guests: all.length - registered, online: all.filter((p) => isOnline(p.id)).length },
+      players: list.slice(pg * n, pg * n + n).map(adminRow),
+    };
+  }
+
+  /** Fiche complète d'un joueur pour le panneau admin. */
+  function adminPlayer(id) {
+    const p = needPlayer(id);
+    accrue(p);
+    const s = p.security;
+    return {
+      ...adminRow(p),
+      cash: Math.floor(p.cash), income: income(p), inviteCode: p.inviteCode, skin: p.skin ?? 0, quest: p.questIndex,
+      devices: 1 + (p.deviceTokens?.length ?? 0), pushDevices: p.push?.subs?.length ?? 0,
+      chests: Object.fromEntries(Object.keys(CHESTS).map((c) => [c, p.chests[c] ?? 0])),
+      tools: p.tools, upgrades: p.upgrades, stats: p.stats, privateUntil: p.privateUntil ?? 0,
+      security: { guardsUntil: s.guards?.until ?? 0, camerasUntil: s.camerasUntil, insuranceUntil: s.insuranceUntil, dogUntil: s.dogUntil, lasers: s.lasers, generator: s.generator },
+      artworks: p.artworks.map((a) => ({ uid: a.uid, workId: a.workId, frame: a.frame, slot: a.slot, repro: !!a.repro, carried: !!a.carriedBy, value: Math.round(workValue(a)) })),
+      purchases: p.purchases.slice(-10).reverse(),
+    };
+  }
+
+  /** Création d'un compte par l'admin : l'e-mail est l'identifiant ; sans mot de passe, le joueur passe par « Mot de passe oublié ». */
+  async function adminCreatePlayer(body) {
+    const name = cleanName(body.name);
+    if (!name) fail('Nom d’utilisateur : 2 à 24 caractères');
+    const email = cleanEmail(body.email);
+    if (!email) fail('E-mail invalide : il sert d’identifiant au joueur');
+    if (byEmail(email)) fail('Cet e-mail a déjà un compte', 409);
+    if (nameTaken(name, null)) fail('Ce nom d’utilisateur est déjà pris', 409);
+    let passwordHash = null;
+    if (body.password) {
+      const bad = passwordProblem(body.password);
+      if (bad) fail(bad);
+      passwordHash = await hashPassword(body.password);
+    }
+    const { p } = newPlayer({ name, color: body.color, country: body.country });
+    p.email = email;
+    if (passwordHash) p.passwordHash = passwordHash;
+    touch(p);
+    changed(p);
+    return adminPlayer(p.id);
+  }
+
+  /** Modification d'un joueur : identité, solde, niveau, mot de passe, déconnexion de tous ses appareils. */
+  async function adminUpdatePlayer(id, body) {
+    const p = needPlayer(id);
+    // tout est vérifié avant la moindre modification : une requête refusée ne laisse rien à moitié changé
+    const name = body.name === undefined ? undefined : cleanName(body.name);
+    if (name === null) fail('Nom d’utilisateur : 2 à 24 caractères');
+    const email = body.email === undefined || body.email === (p.email ?? '') ? undefined : cleanEmail(body.email);
+    if (email === null) fail('E-mail invalide');
+    if (email && byEmail(email) && byEmail(email) !== p) fail('Cet e-mail est déjà utilisé par un autre compte', 409);
+    if (name && (email || isRegistered(p)) && nameTaken(name, p)) fail('Ce nom d’utilisateur est déjà pris', 409);
+    const country = body.country === undefined ? undefined : cleanCountry(body.country);
+    if (country === null) fail('Pays inconnu');
+    if (body.color !== undefined && !colors.includes(body.color)) fail('Couleur inconnue');
+    const num = (v, label, max) => {
+      if (v === undefined || v === '' || v === null) return undefined;
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 0 || n > max) fail(`${label} : un nombre entier entre 0 et ${max.toLocaleString('fr-FR')}`);
+      return n;
+    };
+    const coins = num(body.coins, 'Pièces', 1e15);
+    const sth = num(body.sth, 'STH coins', 1e9);
+    const level = num(body.level, 'Niveau', levels.length);
+    if (level === 0) fail(`Niveau : de 1 à ${levels.length}`);
+    if (level !== undefined && level !== p.level && p.artworks.some((a) => a.carriedBy)) fail('Une de ses œuvres est en train d’être volée : réessayez dans un instant', 409);
+    const password = typeof body.password === 'string' && body.password ? body.password : null;
+    if (password) {
+      const bad = passwordProblem(password);
+      if (bad) fail(bad);
+      if (!email && !p.email) fail('Ajoutez d’abord un e-mail : c’est l’identifiant de connexion');
+    }
+    if (body.logout && !isRegistered(p) && !email) fail('Joueur invité : sans compte, il perdrait son musée pour toujours (supprimez-le plutôt)');
+    const passwordHash = password ? await hashPassword(password) : null;
+
+    accrue(p);
+    if (name) p.name = name;
+    if (email) p.email = email;
+    if (country) p.country = country;
+    if (body.color !== undefined) p.color = body.color;
+    if (coins !== undefined) p.coins = coins;
+    if (sth !== undefined) p.sth = sth;
+    if (level !== undefined && level !== p.level) {
+      const up = level > p.level;
+      p.level = level;
+      const slots = levelInfo(p).slots;
+      // musée réduit : ce qui n'a plus de place part en réserve ; agrandi : la réserve rejoint les nouveaux emplacements
+      for (const a of p.artworks) if (a.slot !== null && a.slot >= slots) a.slot = null;
+      if (up) for (const a of p.artworks) if (a.slot === null) a.slot = freeSlot(p, a.workId);
+    }
+    if (passwordHash) p.passwordHash = passwordHash;
+    if (body.logout || passwordHash) {
+      // nouveau mot de passe ou déconnexion forcée : toutes les sessions ouvertes sont fermées
+      p.tokenHash = hash(newToken());
+      p.deviceTokens = [];
+    }
+    touch(p);
+    changed(p);
+    return { player: adminPlayer(p.id), loggedOut: !!(body.logout || passwordHash) };
+  }
+
+  /** Retire une œuvre du musée d'un joueur (modération). */
+  function adminRemoveArtwork(id, uid) {
+    const p = needPlayer(id);
+    const i = p.artworks.findIndex((a) => a.uid === uid);
+    if (i < 0) fail('Œuvre introuvable', 404);
+    if (p.artworks[i].carriedBy) fail('Cette œuvre est en train d’être volée : réessayez dans un instant', 409);
+    accrue(p);
+    p.artworks.splice(i, 1);
+    touch(p);
+    changed(p);
+    return adminPlayer(p.id);
+  }
+
+  /** Raison pour laquelle un joueur ne peut pas être supprimé tout de suite, ou null. */
+  function adminDeleteBlocker(id) {
+    const p = needPlayer(id);
+    if (p.escrow > 0) return 'Ce joueur a une enchère en cours : réessayez à la fin du lot';
+    if (p.artworks.some((a) => a.carriedBy)) return 'Une de ses œuvres est en train d’être volée : réessayez dans un instant';
+    return null;
+  }
+
+  /** Suppression définitive (ses Mythiques redeviennent libres pour les ventes et les coffres). */
+  async function adminDeletePlayer(id) {
+    const why = adminDeleteBlocker(id);
+    if (why) fail(why, 409);
+    const p = players.get(id);
+    players.delete(id);
+    dirty.delete(id);
+    rankCache.at = 0;
+    mythicCache.at = 0;
+    await saving; // une sauvegarde de ce joueur déjà en cours se termine avant l'effacement (sinon il reviendrait)
+    await db.deletePlayer(id);
+    return { id, name: p.name };
+  }
+
+  /**
+   * Cadeau de l'admin : pièces, STH coins, Lucky coffres ou une œuvre, pour un ou plusieurs joueurs choisis,
+   * ou pour tous (`target` : all | registered | online). Le joueur absent le découvre à sa reconnexion
+   * (et par notification) ; celui qui est en ligne est prévenu en direct par le quartier (`online`).
+   */
+  function adminGift(body) {
+    const kind = String(body.kind ?? '');
+    const message = typeof body.message === 'string' ? body.message.replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) : '';
+    let targets;
+    if (body.target === 'all') targets = [...players.values()];
+    else if (body.target === 'registered') targets = [...players.values()].filter(isRegistered);
+    else if (body.target === 'online') targets = [...players.values()].filter((p) => isOnline(p.id));
+    else if (Array.isArray(body.ids)) targets = [...new Set(body.ids.slice(0, 1000).map(String))].map((x) => players.get(x)).filter(Boolean);
+    else targets = [];
+    if (!targets.length) fail('Aucun joueur choisi');
+
+    const amount = (max, label) => {
+      const n = Number(body.amount);
+      if (!Number.isInteger(n) || n < 1 || n > max) fail(`${label} : un nombre entier entre 1 et ${max.toLocaleString('fr-FR')}`);
+      return n;
+    };
+    let gift;
+    if (kind === 'coins') gift = { kind, amount: amount(1e12, 'Pièces') };
+    else if (kind === 'sth') gift = { kind, amount: amount(1_000_000, 'STH coins') };
+    else if (kind === 'chest') {
+      if (!own(CHESTS, body.chest)) fail('Coffre inconnu');
+      gift = { kind, chest: body.chest, amount: amount(100, 'Nombre de coffres') };
+    } else if (kind === 'artwork') {
+      const w = typeof body.workId === 'string' ? works.get(body.workId) : null;
+      if (!w) fail('Œuvre inconnue');
+      const frame = typeof body.frame === 'string' && own(frames, body.frame) ? body.frame : 'normal';
+      if (w.unique) {
+        // une Mythique est unique sur tout le serveur
+        if (targets.length !== 1) fail('Une Mythique est unique : choisissez un seul joueur');
+        const owner = ownerOf(w.id);
+        if (owner) fail(`« ${w.title} » appartient déjà à ${owner.name}`, 409);
+      }
+      gift = { kind, workId: w.id, frame };
+    } else fail('Cadeau inconnu');
+    if (message) gift.message = message;
+
+    const now = Date.now();
+    const online = [];
+    for (const p of targets) {
+      accrue(p, now);
+      if (kind === 'coins') p.coins += gift.amount;
+      else if (kind === 'sth') p.sth += gift.amount;
+      else if (kind === 'chest') p.chests[gift.chest] = (p.chests[gift.chest] ?? 0) + gift.amount;
+      else {
+        p.artworks.push({ uid: randomBytes(6).toString('base64url'), workId: gift.workId, frame: gift.frame, slot: freeSlot(p, gift.workId), boughtAt: now, gift: true });
+        const rarity = works.get(gift.workId).rarity;
+        if (rarity !== 'commun') p.stats.rare++;
+        if (rank(rarity) >= rank('epique')) p.stats.epic++;
+        if (gift.frame !== 'normal') p.stats.framed++;
+        changed(p);
+      }
+      touch(p);
+      if (isOnline(p.id)) online.push(p.id);
+      else {
+        pushInbox(p, { type: 'gift', ...gift, at: now });
+        void notify(p, 'abuse', { title: '🎁 Un cadeau vous attend', body: `${giftText(gift)}${message ? ` · ${message}` : ''}. Revenez dans votre musée !` });
+      }
+    }
+    return { gift, count: targets.length, online };
+  }
+
+  /** « 5 000 pièces », « 2 × Lucky coffre rare », « La Joconde (cadre doré) »… */
+  function giftText(g) {
+    const fr = (n) => n.toLocaleString('fr-FR');
+    if (g.kind === 'coins') return `${fr(g.amount)} pièces`;
+    if (g.kind === 'sth') return `${fr(g.amount)} STH coins`;
+    if (g.kind === 'chest') return `${g.amount} × ${CHESTS[g.chest]?.label ?? 'Lucky coffre'}`;
+    const w = works.get(g.workId);
+    return `« ${w?.title ?? g.workId} »${g.frame !== 'normal' ? ` (${frames[g.frame]?.label ?? g.frame})` : ''}`;
+  }
+
   // ---------------------------------------------------------------- HTTP
 
   const json = (res, status, body) => {
@@ -1043,10 +1319,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   }
 
   function auth(req) {
-    const id = String(req.headers['x-player-id'] ?? '');
-    const token = String(req.headers['x-player-token'] ?? '');
-    const p = ID_RE.test(id) ? players.get(id) : null;
-    return p && tokenOk(p, token) ? p : null;
+    return authenticate(String(req.headers['x-player-id'] ?? ''), String(req.headers['x-player-token'] ?? ''));
   }
 
   async function handle(req, res, url) {
@@ -1073,6 +1346,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     if (route === 'login' && req.method === 'POST') {
       const existing = ID_RE.test(String(body.id ?? '')) ? players.get(body.id) : null;
       if (existing && tokenOk(existing, body.token)) {
+        seen(existing);
         const offlineGain = accrue(existing);
         const inbox = existing.inbox;
         if (inbox.length) {
@@ -1810,5 +2084,16 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     rarityOf: (workId) => works.get(workId)?.rarity,
     /** Appelé à chaque changement visible d'un musée (achat, agrandissement, vol…). */
     onChange: (fn) => listeners.push(fn),
+    /** Panneau admin : joueurs (liste, fiche, création, modification, suppression) et cadeaux. */
+    admin: {
+      players: adminListPlayers,
+      player: adminPlayer,
+      create: adminCreatePlayer,
+      update: adminUpdatePlayer,
+      removeArtwork: adminRemoveArtwork,
+      deleteBlocker: adminDeleteBlocker,
+      remove: adminDeletePlayer,
+      gift: adminGift,
+    },
   };
 }

@@ -9,7 +9,7 @@
  *
  * Quartiers et enchères en cours vivent en mémoire : une seule instance du serveur à la fois, même avec PostgreSQL.
  */
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export async function createDatabase({ dataDir }) {
@@ -127,6 +127,12 @@ export async function createDatabase({ dataDir }) {
     }
   }
 
+  /** Efface un joueur pour de bon (suppression depuis le panneau admin). */
+  async function deletePlayer(id) {
+    if (pg) await pg.query('DELETE FROM players WHERE id = $1', [id]);
+    else await rm(join(dir, `${id}.json`), { force: true });
+  }
+
   // ---------------------------------------------------------------- petites valeurs (ventes, clés push, visiteurs)
 
   /**
@@ -168,6 +174,7 @@ export async function createDatabase({ dataDir }) {
   return {
     loadAllPlayers,
     savePlayer,
+    deletePlayer,
     kvGet,
     kvSet,
     ping,

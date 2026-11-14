@@ -1,6 +1,17 @@
 {
-  "current": "1.4.0",
+  "current": "1.5.0",
   "versions": [
+    {
+      "version": "1.5.0",
+      "date": "2026-11-14",
+      "title": "Cadeaux de l’équipe et gestion des joueurs",
+      "items": [
+        { "type": "new", "text": "Cadeaux de l’équipe : des pièces, des STH coins, des Lucky coffres ou une œuvre, avec un petit mot. Si vous êtes en jeu, le cadeau s’affiche tout de suite ; sinon, il vous attend à votre prochaine connexion (et une notification vous prévient si vous les avez activées)." },
+        { "type": "new", "text": "Panneau admin : liste de tous les joueurs (inscrits et invités) avec recherche par nom, e-mail ou identifiant, filtres (inscrits, invités, en ligne), tri et pages." },
+        { "type": "new", "text": "Panneau admin : fiche de chaque joueur pour modifier son nom, son e-mail, son pays, ses pièces, ses STH coins, le niveau de son musée et son mot de passe, retirer une œuvre, fermer ses sessions ou supprimer le compte. L’admin peut aussi créer un compte." },
+        { "type": "new", "text": "Panneau admin : cadeaux aux joueurs cochés, à tous les inscrits, à tous les joueurs en ligne ou à tout le monde." }
+      ]
+    },
     {
       "version": "1.4.0",
       "date": "2026-11-13",

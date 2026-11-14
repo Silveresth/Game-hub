@@ -165,7 +165,16 @@ export interface SecurityOffers {
 export type InboxItem =
   | { type: 'stolen'; workId: string; frame: FrameId; by: string; refund?: number; at: number }
   | { type: 'caught'; by: string; workId?: string; fine: number; byGuard: boolean; at: number }
-  | { type: 'attempt'; by: string; reason: string; at: number };
+  | { type: 'attempt'; by: string; reason: string; at: number }
+  | ({ type: 'gift'; at: number } & AdminGift);
+
+/** Cadeau envoyé par l'admin (pièces, STH coins, Lucky coffres ou une œuvre), avec un petit mot facultatif. */
+export type AdminGift = { message?: string } & (
+  | { kind: 'coins'; amount: number }
+  | { kind: 'sth'; amount: number }
+  | { kind: 'chest'; chest: string; amount: number }
+  | { kind: 'artwork'; workId: string; frame: FrameId }
+);
 
 export interface ConvoyItem {
   window: number;

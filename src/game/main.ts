@@ -2157,6 +2157,23 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
   }
 }
 
+/** « 5 000 pièces », « 2 × Lucky coffre rare », « La Joconde (Cadre doré) »… */
+function giftText(g: api.AdminGift): string {
+  if (g.kind === 'coins') return `${money(g.amount)} pièces`;
+  if (g.kind === 'sth') return `${money(g.amount)} STH coins`;
+  if (g.kind === 'chest') return `${g.amount} × ${(CATALOG.chests as Record<string, { label: string }>)[g.chest]?.label ?? 'Lucky coffre'}`;
+  return `« ${work(g.workId).title} »${g.frame !== 'normal' ? ` (${CATALOG.frames[g.frame].label})` : ''}`;
+}
+
+/** Cadeau de l'admin reçu pendant la partie : il est déjà crédité, le porte-monnaie est relu. */
+function onAdminGift(g: api.AdminGift): void {
+  sfx.coin(3);
+  confetti(pos, 60);
+  banner('🎁 Cadeau de l’équipe !', [giftText(g), g.message].filter(Boolean).join(' · '));
+  chat.system(`🎁 Cadeau de l’équipe : ${giftText(g)}${g.message ? ` · « ${g.message} »` : ''}`);
+  refreshSoon();
+}
+
 net.onMessage = (m) => {
   switch (m.t) {
     case 'welcome': onWelcome(m); break;
@@ -2262,9 +2279,10 @@ net.onMessage = (m) => {
       if (m.f !== undefined) floor = m.f;
       break;
     case 'kicked':
-      banner('Partie ouverte ailleurs', m.reason);
+      banner(m.title ?? 'Partie ouverte ailleurs', m.reason);
       playing = false;
       break;
+    case 'admin-gift': onAdminGift(m.gift); break;
     case 'steal': onSteal(m); break;
     case 'bonk': onBonk(m); break;
     case 'coins': onCoins(m); break;
@@ -2334,6 +2352,16 @@ async function start(name?: string, color?: string, country?: string, pre?: Awai
   const stolen = inbox.filter((i): i is Extract<InboxItem, { type: 'stolen' }> => i.type === 'stolen');
   const caught = inbox.filter((i): i is Extract<InboxItem, { type: 'caught' }> => i.type === 'caught');
   const attempts = inbox.filter((i) => i.type === 'attempt');
+  // cadeaux de l'équipe reçus pendant l'absence (déjà crédités : l'état reçu les contient)
+  const gifts = inbox.filter((i): i is Extract<InboxItem, { type: 'gift' }> => i.type === 'gift');
+  const showGifts = () => {
+    sfx.coin(3);
+    banner(
+      gifts.length === 1 ? '🎁 Un cadeau de l’équipe vous attendait !' : `🎁 ${gifts.length} cadeaux de l’équipe vous attendaient !`,
+      gifts.map((g) => [giftText(g), g.message].filter(Boolean).join(' : ')).join(' · '),
+    );
+    for (const g of gifts) chat.system(`🎁 Cadeau de l’équipe : ${giftText(g)}${g.message ? ` · « ${g.message} »` : ''}`);
+  };
   const defended = [
     caught.length ? `${caught.length} voleur${caught.length > 1 ? 's' : ''} arrêté${caught.length > 1 ? 's' : ''} par vos gardes (+${money(caught.reduce((s, c) => s + c.fine, 0))})` : '',
     attempts.length ? `${attempts.length} tentative${attempts.length > 1 ? 's' : ''} repérée${attempts.length > 1 ? 's' : ''} par l’alarme` : '',
@@ -2349,9 +2377,11 @@ async function start(name?: string, color?: string, country?: string, pre?: Awai
   } else if (defended) {
     sfx.coin(3);
     banner('Votre musée a tenu bon !', defended);
-  } else if (r.created) banner('Bienvenue dans le quartier !', 'Approchez-vous d’un camion du convoi et appuyez sur E pour acheter');
+  } else if (gifts.length) showGifts();
+  else if (r.created) banner('Bienvenue dans le quartier !', 'Approchez-vous d’un camion du convoi et appuyez sur E pour acheter');
   else if (r.offlineGain > 0) banner('Bon retour !', `Votre caisse a gagné ${money(r.offlineGain)} pièces en votre absence`);
   else banner(`Bon retour, ${r.state.name}`);
+  if ((stolen.length || defended) && gifts.length) setTimeout(showGifts, 3500);
   if (r.state.daily.claimable) setTimeout(() => toast(`🎁 Récompense du jour : +${money(r.state.daily.reward)} (bouton 🎁 ou boutique)`), 3600);
   // tutoriel : automatique pour un nouveau joueur (ou un joueur qui débute) ; proposé une fois aux autres
   if (!Tutorial.seen()) {

@@ -291,8 +291,48 @@ async function adminApi(req, res, url) {
       if (req.method === 'POST' && parts[4] === 'announce') return ok({ sale: auctions.announceSale(parts[3]) });
       if (req.method === 'POST' && parts[4] === 'start') return ok({ sale: auctions.startNow(parts[3]) });
     }
+    // joueurs : liste (recherche, filtre, tri, pages), fiche, création, modification, suppression
+    if (parts[2] === 'players' && !parts[3]) {
+      if (req.method === 'GET') {
+        const q = (k) => url.searchParams.get(k) ?? undefined;
+        return ok(game.admin.players({ q: q('q'), filter: q('filter'), sort: q('sort'), page: q('page'), size: q('size') }));
+      }
+      if (req.method === 'POST') {
+        const body = await readJson(req, res);
+        if (body === undefined) return;
+        return ok({ player: await game.admin.create(body) });
+      }
+    }
+    if (parts[2] === 'players' && parts[3]) {
+      const id = parts[3];
+      if (!parts[4] && req.method === 'GET') return ok({ player: game.admin.player(id) });
+      if (!parts[4] && req.method === 'PATCH') {
+        const body = await readJson(req, res);
+        if (body === undefined) return;
+        const r = await game.admin.update(id, body);
+        // sessions fermées : le joueur connecté est sorti du quartier tout de suite
+        if (r.loggedOut) districts.kick(id, 'Session fermée', 'L’administrateur a fermé vos sessions : reconnectez-vous avec votre compte.');
+        return ok(r);
+      }
+      if (!parts[4] && req.method === 'DELETE') {
+        const why = game.admin.deleteBlocker(id);
+        if (why) return send(res, 409, { error: why });
+        districts.forget(id);
+        return ok(await game.admin.remove(id));
+      }
+      if (parts[4] === 'artworks' && parts[5] && req.method === 'DELETE') return ok({ player: game.admin.removeArtwork(id, parts[5]) });
+    }
+    // cadeaux : pièces, STH coins, coffres ou une œuvre, aux joueurs choisis ou à tous
+    if (parts[2] === 'gifts' && req.method === 'POST') {
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      const r = game.admin.gift(body);
+      let live = 0;
+      for (const id of r.online) if (districts.sendTo(id, { t: 'admin-gift', gift: r.gift })) live++;
+      return ok({ gift: r.gift, count: r.count, live });
+    }
   } catch (e) {
-    return send(res, 422, { error: e.message });
+    return send(res, e.status ?? 422, { error: e.message });
   }
   return send(res, 404, { error: 'Route inconnue' });
 }

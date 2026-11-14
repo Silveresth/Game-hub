@@ -868,9 +868,38 @@ export async function attachDistricts(httpServer, game, { layoutFile, devMode = 
     ws.on('error', () => undefined);
   });
 
+  /** Ferme la connexion d'un joueur (déconnexion forcée par l'admin). Renvoie true s'il était en ligne. */
+  function kick(id, title, reason) {
+    const c = conns.get(id);
+    if (!c) return false;
+    send(c.ws, { t: 'kicked', title, reason });
+    c.ws.close();
+    leave(c);
+    return true;
+  }
+
   return {
     startLiveEvent,
     stopLiveEvent,
+    /** Message direct à un joueur en ligne (cadeau de l'admin…) ; false s'il n'est pas connecté. */
+    sendTo: (id, msg) => {
+      const c = conns.get(id);
+      if (!c || c.ws.readyState !== 1) return false;
+      send(c.ws, msg);
+      return true;
+    },
+    kick,
+    /** Joueur supprimé : connexion fermée, et son musée endormi quitte la parcelle qu'il occupait. */
+    forget(id) {
+      kick(id, 'Compte supprimé', 'Ce musée a été supprimé par l’administrateur.');
+      const d = districts.get(placement.get(id));
+      const pl = d?.plots.find((x) => x.ownerId === id);
+      if (pl) {
+        freePlot(d, pl);
+        broadcast(d, { t: 'plot', plot: plotInfo(pl) });
+      }
+      placement.delete(id);
+    },
     /** Nouvelle saison (thème du monde) : tous les joueurs en ligne la voient tout de suite. */
     broadcastSeason: (season) => broadcastAll({ t: 'season', season }),
     stats: () => ({ districts: districts.size, online: conns.size, private: [...districts.values()].filter((d) => d.privateOwner).length }),
