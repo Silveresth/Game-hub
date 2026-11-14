@@ -40,7 +40,9 @@ async function fetchJson(url, init = {}) {
 const postJson = (url, body, headers = {}) => fetchJson(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', ...headers }, body: JSON.stringify(body) });
 
 export async function createPayments({ game, db, devMode = false }) {
-  const env = process.env;
+  // valeurs nettoyées : une clé collée avec un espace ou un retour à la ligne (champ de texte de Render) est refusée
+  // par le prestataire, ou rend l'en-tête « Authorization » invalide
+  const env = Object.fromEntries(Object.entries(process.env).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]));
   const PACKS = game.premium.packs ?? [];
   const packById = new Map(PACKS.map((p) => [p.id, p]));
 
@@ -96,13 +98,23 @@ export async function createPayments({ game, db, devMode = false }) {
     ? {
         id: 'fedapay',
         methods: ['tmoney', 'flooz', 'card'],
+        sandbox: fedaBase.includes('sandbox'),
+        /** Clé acceptée par FedaPay ? (seule une réponse 401 / 403 veut dire « clé refusée ») */
+        async check() {
+          try {
+            await fetchJson(`${fedaBase}/transactions?per_page=1`, { headers: { accept: 'application/json', ...fedaHeaders() } });
+          } catch (e) {
+            if (e.status === 401 || e.status === 403) throw e;
+          }
+        },
         async create(order, { returnUrl }) {
+          // champs de la documentation FedaPay (description, amount, currency obligatoires) ; le numéro de commande
+          // voyage dans custom_metadata (merchant_reference n'est pas documenté pour la création)
           const tx = unwrapFeda(await postJson(`${fedaBase}/transactions`, {
             description: order.description,
             amount: order.amount,
             currency: { iso: 'XOF' },
             callback_url: returnUrl,
-            merchant_reference: order.id,
             custom_metadata: { order: order.id },
           }, fedaHeaders()));
           if (!tx?.id) throw new Error('FedaPay : transaction non créée');
@@ -218,9 +230,45 @@ export async function createPayments({ game, db, devMode = false }) {
     ? { id: 'test', methods: Object.keys(METHODS), async create() { return { test: true }; }, async verify(order) { return order.testPaid ? 'paid' : 'pending'; } }
     : null;
 
+  if (paypal) paypal.sandbox = env.PAYPAL_ENV === 'sandbox';
   const providers = Object.fromEntries([paygate, fedapay, cinetpay, paypal].filter(Boolean).map((p) => [p.id, p]));
   const realProviders = Object.keys(providers).length;
   if (test && !realProviders) providers.test = test;
+
+  // ---------------------------------------------------------------- santé des prestataires (logs Render + panneau admin)
+
+  /** Dernier état connu de chaque prestataire : clé acceptée au démarrage, dernière erreur. */
+  const health = {};
+  const keyHint = (id) => (id === 'fedapay' ? 'vérifiez FEDAPAY_SECRET_KEY (clé secrète sk_…) et FEDAPAY_ENV (sandbox avec une clé sk_sandbox_…, live avec une clé sk_live_…)' : 'vérifiez ses clés dans l’environnement du serveur');
+  function noteError(id, e) {
+    const auth = e.status === 401 || e.status === 403;
+    health[id] = { ...(health[id] ?? {}), lastError: { at: Date.now(), status: e.status ?? null, message: String(e.message).slice(0, 300), auth } };
+    console.error(`Paiement ${id} : ${auth ? `CLÉ REFUSÉE par le prestataire — ${keyHint(id)}.` : 'erreur'} ${e.message}`);
+  }
+  for (const p of Object.values(providers)) {
+    if (!p.check) continue;
+    p.check().then(
+      () => {
+        health[p.id] = { ...(health[p.id] ?? {}), keyOk: true, checkedAt: Date.now() };
+        console.log(`💳 ${p.id} : clé acceptée (${p.sandbox ? 'sandbox, paiements de test' : 'live, vrais paiements'})`);
+      },
+      (e) => {
+        health[p.id] = { ...(health[p.id] ?? {}), keyOk: e.status === 401 || e.status === 403 ? false : null, checkedAt: Date.now() };
+        noteError(p.id, e);
+      },
+    );
+  }
+
+  /**
+   * Message pour le joueur quand le prestataire refuse de créer le paiement. En mode test (sandbox), on donne la
+   * vraie raison (c'est le développeur qui teste) ; en vrai, un message simple, la raison complète est dans les logs.
+   */
+  function payError(prov, e) {
+    const detail = prov.sandbox ? ` [${prov.id} sandbox : ${String(e.message).slice(0, 180)}]` : '';
+    if (e.status === 401 || e.status === 403) return `Paiement indisponible : le prestataire refuse la clé du serveur${detail}`;
+    if (e.status >= 400 && e.status < 500) return `Le prestataire a refusé ce paiement${detail}`;
+    return `Le service de paiement ne répond pas : réessayez dans un instant${detail}`;
+  }
 
   /** Prestataire retenu pour un moyen de paiement (le premier configuré), ou null. */
   function providerFor(method) {
@@ -291,8 +339,9 @@ export async function createPayments({ game, db, devMode = false }) {
       order.updatedAt = Date.now();
       save();
     } catch (e) {
-      // prestataire injoignable : on réessaiera
+      // prestataire injoignable : on réessaiera (une clé refusée est signalée dans les logs et le panneau admin)
       order.hint = null;
+      if (e.status === 401 || e.status === 403) noteError(prov.id, e);
       if (devMode) console.warn(`Vérification ${order.id} impossible :`, e.message);
     }
     return order;
@@ -432,8 +481,8 @@ export async function createPayments({ game, db, devMode = false }) {
         save();
         return json(res, 200, { order: publicOrder(order), url: r.url ?? null, push: !!r.push, test: !!r.test });
       } catch (e) {
-        console.error(`Paiement ${prov.id} : création impossible :`, e.message);
-        return json(res, e.status === 402 ? 402 : 502, { error: e.status === 402 ? e.message : 'Le service de paiement ne répond pas : réessayez dans un instant' });
+        noteError(prov.id, e);
+        return json(res, e.status === 402 ? 402 : 502, { error: e.status === 402 ? e.message : payError(prov, e) });
       }
     }
 
@@ -471,6 +520,8 @@ export async function createPayments({ game, db, devMode = false }) {
       for (const o of list) if (o.status === 'paid') totals[o.currency] = (totals[o.currency] ?? 0) + o.amount;
       return {
         providers: Object.keys(providers),
+        // clé acceptée au démarrage, mode (sandbox / live) et dernière erreur de chaque prestataire
+        health: Object.fromEntries(Object.values(providers).map((p) => [p.id, { sandbox: !!p.sandbox, ...(health[p.id] ?? {}) }])),
         totals,
         recent: list.slice(0, 15).map((o) => ({ ...publicOrder(o), provider: o.provider, player: game.getPlayer(o.playerId)?.name ?? '?' })),
       };

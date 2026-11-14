@@ -69,6 +69,16 @@ retour et de notification envoyés aux prestataires.
 
 Le joueur est envoyé sur la page de paiement FedaPay (il y choisit T-Money, Moov ou sa carte), puis revient dans le jeu.
 
+**Vérifier la clé** : au démarrage, le serveur l'essaie auprès de FedaPay et l'écrit dans les logs (Render → *Logs*) :
+`💳 fedapay : clé acceptée (sandbox…)`, ou `Paiement fedapay : CLÉ REFUSÉE par le prestataire…`. Le panneau `/admin/`
+(« Achats de STH coins ») affiche aussi « clé acceptée ✅ » ou « CLÉ REFUSÉE ❌ » et la dernière erreur. Une clé refusée
+vient presque toujours d'une clé mal copiée (copiez-la avec le bouton de copie du tableau de bord, sans espace), d'une
+clé publique (`pk_…`) au lieu de la clé secrète (`sk_…`), ou d'un mélange sandbox / live.
+
+**Essais en sandbox** (documentation FedaPay, « momo_test ») : seuls les numéros **64000001** et **66000001** donnent un
+paiement réussi ; tout autre numéro simule un échec. En sandbox, le message d'erreur affiché au joueur contient la
+réponse exacte de FedaPay.
+
 ### PayGate Global (T-Money et Flooz, Togo)
 
 1. Compte sur <https://paygateglobal.com> → inscription, puis activation. Frais annoncés : 2,5 % (Flooz), 3 % (T-Money).

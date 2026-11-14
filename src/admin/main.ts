@@ -17,6 +17,7 @@ interface Overview {
   season?: { id: string; mode: 'auto' | 'manual'; custom: { skyTop?: string; skyHorizon?: string; grass?: string } | null };
   payments?: {
     providers: string[];
+    health?: Record<string, { sandbox: boolean; keyOk?: boolean | null; checkedAt?: number; lastError?: { at: number; status: number | null; message: string; auth: boolean } }>;
     totals: Record<string, number>;
     recent: Array<{ id: string; player: string; sth: number; amount: number; currency: string; status: string; method: string; provider: string; createdAt: number }>;
   };
@@ -116,8 +117,16 @@ function render(): void {
   // achats de STH coins : prestataires actifs, total encaissé, dernières commandes
   const pay = data.payments;
   const STATUS: Record<string, string> = { paid: '✅ payée', pending: '⏳ en attente', failed: '✖ refusée', expired: '⌛ expirée', error: '⚠ à vérifier' };
+  // prestataires : mode (test / réel), clé acceptée ou refusée au démarrage, dernière erreur
+  const provText = (id: string) => {
+    const h = pay?.health?.[id];
+    if (!h) return id;
+    const key = h.keyOk === true ? 'clé acceptée ✅' : h.keyOk === false ? 'CLÉ REFUSÉE ❌' : '';
+    const err = h.lastError ? ` · dernière erreur ${when.format(h.lastError.at)} : ${h.lastError.message}` : '';
+    return `${id} (${h.sandbox ? 'sandbox' : 'live'}${key ? `, ${key}` : ''})${err}`;
+  };
   $('payInfo').textContent = pay
-    ? `Prestataires actifs : ${pay.providers.length ? pay.providers.join(', ') : 'aucun (voir docs/PAIEMENTS.md)'} · encaissé : ${Object.entries(pay.totals).map(([c, n]) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: c }).format(n)).join(' + ') || '0'}`
+    ? `Prestataires actifs : ${pay.providers.length ? pay.providers.map(provText).join(' · ') : 'aucun (voir docs/PAIEMENTS.md)'} · encaissé : ${Object.entries(pay.totals).map(([c, n]) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: c }).format(n)).join(' + ') || '0'}`
     : '';
   $('payments').innerHTML = pay?.recent.length
     ? pay.recent.map((o) => `<tr><td>${esc(o.player)}<div class="muted">${when.format(o.createdAt)}</div></td><td>${nf.format(o.sth)} STH<div class="muted">${esc(o.method)} · ${esc(o.provider)}</div></td><td>${new Intl.NumberFormat('fr-FR', { style: 'currency', currency: o.currency }).format(o.amount)}</td><td>${STATUS[o.status] ?? esc(o.status)}</td></tr>`).join('')
