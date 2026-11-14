@@ -2274,9 +2274,25 @@ net.onMessage = (m) => {
     default: break;
   }
 };
-net.onStatus = (ok) => {
+/** L'appareil a-t-il du réseau ? (sans réseau, inutile d'envoyer des requêtes : elles échoueraient toutes) */
+const hasNetwork = () => navigator.onLine !== false;
+function renderNetStatus(ok: boolean): void {
   $('netStatus').hidden = ok;
-};
+  $('netStatus').textContent = hasNetwork()
+    ? 'Connexion au quartier…'
+    : '📡 Pas de connexion internet : le jeu reprend tout seul dès que le réseau revient';
+}
+net.onStatus = (ok) => renderNetStatus(ok);
+// coupure du réseau (téléphone sans données, changement d'antenne…) : message clair, puis reprise immédiate au retour
+addEventListener('offline', () => renderNetStatus(false));
+addEventListener('online', () => {
+  renderNetStatus(net.connected);
+  net.wake();
+  if (playing) {
+    void refreshState();
+    void refreshConvoy();
+  }
+});
 
 // position envoyée 10 fois par seconde
 setInterval(() => {
@@ -2358,9 +2374,10 @@ async function start(name?: string, color?: string, country?: string, pre?: Awai
     if (pay) setTimeout(() => openShop('sth'), 600);
   }
   void premium.loadConfig();
-  setInterval(() => void refreshConvoy(), 5000);
-  setInterval(() => void refreshState(), 15000);
-  setInterval(() => void refreshBoard(), 10000);
+  // (sans réseau, on ne relance pas les requêtes : elles reprennent toutes seules au retour d'internet)
+  setInterval(() => hasNetwork() && void refreshConvoy(), 5000);
+  setInterval(() => hasNetwork() && void refreshState(), 15000);
+  setInterval(() => hasNetwork() && void refreshBoard(), 10000);
 }
 
 // Choix de la couleur du personnage

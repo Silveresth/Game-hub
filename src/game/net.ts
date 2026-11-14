@@ -212,13 +212,34 @@ export class Net {
       this.onMessage(m);
     };
     ws.onclose = () => {
+      if (this.ws !== ws) return; // ancienne connexion remplacée (wake)
       this.connected = false;
       this.onStatus(false);
       if (this.closed) return;
-      // reconnexion progressive : 1 s, 2 s, 4 s… jusqu'à 15 s
+      // reconnexion progressive : 1 s, 2 s, 4 s… jusqu'à 15 s (sans internet, on attend surtout le retour du réseau : wake)
       const delay = Math.min(15000, 1000 * 2 ** this.retry++);
-      setTimeout(() => this.connect(), delay);
+      clearTimeout(this.timer);
+      this.timer = window.setTimeout(() => this.connect(), delay);
     };
+  }
+
+  private timer: number | undefined;
+
+  /**
+   * Le réseau revient (événement « online » du navigateur) : on se reconnecte tout de suite,
+   * au lieu d'attendre la fin du délai de reconnexion (jusqu'à 15 s).
+   */
+  wake(): void {
+    if (this.closed || this.connected) return;
+    clearTimeout(this.timer);
+    this.retry = 0;
+    const old = this.ws;
+    this.ws = null;
+    if (old && old.readyState !== WebSocket.CLOSED) {
+      old.onclose = null;
+      old.close();
+    }
+    this.connect();
   }
 
   send(msg: Record<string, unknown>): void {

@@ -141,9 +141,10 @@ export function mountLiveBar(opts: { gameHref?: string } = {}): { onStats: (fn: 
     listeners.forEach((fn) => fn(s));
   };
 
+  let es: EventSource | null = null;
   const connect = () => {
     if (!('EventSource' in window)) return poll();
-    const es = new EventSource(`${API_BASE}/api/live?v=${encodeURIComponent(visitorId())}`);
+    es = new EventSource(`${API_BASE}/api/live?v=${encodeURIComponent(visitorId())}`);
     es.onopen = () => {
       connected = true;
       bar.classList.remove('offline');
@@ -173,6 +174,18 @@ export function mountLiveBar(opts: { gameHref?: string } = {}): { onStats: (fn: 
   };
 
   connect();
+  // sans internet, le flux en direct réessaierait toutes les 5 s pour rien : on le met en pause jusqu'au retour du réseau
+  if ('EventSource' in window) {
+    addEventListener('offline', () => {
+      es?.close();
+      es = null;
+      connected = false;
+      bar.classList.add('offline');
+    });
+    addEventListener('online', () => {
+      if (!es) connect();
+    });
+  }
   render();
   setInterval(render, 1000);
   return { onStats: (fn) => listeners.push(fn) };

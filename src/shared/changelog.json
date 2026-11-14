@@ -21,6 +21,7 @@
         { "type": "improved", "text": "Échange pièces → STH coins plus cher et limité : 1 STH = 1 million de pièces, 100 STH et 3 échanges au plus par mois." },
         { "type": "fixed", "text": "Après un vol, une œuvre de la réserve de la victime s’accrochait toute seule à la place de l’œuvre volée : on croyait que l’œuvre volée était encore là. La place reste maintenant vide, et la victime est invitée à exposer une œuvre de sa réserve." },
         { "type": "fixed", "text": "Message de vol plus clair : un musée dont le propriétaire est absent et s’est déjà fait voler il y a moins de 2 h affiche « protégé » (avec le temps restant) au lieu de proposer un vol qui serait refusé." },
+        { "type": "improved", "text": "Coupure d’internet (données mobiles, changement d’antenne) : message clair « Pas de connexion internet », le jeu arrête d’envoyer des requêtes pour rien et se reconnecte dès que le réseau revient (avant : jusqu’à 15 s d’attente)." },
         { "type": "fixed", "text": "Les pieds du personnage se déformaient pendant le saut." },
         { "type": "fixed", "text": "Après leur pause, les gardes repartaient en patrouille les jambes encore pliées (personnage déformé en marchant)." }
       ]
