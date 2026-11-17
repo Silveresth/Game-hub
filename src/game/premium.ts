@@ -640,7 +640,7 @@ export class ChestOpener {
       chestEl.classList.remove('shake');
       this.el.classList.add('opened');
       const big = rank >= 3;
-      this.burst(color, 40 + rank * 45);
+      this.burst(color, Math.min(160, 36 + rank * 32));
       if (big) this.el.classList.add('flash');
       if (rank >= 3) this.ctx.sfx.fanfare();
       else this.ctx.sfx.rare();

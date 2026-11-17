@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Character, hasOutfit } from './character';
 import { Label } from './labels';
-import { artTexture } from './convoy';
+import { makeCarry, disposeCarry } from './carry';
 import type { NetPlayer } from './net';
 import { FLOOR_H } from './layout';
 import { EMOTE_ICONS, SpeechBubble } from './chat';
@@ -14,7 +14,7 @@ class Remote {
   target = new THREE.Vector3();
   ry = 0;
   anim = 'Idle';
-  carry: THREE.Mesh | null = null;
+  carry: THREE.Object3D | null = null;
   carryKey = '';
   wanted = false; // voleur en fuite avec une œuvre du joueur local
   floor = 0;
@@ -60,14 +60,11 @@ class Remote {
     if (key === this.carryKey) return;
     this.carryKey = key;
     if (this.carry) {
-      this.carry.removeFromParent();
-      this.carry.geometry.dispose();
+      disposeCarry(this.carry);
       this.carry = null;
     }
     if (carry) {
-      this.carry = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.9), new THREE.MeshBasicMaterial({ map: artTexture(carry.workId), side: THREE.DoubleSide }));
-      this.carry.position.set(0, 1.1, 0.55);
-      this.carry.rotation.set(-0.15, 0, 0);
+      this.carry = makeCarry(carry.workId, carry.frame);
       this.ch.root.add(this.carry);
     }
   }
@@ -123,6 +120,7 @@ export class RemotePlayers {
   remove(id: string): void {
     const r = this.map.get(id);
     if (!r) return;
+    if (r.carry) disposeCarry(r.carry);
     r.ch.dispose();
     r.label.dispose();
     r.bubble.dispose();
@@ -171,6 +169,7 @@ export class RemotePlayers {
     const r = this.map.get(id);
     if (!r || r.wanted === wanted) return;
     r.wanted = wanted;
+    r.ch.setRim(wanted ? 0.85 : 0);
     r.refreshLabel();
   }
 

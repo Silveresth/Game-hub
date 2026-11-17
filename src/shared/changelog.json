@@ -1,6 +1,54 @@
 {
-  "current": "1.6.0",
+  "current": "1.12.0",
   "versions": [
+    {
+      "version": "1.12.0",
+      "date": "2026-11-16",
+      "title": "Interface vitrine",
+      "items": [
+        { "type": "improved", "text": "Porte-monnaie, objectif, menu, enchères, coffres et résultat de vol partagent le velours, l’or et l’ivoire. Les gains de pièces volent vers le porte-monnaie. En paysage, les boutons tactiles restent dans l’écran, à au moins 44 px, sans se chevaucher." }
+      ]
+    },
+    {
+      "version": "1.11.0",
+      "date": "2026-11-15",
+      "title": "Mesures de rendu",
+      "items": [
+        { "type": "new", "text": "En développement, la touche F8 affiche le palier graphique, les images/s, les appels de dessin et les triangles. Rien de tout cela n’apparaît dans la version jouée." }
+      ]
+    },
+    {
+      "version": "1.10.0",
+      "date": "2026-11-15",
+      "title": "Sensations",
+      "items": [
+        { "type": "improved", "text": "La caméra accuse l’atterrissage, le coup de parapluie, l’alarme et l’encaissement. Les pas, le décrochage et l’atterrissage ont leur bruitage, toujours synthétisé, sans rien télécharger de plus." }
+      ]
+    },
+    {
+      "version": "1.9.0",
+      "date": "2026-11-15",
+      "title": "Lire la scène",
+      "items": [
+        { "type": "improved", "text": "Liseré sur votre personnage, plus fort sur un voleur en fuite. L’œuvre portée est un vrai cadre. Relief léger sur les sols, lumière douce dans les musées, lampadaires dessinés en une fois. Les couleurs et le rendu Neutral ne changent pas." }
+      ]
+    },
+    {
+      "version": "1.8.0",
+      "date": "2026-11-15",
+      "title": "Moins de travail par image",
+      "items": [
+        { "type": "improved", "text": "Les étincelles et les étiquettes lointaines s’éteignent. La poussière et les ondes de choc réutilisent leurs particules. En qualité moyenne, l’ombre est plus petite et la place ne la projette plus." }
+      ]
+    },
+    {
+      "version": "1.7.0",
+      "date": "2026-11-15",
+      "title": "Trois niveaux de graphismes",
+      "items": [
+        { "type": "new", "text": "Graphismes Bas, Moyen ou Haut, choisis tout seuls selon le téléphone, et abaissés d’un cran si le jeu rame. Moins de pixels, de nuages et de flou d’interface en Bas et en Moyen. L’anticrénelage de la Haute qualité s’applique au chargement de la page." }
+      ]
+    },
     {
       "version": "1.6.0",
       "date": "2026-11-14",

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { textureAnisotropy } from './quality';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Label } from './labels';
@@ -73,7 +74,7 @@ function signTexture(): THREE.CanvasTexture {
   const g = c.getContext('2d')!;
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.anisotropy = textureAnisotropy;
   const draw = () => {
     g.clearRect(0, 0, 1024, 64);
     g.fillStyle = '#c9a24e';

@@ -8,7 +8,11 @@ console.log('Compiling TypeScript...');
 execSync('npx tsc --noEmit', { stdio: 'inherit' });
 
 // dist/ repart de zéro : sinon d'anciennes pages (ex. le prototype /museum/) restent servies en production
-await rm('dist', { recursive: true, force: true });
+try {
+  await rm('dist', { recursive: true, force: true });
+} catch {
+  // sur Windows le dossier peut être verrouillé par un processus : on écrase alors les fichiers sur place
+}
 
 console.log('Bundling with esbuild API...');
 await mkdir('dist/game', { recursive: true });

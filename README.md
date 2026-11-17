@@ -146,11 +146,11 @@ la page d'accueil (section « Journal des versions ») et dans le jeu (menu ☰ 
 
 **Phase 2 — multijoueur et vol** (`server/district.mjs`, `src/game/net.ts`, `remote.ts`, `museumView.ts`) :
 - **Quartiers en temps réel :** WebSocket `/ws` (bibliothèque `ws`). Jusqu’à 7 joueurs en ligne par quartier, une parcelle chacun, attribuée par le serveur. Positions relayées 10 fois par seconde, vitesse contrôlée par le serveur.
-- **Musées en sommeil :** les parcelles libres accueillent les musées de joueurs hors ligne, de valeur proche. On peut les visiter et les voler, au plus une œuvre toutes les 10 min pendant l’absence. Le volé l’apprend à sa reconnexion.
+- **Musées en sommeil :** les parcelles libres accueillent les musées de joueurs hors ligne, de valeur proche. On peut les visiter et les voler à tout moment pendant leur absence, le nombre de fois qu'on veut. Le volé l’apprend à sa reconnexion.
 - **Vol :** dans un musée rival, maintenir E devant une œuvre (2,5 s pour une Commune, jusqu’à 12 s pour une Mythique). On la porte ensuite au-dessus de la tête, ralenti de 30 %, jusqu’à son propre musée. Le propriétaire présent est alerté (sirène, écran rouge, voleur marqué ⚠).
 - **Arrestation :** il suffit que le propriétaire touche le voleur. L’œuvre revient, le voleur paie 10 % de sa valeur d’amende et passe 60 s en cellule : le serveur le retient devant son musée, sans pouvoir bouger, voler ni utiliser d'outil.
 - **Achat au convoi :** l'œuvre achetée arrive entre les mains du joueur ; E devant un emplacement de son musée pour l'accrocher (Échap la laisse à l'emplacement attribué par le serveur).
-- **Protections :** verrou des portes (laser, 60 s, recharge 3 min : personne ne franchit la porte, ni pour entrer ni pour sortir), bouclier débutant (24 h tant que le musée vaut moins de 100 000), pause de 5 min après un vol. On peut voler n’importe quel musée, quelle que soit sa valeur.
+- **Protections :** verrou des portes (laser, 60 s, recharge 3 min : personne ne franchit la porte, ni pour entrer ni pour sortir), bouclier débutant (24 h tant que le musée vaut moins de 100 000). On peut voler n’importe quel musée, le nombre de fois qu'on veut et à tout moment, quelle que soit sa valeur.
 - **Le serveur décide de tout :** portée, durée, livraison, arrestation et transfert de propriété. Une œuvre en cours de vol ne rapporte plus rien. Si le serveur redémarre pendant un vol, l’œuvre revient à son propriétaire.
 
 **Phase 1 — tranche jouable solo** (`game/`, `src/game/`) :

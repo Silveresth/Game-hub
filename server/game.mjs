@@ -18,9 +18,9 @@ const SELL_RATE = 0.5;
 // Règles de vol (cahier des charges, « Sécurité et vols »)
 const BEGINNER_MS = 24 * 3600_000; // bouclier débutant : 24 h…
 const BEGINNER_VALUE = 100_000; // … tant que le musée vaut moins de 100 000
-// (avant : 15 min d'immunité et 2 h pour un absent, jugé beaucoup trop long : on doit pouvoir voler souvent)
-const IMMUNE_MS = 5 * 60_000; // courte pause après un vol réussi
-const OFFLINE_LOSS_MS = 10 * 60_000; // hors ligne : au plus une œuvre perdue toutes les 10 min
+// Plus de restriction d'attente (immunité ou délai hors-ligne) : on peut voler le nombre de fois qu'on veut et à tout moment
+const IMMUNE_MS = 0;
+const OFFLINE_LOSS_MS = 0;
 const FINE_RATE = 0.1; // amende du voleur arrêté, versée au propriétaire
 const STATUE_SLOT_FROM = 214; // emplacements 214+ : socles du toit-terrasse (tools/gen-layout.mjs)
 const ID_RE = /^[A-Za-z0-9_-]{8,32}$/;
@@ -552,9 +552,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
   function stealBlocker(thief, victim, victimOnline, now = Date.now()) {
     if (thief.id === victim.id) return 'C’est votre propre musée';
     if (shielded(victim, now)) return 'Bouclier débutant : ce musée est protégé';
-    if (victim.immuneUntil > now) return `Musée déjà cambriolé : protégé encore ${Math.ceil((victim.immuneUntil - now) / 60_000)} min`;
-    // (plus de règle « cible trop modeste » : on vole qui on veut, quelle que soit la valeur de son musée)
-    if (!victimOnline && now - victim.lastOfflineLoss < OFFLINE_LOSS_MS) return `Musée protégé : son propriétaire est absent et s’est déjà fait voler une œuvre il y a moins de ${OFFLINE_LOSS_MS / 60_000} min (encore ${waitText(victim.lastOfflineLoss + OFFLINE_LOSS_MS - now)})`;
+    // Plus de restriction de délai d'attente après un vol (en ligne ou absent) : vol libre à tout moment
     return null;
   }
 
@@ -602,7 +600,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
     const loot = workValue(a);
     thief.records.theft = Math.max(thief.records.theft, loot);
     thief.week.theft = Math.max(thief.week.theft, loot);
-    victim.immuneUntil = now + IMMUNE_MS;
+    victim.immuneUntil = 0;
     // assurance : la moitié de la valeur est remboursée
     const refund = victim.security.insuranceUntil > now ? Math.floor(workValue(a) * SEC.insurance.refund) : 0;
     victim.coins += refund;
@@ -652,9 +650,8 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       artworks: p.artworks.filter((a) => a.slot !== null).map((a) => ({ uid: a.uid, workId: a.workId, frame: a.frame, slot: a.slot, carried: !!a.carriedBy, ...(a.repro ? { repro: true } : {}) })),
       themes: p.roomThemes ?? {},
       ticket: ticketPrice(p),
-      value: Math.round(value(p)), shielded: shielded(p), immuneUntil: p.immuneUntil,
-      // propriétaire absent déjà volé : protégé jusqu'à cette heure (les autres le voient avant d'essayer)
-      robbedUntil: p.lastOfflineLoss ? p.lastOfflineLoss + OFFLINE_LOSS_MS : 0,
+      value: Math.round(value(p)), shielded: shielded(p), immuneUntil: 0,
+      robbedUntil: 0,
       sec: publicSecurity(p),
       rebirths: p.rebirths ?? 0,
       skin: p.skin ?? 0,
@@ -801,7 +798,7 @@ export async function createGame({ dataDir, catalogFile, devMode = false, push =
       value: value(p),
       serverTime: Date.now(),
       shielded: shielded(p),
-      immuneUntil: p.immuneUntil,
+      immuneUntil: 0,
       stolen: p.stats.stolen,
       arrests: p.stats.arrests,
       sec: publicSecurity(p),

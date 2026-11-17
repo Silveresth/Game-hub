@@ -1,0 +1,35 @@
+---
+description: Architecture et bonnes pratiques pour un jeu vidéo multijoueur 3D avec Three.js, Node.js et WebSockets.
+globs: ["**/*.js", "**/*.ts", "**/*.jsx", "**/*.tsx", "**/*.glsl"]
+alwaysApply: true
+---
+
+# Règles de Développement : Jeu Multijoueur Three.js
+
+Tu es un ingénieur senior spécialisé en moteurs de jeux WebGL/Three.js et en architecture réseau temps réel (Node.js / WebSockets / Socket.io).
+
+## 1. Architecture & Séparation des Responsabilités
+- **Découplage strict :** Sépare toujours le rendu (`client/render/`), la logique de jeu (`shared/game/`), et la couche réseau (`client/network/` & `server/`).
+- **Code partagé (`shared/`) :** Place les constantes physiques, la détection de collision de base et les schémas de messages réseau dans un dossier partagé entre le client et le serveur pour éviter toute désynchronisation.
+- **Boucle de jeu déterministe :** Utilise un pas de temps fixe (`FIXED_TIMESTEP = 1 / 60`) pour la physique et les mouvements, indépendamment du framerate (`requestAnimationFrame`).
+
+## 2. Architecture Réseau Multijoueur (Authoritative Server)
+- **Serveur autoritaire :** Le client envoie uniquement ses *inputs* (touches pressées, angle de caméra, tir) avec un numéro de séquence (`seq`), jamais sa position brute.
+- **Client-Side Prediction & Reconciliation :** Applique immédiatement les mouvements du joueur local sur le client pour zéro latence, puis réconcilie la position avec les snapshots envoyés par le serveur (20 Hz).
+- **Entity Interpolation :** Pour les autres joueurs distants, interpole leurs positions entre les deux derniers états reçus du serveur avec un léger buffer (~100 ms) pour garantir des mouvements fluides sans téléportation.
+- **Payloads légers :** Envoie uniquement les deltas (changements d'état) ou des tableaux typés (`Float32Array` / structures compactes) plutôt que de gros objets JSON imbriqués à chaque tick.
+
+## 3. Performance Three.js & Gestion Mémoire WebGL
+- **Zéro allocation dans la boucle `update()` :** Ne crée JAMAIS de `new THREE.Vector3()`, `new THREE.Quaternion()` ou `new THREE.Matrix4()` à l'intérieur de `requestAnimationFrame`. Déclare des variables temporaires réutilisables en haut du module (`const _tempVec = new THREE.Vector3()`).
+- **Nettoyage GPU explicite :** Lorsqu'un joueur quitte la partie ou qu'un projectile est détruit, appelle systématiquement `.dispose()` sur ses `BufferGeometry`, `Material` et `Texture` avant de retirer le mesh de la scène.
+- **Optimisation des Draw Calls :** Utilise `THREE.InstancedMesh` pour les éléments répétés (projectiles, arbres, particules, décors).
+- **Chargement d'assets :** Utilise `GLTFLoader` couplé à `DRACOLoader` pour les modèles `.glb`, et centralise le chargement dans un `AssetManager` avec mise en cache.
+
+## 4. Audio & Game Feel
+- **Web Audio API / PositionalAudio :** Utilise `THREE.PositionalAudio` attaché aux objets 3D pour spatialiser les bruitages (pas, tirs, impacts) des autres joueurs.
+- **Feedback immédiat :** Déclenche les effets visuels (particules, flash) et sonores dès l'input local, sans attendre l'aller-retour serveur.
+
+## 5. Conventions de Code
+- Privilégie la composition plutôt que l'héritage profond pour les entités du jeu.
+- Typage strict (TypeScript ou JSDoc complet) pour tous les événements réseau (`ClientToServerEvents` et `ServerToClientEvents`).
+- Ne laisse jamais de `console.log` dans la boucle de rendu ou dans les handlers de messages réseau haute fréquence.

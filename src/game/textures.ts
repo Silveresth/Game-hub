@@ -6,6 +6,7 @@
  */
 import * as THREE from 'three';
 import type { ThemeId } from './Room';
+import { textureAnisotropy } from './quality';
 
 /** Taille (m) couverte par une répétition de motif. */
 export const TILE_M = 4;
@@ -28,7 +29,7 @@ function finish(c: HTMLCanvasElement): THREE.CanvasTexture {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.anisotropy = textureAnisotropy;
   return t;
 }
 
@@ -197,9 +198,9 @@ interface ThemeMaterials {
 
 const THEMES: Record<ThemeId, () => ThemeMaterials> = {
   classic: () => ({
-    floor: new THREE.MeshStandardMaterial({ map: finish(parquet()), roughness: 0.45 }),
+    floor: new THREE.MeshStandardMaterial({ map: finish(parquet()), roughness: 0.32, metalness: 0.04, envMapIntensity: 0.55 }),
     wall: new THREE.MeshStandardMaterial({ map: finish(damask()), roughness: 0.85 }),
-    trim: new THREE.MeshStandardMaterial({ color: 0xc9a45c, roughness: 0.35, metalness: 0.6 }),
+    trim: new THREE.MeshStandardMaterial({ color: 0xe0b45a, roughness: 0.28, metalness: 1, emissive: 0x3a2808, emissiveIntensity: 0.22, envMapIntensity: 1.15 }),
   }),
   modern: () => ({
     floor: new THREE.MeshStandardMaterial({ map: finish(concrete()), roughness: 0.3, metalness: 0.05 }),
@@ -294,6 +295,65 @@ export function setRainbow(mat: THREE.MeshStandardMaterial, on: boolean): void {
     mat.needsUpdate = true;
   }
 }
+// ------------------------------------------------------------------ kit vitrine (marbre, bois verni, velours, or, verre)
+
+function marbleCanvas(): HTMLCanvasElement {
+  const [c, g] = canvas(256);
+  g.fillStyle = '#f3efe6';
+  g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(190,184,172,.55)';
+  g.lineWidth = 2;
+  for (let i = 0; i < 7; i++) {
+    g.beginPath();
+    g.moveTo(0, 30 + i * 34);
+    g.bezierCurveTo(80, 10 + i * 36, 160, 60 + i * 28, 256, 24 + i * 34);
+    g.stroke();
+  }
+  grain(g, 256, 500, 0.05);
+  return c;
+}
+
+export interface ShowcaseKit {
+  marble: THREE.MeshPhysicalMaterial;
+  wood: THREE.MeshStandardMaterial;
+  /** Bois sombre verni (portes, escalier, bancs). */
+  woodDark: THREE.MeshStandardMaterial;
+  velvet: THREE.MeshPhysicalMaterial;
+  gold: THREE.MeshStandardMaterial;
+  /** Verre sans réfraction (pas de second rendu de la scène). */
+  glass: THREE.MeshPhysicalMaterial;
+}
+
+let kit: ShowcaseKit | null = null;
+
+/** Matériaux partagés. Créés au premier musée, pas au chargement du module. */
+export function showcase(): ShowcaseKit {
+  if (kit) return kit;
+  const woodMap = finish(parquet());
+  kit = {
+    marble: new THREE.MeshPhysicalMaterial({
+      map: finish(marbleCanvas()), roughness: 0.2, metalness: 0.02,
+      clearcoat: 0.55, clearcoatRoughness: 0.18, envMapIntensity: 1.05,
+    }),
+    wood: new THREE.MeshStandardMaterial({ map: woodMap, roughness: 0.3, metalness: 0.04, envMapIntensity: 0.6 }),
+    woodDark: new THREE.MeshStandardMaterial({ map: woodMap, color: 0x6a4330, roughness: 0.34, metalness: 0.06, envMapIntensity: 0.55 }),
+    velvet: new THREE.MeshPhysicalMaterial({
+      color: 0x9a1830, roughness: 0.94, metalness: 0, sheen: 1, sheenRoughness: 0.4,
+      sheenColor: new THREE.Color(0xff8d98), envMapIntensity: 0.2,
+    }),
+    gold: new THREE.MeshStandardMaterial({
+      color: 0xe8b64c, metalness: 1, roughness: 0.26,
+      emissive: 0x4a3008, emissiveIntensity: 0.4, envMapIntensity: 1.2,
+    }),
+    glass: new THREE.MeshPhysicalMaterial({
+      color: 0xc5e4ff, roughness: 0.05, metalness: 0, transmission: 0,
+      transparent: true, opacity: 0.28, clearcoat: 1, clearcoatRoughness: 0.08,
+      envMapIntensity: 1.45, depthWrite: false,
+    }),
+  };
+  return kit;
+}
+
 export function updateRainbow(t: number): void {
   if (!rainbowTex || !rainbow.size) return;
   rainbowTex.offset.x = (t * 0.25) % 1;
@@ -317,7 +377,7 @@ export function artTextureByUrl(url: string): { tex: THREE.Texture; ready: Promi
     const ready = new Promise<THREE.Texture>((r) => (resolve = r));
     const tex = artLoader.load(url, (t) => resolve(t), undefined, () => resolve(tex));
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
+    tex.anisotropy = textureAnisotropy;
     e = { tex, ready };
     artCache.set(url, e);
   }

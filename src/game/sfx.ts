@@ -121,6 +121,11 @@ export class Sfx {
   /** Début d'un événement en direct : fanfare. */
   fanfare(): void { [523.3, 659.3, 784, 1046.5, 784, 1046.5].forEach((f, i) => this.tone(f, i * 0.11, i === 5 ? 0.6 : 0.2, 'triangle', 0.16)); }
 
+  /** Atterrissage. */
+  land(): void { this.tone(90, 0, 0.1, 'sine', 0.1, 42); }
+  /** Décrochage d'une œuvre : petit grincement, sans fichier audio. */
+  pry(): void { this.tone(210, 0, 0.05, 'square', 0.035, 140); }
+
   /** Bruit de pas feutré lors de la marche ou la course */
   step(): void {
     if (!this.ctx || this.muted) return;

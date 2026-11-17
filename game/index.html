@@ -10,9 +10,9 @@
   <title>Steal a Masterpiece — Jouer</title>
   <link rel="stylesheet" href="/src/shared/theme.css" />
   <style>
-    @font-face { font-family: 'Bricolage'; src: url('/fonts/bricolage-latin.woff2') format('woff2'); font-weight: 200 800; font-display: swap; }
     :root {
-      --fun: 'Bricolage', 'Segoe UI', system-ui, sans-serif;
+      --fun: var(--ui);
+      --display: 'Cinzel', Georgia, serif;
       --hud: rgba(12, 14, 24, .8);
       --hud-line: rgba(255, 255, 255, .13);
       --sth: #b98cff;
@@ -71,6 +71,20 @@
     #questClaim { margin-top: 6px; width: 100%; padding: 7px; border-radius: 9px; border: none; background: var(--gold); color: #1b1308; font-weight: 900; font-size: 12px; cursor: pointer; animation: glow 1.2s ease-in-out infinite; }
     #quest.done { border-color: var(--gold); }
     #quest.mini #questLabel, #quest.mini .bar, #quest.mini #questHint { display: none; }
+    /* Bas et moyen : pas de flou derrière le HUD (cher sur les téléphones). Même taille, fond plus opaque. */
+    body[data-q="low"] #wallet, body[data-q="medium"] #wallet,
+    body[data-q="low"] #quest, body[data-q="medium"] #quest {
+      backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(12, 14, 24, .92);
+    }
+    body[data-q="low"] .overlay, body[data-q="medium"] .overlay {
+      backdrop-filter: none; -webkit-backdrop-filter: none;
+    }
+    /* Bas et moyen : pas de flou derrière le HUD (cher sur les téléphones). Le panneau reste compact. */
+    body[data-q="low"] #wallet, body[data-q="medium"] #wallet,
+    body[data-q="low"] #quest, body[data-q="medium"] #quest {
+      backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(12, 14, 24, .92);
+    }
+    body[data-q="low"] .overlay, body[data-q="medium"] .overlay { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
     #alert { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0; transition: opacity .3s; box-shadow: inset 0 0 120px 30px rgba(255, 30, 50, .65); }
     #alert.on { opacity: 1; animation: siren .5s ease-in-out infinite alternate; }
@@ -122,9 +136,13 @@
     #prompt kbd { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 7px; margin-right: 9px; border-radius: 9px; background: linear-gradient(180deg, #ffe08a, #f2b632); color: #3a2604; font: 900 13px var(--fun); box-shadow: 0 3px 0 #a87418, inset 0 1px 0 rgba(255, 255, 255, .6); }
     #prompt .poor { border-color: rgba(255, 107, 107, .75); color: #ffc2c2; }
     #prompt .poor kbd { background: linear-gradient(180deg, #ffb3b3, #ff6b6b); box-shadow: 0 3px 0 #a3262a; color: #3a0b0b; }
-    #banner { position: fixed; left: 50%; top: 28%; transform: translate(-50%, -50%) scale(.9); z-index: 25; width: max-content; max-width: 90vw; text-align: center; opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; font: 800 clamp(22px, 4vw, 38px) Georgia, serif; color: #fff; text-shadow: 0 3px 0 #000, 0 8px 30px rgba(0, 0, 0, .6); }
+    #banner { position: fixed; left: 50%; top: 28%; transform: translate(-50%, -50%) scale(.94); z-index: 25; width: min(520px, 92vw); text-align: center; opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; padding: 14px 16px 16px; border-radius: 18px; background: linear-gradient(180deg, rgba(74, 18, 32, .94), rgba(16, 8, 12, .94)); border: 1px solid rgba(232, 182, 76, .75); font: 800 clamp(18px, 3.4vw, 30px)/1.15 var(--display), Georgia, serif; color: var(--ivory); overflow-wrap: anywhere; box-shadow: 0 16px 40px rgba(0, 0, 0, .45); }
     #banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-    #banner small { display: block; font: 700 15px 'Segoe UI', sans-serif; color: #ffd36b; margin-top: 6px; }
+    #banner.heist { box-shadow: 0 0 36px rgba(232, 182, 76, .4), 0 16px 40px rgba(0, 0, 0, .45); }
+    #banner.loss { border-color: #ff3b4e; }
+    #banner small { display: block; font: 700 14px/1.35 var(--fun); color: #ffd36b; margin-top: 6px; overflow-wrap: anywhere; }
+    .coin.fly { position: fixed; z-index: 80; margin: 0; pointer-events: none; }
+    .sheet h1, .co-title, #bidPrice, .hall-card b, #rotateHint b { font-family: var(--display), Georgia, serif; }
     #toast { bottom: 70px; max-width: 92vw; text-align: center; font-size: 13.5px; padding: 8px 16px; }
 
     /* outils du marché noir (bas gauche) */
@@ -371,7 +389,11 @@
     .co-rays { position: absolute; left: 50%; top: 50%; width: 170vmax; height: 170vmax; margin: -85vmax 0 0 -85vmax; opacity: 0; transform: scale(.2); background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--glow) 55%, transparent) 0deg 7deg, transparent 7deg 20deg); -webkit-mask: radial-gradient(circle, #000 0%, transparent 55%); mask: radial-gradient(circle, #000 0%, transparent 55%); transition: opacity .4s, transform .7s cubic-bezier(.2, 1.2, .4, 1); animation: raysSpin 16s linear infinite; }
     @keyframes raysSpin { to { rotate: 360deg; } }
     .chest-open.opened .co-rays { opacity: 1; transform: scale(1); }
-    .r-mythique .co-rays { background: repeating-conic-gradient(#ff3b4e 0 6deg, transparent 6deg 14deg, #ffd36b 14deg 20deg, transparent 20deg 30deg, #b46bff 30deg 36deg, transparent 36deg 46deg); }
+    .r-mythique .co-rays { background: repeating-conic-gradient(#ff3b4e 0 6deg, transparent 6deg 14deg, #ffd36b 14deg 20deg, transparent 20deg 30deg, #b46bff 30deg 36deg, transparent 36deg 46deg); animation-duration: 7s; }
+    .r-legendaire .co-rays, .r-epique .co-rays { opacity: .85; }
+    .r-mythique.opened .co-title, .r-legendaire.opened .co-title { animation: mythPop .7s cubic-bezier(.2, 1.6, .4, 1); }
+    @keyframes mythPop { 0% { transform: scale(.4); } 60% { transform: scale(1.12); } 100% { transform: none; } }
+    .co-info b, .co-title { overflow-wrap: anywhere; }
     .co-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 4; }
     .chest-open.flash .co-flash { animation: flashOut .8s ease-out; }
     @keyframes flashOut { 0% { opacity: .95; } 100% { opacity: 0; } }
@@ -417,9 +439,10 @@
     body.in-hall #wallet, body.in-hall #quest, body.in-hall #toolbar, body.in-hall #prompt, body.in-hall #touch, body.in-hall #saleBtn, body.in-hall #secBtn, body.in-hall #tuto { display: none !important; }
     #hallUi { display: none; }
     body.in-hall #hallUi { display: block; }
-    .hall-top { position: fixed; left: 50%; top: calc(var(--bar-h) + 10px); transform: translateX(-50%); z-index: 20; display: flex; gap: 10px; align-items: center; padding: 6px 8px 6px 14px; border-radius: 999px; background: rgba(20, 8, 10, .85); border: 1px solid rgba(201, 162, 74, .5); font-weight: 800; font-size: 13px; white-space: nowrap; max-width: calc(100vw - 24px); }
+    .hall-top { position: fixed; left: 50%; top: calc(var(--bar-h) + 10px); transform: translateX(-50%); z-index: 20; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; padding: 6px 8px 6px 14px; border-radius: 18px; background: rgba(44, 11, 20, .9); border: 1px solid rgba(201, 162, 74, .5); font-weight: 800; font-size: 13px; max-width: calc(100vw - 24px); }
     .hall-top button { border: 1px solid rgba(255, 255, 255, .25); background: rgba(255, 255, 255, .08); color: #fff; border-radius: 999px; padding: 5px 11px; cursor: pointer; font-weight: 700; }
-    #hallSale { color: var(--gold); overflow: hidden; text-overflow: ellipsis; }
+    #hallSale { color: var(--gold); overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+    .bids button, #bidGo, .hall-top button { min-height: 44px; }
     .hall-card { position: fixed; left: var(--safe-l); top: calc(var(--bar-h) + 60px); z-index: 20; width: 230px; padding: 12px; border-radius: 14px; background: rgba(14, 8, 10, .86); border: 1px solid rgba(201, 162, 74, .4); font-size: 12.5px; color: #cfc9bb; line-height: 1.5; }
     .hall-card b { display: block; font: 800 17px Georgia, serif; color: #fff; margin-bottom: 2px; }
     .hall-card .rar { font-weight: 900; }
@@ -565,19 +588,26 @@
     @media (max-height: 520px) and (pointer: coarse) {
       body.playing:not(.in-hall) .livebar { display: none; }
       body.playing:not(.in-hall) { --bar-h: 0px; }
-      #tools { flex-direction: column; flex-wrap: wrap-reverse; max-height: calc(100dvh - 210px); align-content: flex-start; }
-      #menu { top: 8px; right: calc(var(--safe-r) + 44px); }
-      #tuto { width: min(380px, calc(100vw - 520px)); min-width: 270px; padding: 7px 10px; font-size: 11.5px; }
+      #wallet { max-width: min(210px, calc(100vw - 250px)); }
+      #coins { max-width: 8ch; overflow: hidden; text-overflow: ellipsis; }
+      #quest { width: min(200px, calc(100vw - 250px)); top: 48px; }
+      #questLabel { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      #tools { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: min(240px, 42vw); max-height: none; }
+      #tools > button, #toolbar button { width: 44px; height: 44px; }
+      #menu { top: 8px; right: var(--safe-r); max-height: calc(100dvh - 150px); overflow: auto; }
+      #tuto { width: min(340px, calc(100vw - 280px)); min-width: 0; padding: 7px 10px; font-size: 11.5px; }
       #renameBtn.save { font-size: 0; padding: 1px 6px; }
       #renameBtn.save::before { content: '💾'; font-size: 12px; }
       .tu-icon { font-size: 20px; }
       #joyZone { top: 90px; }
       #joy { width: 104px; height: 104px; }
       #joyKnob { left: 29px; top: 29px; }
-      #tA { width: 70px; height: 70px; }
-      #tJ { width: 56px; height: 56px; right: calc(max(20px, env(safe-area-inset-right)) + 84px); }
-      #tB { width: 50px; height: 50px; bottom: calc(max(22px, env(safe-area-inset-bottom)) + 82px); }
-      #tR { width: 46px; height: 46px; right: calc(max(20px, env(safe-area-inset-right)) + 80px); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 70px); }
+      #joy { width: 96px; height: 96px; left: max(12px, env(safe-area-inset-left)); }
+      #joyKnob { left: 26px; top: 26px; width: 44px; height: 44px; }
+      #tA { width: 56px; height: 56px; right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); }
+      #tJ { width: 48px; height: 48px; right: calc(max(12px, env(safe-area-inset-right)) + 80px); bottom: max(16px, env(safe-area-inset-bottom)); }
+      #tB { width: 48px; height: 48px; right: max(16px, env(safe-area-inset-right)); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 78px); }
+      #tR { width: 48px; height: 48px; right: calc(max(12px, env(safe-area-inset-right)) + 80px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 76px); }
       body.touch #toast { bottom: 96px; }
     }
     /* téléphone à la verticale : outils en colonne à droite (en ligne, ils chevauchaient le porte-monnaie) */
@@ -766,7 +796,8 @@
     .opt input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #ffe08a 42%, #f2b632); border: 3px solid #fff; box-shadow: 0 3px 0 #b07a12; }
     .opt.toggle { grid-template-columns: auto 1fr; cursor: pointer; font-size: 14px; }
     .sheet .opt.toggle input { width: 26px; height: 26px; padding: 0; border: none; accent-color: #ffc93c; cursor: pointer; }
-    .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    @media (max-width: 560px) { .seg { grid-template-columns: 1fr; } }
     .seg button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, .07); border: 3px solid rgba(255, 255, 255, .12); color: #fff; font: 900 16px var(--fun); cursor: pointer; text-align: left; }
     .seg button small { font: 700 12px var(--fun); color: #b3b0c9; }
     .seg button.on { border-color: #ffc93c; background: rgba(255, 201, 60, .16); box-shadow: 0 0 0 3px rgba(255, 201, 60, .2); }
@@ -922,8 +953,9 @@
       <div class="opt-group">
         <div class="opt-title">🖥 Graphismes</div>
         <div class="seg" id="optQuality">
-          <button type="button" data-q="high">✨ Haute qualité<small>ombres, image nette</small></button>
-          <button type="button" data-q="low">🔋 Économie<small>plus fluide sur téléphone</small></button>
+          <button type="button" data-q="high">✨ Haute<small>ombres fines, image nette</small></button>
+          <button type="button" data-q="medium">⚖ Moyenne<small>bon équilibre</small></button>
+          <button type="button" data-q="low">🔋 Économie<small>le plus fluide</small></button>
         </div>
       </div>
       <div class="opt-group">

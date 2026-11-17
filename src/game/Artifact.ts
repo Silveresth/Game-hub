@@ -83,6 +83,7 @@ export class Artifact {
     this.isSculpt = config.type === 'SCULPTURE';
     const [px, py, pz] = config.position;
     const [rx, ry, rz] = config.rotation;
+    this.group.userData.art = 1;
     this.group.position.set(px, py, pz);
     this.group.rotation.set(rx, ry, rz);
     if (this.isSculpt) this.buildSculpture(config);
@@ -101,8 +102,9 @@ export class Artifact {
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(1, 1, 0.08),
       std(frameColor, {
-        roughness: metal ? 0.22 : 0.45,
-        metalness: metal ? 0.85 : 0.15,
+        roughness: metal ? 0.22 : 0.38,
+        metalness: metal ? 1 : 0.12,
+        envMapIntensity: metal ? 1.2 : 0.45,
         ...(glowColor ? { emissive: glowColor, emissiveIntensity: 0.55 } : {}),
       }),
     );

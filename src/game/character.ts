@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { shadowMode } from './quality';
 
 /**
  * Personnages 3D animés. Tous les modèles humains partagent le même squelette (62 os) :
@@ -110,6 +111,11 @@ export class Character {
   private baseY = 0;
   /** Tenue réellement portée (0 si la tenue demandée n'est pas encore chargée). */
   readonly outfit: number;
+  /** Couleur de la silhouette lointaine. */
+  readonly lodColor = new THREE.Color(0xe6d3b0);
+  /** 0 près, 1 animation une image sur deux, 2 silhouette. */
+  private lod = 0;
+  private lodSkip = 0;
 
   /** @param tint couleur du costume (joueur, gardes) ; ignorée pour la foule */
   constructor(tint?: number, opts: CharacterOptions = {}) {
@@ -124,6 +130,7 @@ export class Character {
     const box = new THREE.Box3().setFromObject(model);
     model.scale.setScalar(HEIGHT / (box.max.y - box.min.y));
     this.baseY = model.position.y;
+    this.lodColor.setHex(opts.crowd ? pick(CLOTHES) : (tint ?? 0xe6d3b0));
     // apparence de la foule : une couleur par « famille » de matériau, gardée pour tout le personnage
     const look = opts.crowd ? { skin: pick(SKIN), hair: pick(HAIR), clothes: new Map<string, number>() } : null;
     model.traverse((o) => {
@@ -133,7 +140,8 @@ export class Character {
       }
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
-      mesh.castShadow = true;
+      mesh.castShadow = shadowMode !== 'low';
+      mesh.userData.canCast = true;
       const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
       const next = mats.map((m) => {
         const name = m.name.toLowerCase();
@@ -184,6 +192,13 @@ export class Character {
       });
     }
     this.root.add(model);
+    this.root.userData.actor = 1;
+    this.blob = new THREE.Mesh(blobGeo, blobMat);
+    this.blob.rotation.x = -Math.PI / 2;
+    this.blob.position.y = 0.03;
+    this.blob.visible = blobsOn;
+    this.root.add(this.blob);
+    roster.push(this);
     this.mixer = new THREE.AnimationMixer(model);
     for (const clip of tpl.clips) {
       const action = this.mixer.clipAction(clip);
@@ -244,6 +259,49 @@ export class Character {
     this.oneShot = true;
   }
 
+  private blob: THREE.Mesh;
+  private rimU: { value: number } | null = null;
+
+  /** Disque de contact au sol, quand les ombres sont coupées. */
+  setContact(on: boolean): void {
+    this.blob.visible = on;
+  }
+
+  /**
+   * Liseré clair sur la silhouette (joueur local, voleur marqué).
+   * Les matériaux sont clonés une fois pour ne pas teinter les autres personnages qui partagent le modèle.
+   */
+  setRim(strength: number): void {
+    if (!this.rimU) {
+      this.rimU = { value: strength };
+      const u = this.rimU;
+      this.model.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.Material[];
+        const next = mats.map((m) => {
+          const std = m as THREE.MeshStandardMaterial;
+          if (!std.isMeshStandardMaterial) return m;
+          const c = std.clone();
+          this.ownMaterials.push(c);
+          c.onBeforeCompile = (shader) => {
+            shader.uniforms.uRim = u;
+            shader.fragmentShader = `uniform float uRim;\n${shader.fragmentShader.replace(
+              '#include <opaque_fragment>',
+              `float samRim = pow(1.0 - clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0), 2.6);
+               outgoingLight += vec3(1.0, 0.86, 0.62) * samRim * uRim;
+               #include <opaque_fragment>`,
+            )}`;
+          };
+          c.customProgramCacheKey = () => 'sam-rim';
+          return c;
+        });
+        mesh.material = Array.isArray(mesh.material) ? next : next[0];
+      });
+    }
+    this.rimU.value = strength;
+  }
+
   /** Vitesse de lecture des animations (pas plus rapides pour un personnage pressé). */
   setTimeScale(k: number): void {
     this.mixer.timeScale = k;
@@ -272,7 +330,21 @@ export class Character {
   /** Pose des os modifiés à l'image précédente (remise en place avant l'animation suivante). */
   private saved: Array<{ o: THREE.Object3D; q: THREE.Quaternion; p: THREE.Vector3 }> = [];
 
+  /** 0 près de la caméra, 1 un peu loin, 2 trop loin (silhouette à la place du modèle). */
+  applyLod(level: 0 | 1 | 2): void {
+    if (level === this.lod) return;
+    this.lod = level;
+    this.model.visible = level < 2;
+    if (this.blob) this.blob.visible = blobsOn && level < 2;
+  }
+
   update(dt: number): void {
+    if (this.lod === 2) return;
+    if (this.lod === 1) {
+      this.lodSkip ^= 1;
+      if (this.lodSkip) return;
+      dt *= 2;
+    }
     // pose de l'image précédente retirée avant l'animation (sinon, sur un os que l'animation
     // ne pilote pas, la rotation s'additionnerait à chaque image)
     for (const s of this.saved) {
@@ -305,6 +377,8 @@ export class Character {
   }
 
   dispose(): void {
+    const i = roster.indexOf(this);
+    if (i >= 0) roster.splice(i, 1);
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.mixer.getRoot());
     this.root.removeFromParent();
@@ -316,4 +390,62 @@ export class Character {
 function darken(hex: number, k: number): number {
   const c = new THREE.Color(hex).multiplyScalar(k);
   return c.getHex();
+}
+
+const roster: Character[] = [];
+let blobsOn = false;
+const blobGeo = new THREE.CircleGeometry(0.42, 14);
+const blobMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false });
+
+/** Disques de contact sous tous les personnages (palier bas, sans ombres). */
+export function setContactBlobs(on: boolean): void {
+  blobsOn = on;
+  for (const c of roster) c.setContact(on);
+}
+
+const NEAR = 30;
+let lodFar = 52;
+const impostorGeo = new THREE.CapsuleGeometry(0.32, 0.85, 2, 6);
+const impostorMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.72 });
+let impostors: THREE.InstancedMesh | null = null;
+const lodDummy = new THREE.Object3D();
+
+/** Silhouettes partagées des personnages trop loin pour leur modèle animé. */
+export function mountImpostors(scene: THREE.Scene): void {
+  impostors = new THREE.InstancedMesh(impostorGeo, impostorMat, 48);
+  impostors.count = 0;
+  impostors.frustumCulled = false;
+  impostors.castShadow = false;
+  scene.add(impostors);
+}
+
+export function setCharacterLod(dist: number): void {
+  lodFar = dist;
+}
+
+/** À appeler après le déplacement des personnages. En deçà de 30 m, le modèle reste entier (le joueur local y est toujours). */
+export function updateCharacterLods(cam: THREE.Vector3): void {
+  if (!impostors) return;
+  let n = 0;
+  for (const c of roster) {
+    const p = c.root.position;
+    const dx = p.x - cam.x;
+    const dy = p.y - cam.y;
+    const dz = p.z - cam.z;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    const level: 0 | 1 | 2 = d2 < NEAR * NEAR ? 0 : d2 < lodFar * lodFar ? 1 : 2;
+    c.applyLod(level);
+    if (level === 2 && n < 48) {
+      lodDummy.position.set(p.x, p.y + 1.05, p.z);
+      lodDummy.rotation.set(0, c.root.rotation.y, 0);
+      lodDummy.scale.set(1, 1, 1);
+      lodDummy.updateMatrix();
+      impostors.setMatrixAt(n, lodDummy.matrix);
+      impostors.setColorAt(n, c.lodColor);
+      n++;
+    }
+  }
+  impostors.count = n;
+  impostors.instanceMatrix.needsUpdate = true;
+  if (impostors.instanceColor) impostors.instanceColor.needsUpdate = true;
 }

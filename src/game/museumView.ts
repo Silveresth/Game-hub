@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { MuseumBuilding, type ThemeId } from './Room';
 import { Artifact } from './Artifact';
-import { Sparkles } from './fx';
+import { Sparkles, motes } from './fx';
 import { Label } from './labels';
 import { CATALOG, RARITY_STARS, artUrl, frameTag, incomeOf, money, perSec, work, type FrameId, type RarityId } from './catalog';
 import { CELL, FLOOR_H, ROOMS, STAIRS, inside, isStatueSlot, slotFloor, slotWorld, toWorld, type Plot } from './layout';
 import { disposeMerged, mergeStatic } from './merge';
+import { showcase } from './textures';
 import type { Box, Circle } from './district';
 import type { PlayerState, PublicSecurity } from './api';
 
@@ -52,6 +53,9 @@ const SPARKLY = new Set(['epique', 'legendaire', 'mythique']);
 const AURA: Record<RarityId, number> = { commun: 0, rare: 0.3, epique: 0.5, legendaire: 0.8, mythique: 1 };
 
 const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
+const laserCore = new THREE.MeshBasicMaterial({ color: 0xff2a3d, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+const laserGlow = new THREE.MeshBasicMaterial({ color: 0xff4a55, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false });
+const _aim = new THREE.Vector3();
 
 function signTexture(lines: Array<[string, string, number]>, bg = '#10131d'): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -83,6 +87,10 @@ function signTexture(lines: Array<[string, string, number]>, bg = '#10131d'): TH
  * Pour votre musée seulement : caisse, panneau d'agrandissement et verrou.
  */
 export class MuseumView {
+  /** Distance max (m) des étiquettes d'œuvres. Réglée par le palier graphique. */
+  static labelRange = 22;
+  /** Poussière dans la salle où se trouve le joueur (éteinte en économie). */
+  static dustOn = false;
   owner: MuseumSnap | null = null;
   online = false;
   lockedUntil = 0;
@@ -274,7 +282,7 @@ export class MuseumView {
         tg.position.set(this.plot.x, f * FLOOR_H + 0.02, this.plot.z);
         tg.scale.z = this.plot.f;
         // Sol en dalles de pierre claire de 36×36 m
-        const floorMat = std(0xd8d4cc, { roughness: 0.65 });
+        const floorMat = showcase().marble;
         const terraceFloor = new THREE.Mesh(new THREE.PlaneGeometry(36, 36), floorMat);
         terraceFloor.rotation.x = -Math.PI / 2;
         terraceFloor.position.set(0, 0, 12);
@@ -283,7 +291,7 @@ export class MuseumView {
         tg.add(terraceFloor);
 
         // Balustrades extérieures (hauteur 1.1 m)
-        const railMat = std(0xeeeeee, { roughness: 0.4 });
+        const railMat = showcase().marble;
         const boxes: Box[] = [];
         const addRail = (w: number, d: number, x: number, z: number) => {
           const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 1.1, d), railMat);
@@ -330,8 +338,8 @@ export class MuseumView {
     if (!this.stairs.parent) this.scene.add(this.stairs);
     const base = toWorld(this.plot, STAIRS[0], 0, STAIRS[1]);
     this.stairs.position.copy(base);
-    const wood = std(0x6b4a2e, { roughness: 0.5 });
-    const metal = std(0x2b2f38, { metalness: 0.7, roughness: 0.35 });
+    const wood = showcase().woodDark;
+    const metal = showcase().gold;
     const STEPS = 16;
     for (let f = 0; f < n - 1; f++) {
       const seg = new THREE.Group();
@@ -475,13 +483,15 @@ export class MuseumView {
       }
     }
     if (s.lasers) {
-      const mat = new THREE.MeshBasicMaterial({ color: 0xff2a3d, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
       for (const y of [0.45, 1.05, 1.65]) {
-        const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 3.0, 6), mat);
-        beam.rotation.z = Math.PI / 2;
-        beam.position.copy(toWorld(this.plot, 0, y, -CELL / 2 - 0.15));
-        this.secGroup.add(beam);
-        this.beams.push(beam);
+        const at = toWorld(this.plot, 0, y, -CELL / 2 - 0.15);
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 3.0, 6), laserCore);
+        const halo = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 3.0, 6), laserGlow);
+        beam.rotation.z = halo.rotation.z = Math.PI / 2;
+        beam.position.copy(at);
+        halo.position.copy(at);
+        this.secGroup.add(beam, halo);
+        this.beams.push(beam, halo);
       }
       for (const sx of [-1.55, 1.55]) {
         const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.9, 0.12), dark);
@@ -508,7 +518,10 @@ export class MuseumView {
       const { p, ry, normal, floor } = this.slotWorld(Number(slot));
       const glass = new THREE.Mesh(
         new THREE.BoxGeometry(2.0, 1.75, 0.5),
-        new THREE.MeshStandardMaterial({ color: lvl >= 2 ? 0x9fd0ff : 0xe8f4ff, transparent: true, opacity: lvl >= 2 ? 0.28 : 0.18, roughness: 0.05, metalness: 0.3, depthWrite: false }),
+        new THREE.MeshPhysicalMaterial({
+          color: lvl >= 2 ? 0x9fd0ff : 0xe8f4ff, transparent: true, opacity: lvl >= 2 ? 0.3 : 0.18,
+          roughness: 0.05, metalness: 0, clearcoat: 1, envMapIntensity: 1.3, depthWrite: false,
+        }),
       );
       glass.position.copy(p).addScaledVector(normal, 0.3);
       glass.rotation.y = ry;
@@ -530,6 +543,7 @@ export class MuseumView {
       (this.genLed.material as THREE.MeshBasicMaterial).color.setHex(sabotage ? (Math.sin(t * 20) > 0 ? 0xff9f43 : 0x332211) : out ? 0x333333 : 0x7dff9a);
     }
     const lasers = this.lasersOn(now);
+    laserCore.opacity = 0.55 + Math.sin(t * 9) * 0.35;
     for (const b of this.beams) b.visible = lasers;
   }
 
@@ -804,9 +818,9 @@ export class MuseumView {
     const stoneMat = std(0xf6e7c8, { roughness: 0.75 });
     const stoneDark = std(own.clone().lerp(white, 0.22).getHex(), { roughness: 0.8 });
     const pedMat = std(own.clone().lerp(white, 0.45).getHex(), { roughness: 0.75 });
-    const goldTrim = std(0xe8b64c, { roughness: 0.25, metalness: 0.8 });
+    const goldTrim = showcase().gold;
     const roofSlate = std(own.clone().multiplyScalar(0.5).getHex(), { roughness: 0.7 });
-    const stepsMat = std(0xd9b48a, { roughness: 0.85 });
+    const stepsMat = showcase().marble;
 
     const d = -this.plot.f; // direction de la place sur l'axe z
     const wallZ = this.plot.z + d * 6.1;
@@ -886,8 +900,8 @@ export class MuseumView {
     this.facadeTop.add(entab, pediment, goldMedallion, roof);
 
     // Portes battantes d'apparat en bois noble avec vitres et garnitures dorées
-    const doorWood = std(0x2a1a12, { roughness: 0.5 });
-    const doorGlass = new THREE.MeshStandardMaterial({ color: 0x8fc5ff, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.35 });
+    const doorWood = showcase().woodDark;
+    const doorGlass = showcase().glass;
     const doorW = 1.45;
     const doorH = 3.6;
     const doorThick = 0.14;
@@ -920,7 +934,7 @@ export class MuseumView {
     // Tapis rouge menant vers la galerie (avant : un tapis de marbre blanc)
     const runway = new THREE.Mesh(
       new THREE.PlaneGeometry(4.2, 16),
-      std(0xa31c30, { roughness: 0.95 }),
+      showcase().velvet,
     );
     runway.rotation.x = -Math.PI / 2;
     runway.position.set(x0, 0.02, wallZ + d * 8.4);
@@ -1043,15 +1057,12 @@ export class MuseumView {
     if (this.own) lines = [{ text: 'VOTRE MUSÉE', color: '#ffd36b', size: 66, weight: 900 }];
     else if (!o) lines = [];
     else {
-      const robbed = !this.online && (o.robbedUntil ?? 0) > now;
       const tag = o.shielded ? '🛡 Bouclier débutant'
-        : o.immuneUntil > now ? `🛡 Protégé ${Math.ceil((o.immuneUntil - now) / 60_000)} min`
-        : robbed ? `🛡 Absent, déjà volé : protégé ${Math.ceil(((o.robbedUntil ?? 0) - now) / 60_000)} min`
         : this.isLocked(now) ? '🔒 Verrouillé'
         : this.online ? '● Propriétaire présent' : '☾ Propriétaire absent';
       lines = [
         { text: o.rebirths ? `${o.name} · ⭐${o.rebirths}` : o.name, color: '#fff', size: 52, weight: 900 },
-        { text: `${money(o.value)} · ${tag}`, color: o.shielded || o.immuneUntil > now || robbed ? '#9fe3ff' : this.online ? '#7dff9a' : '#ffb3c1', size: 40, weight: 800 },
+        { text: `${money(o.value)} · ${tag}`, color: o.shielded ? '#9fe3ff' : this.online ? '#7dff9a' : '#ffb3c1', size: 40, weight: 800 },
       ];
       const prot = this.protectionText(now);
       if (prot) lines.push({ text: prot, color: '#ffd36b', size: 34, weight: 800 });
@@ -1063,12 +1074,44 @@ export class MuseumView {
     if (lines.length) this.status.update(lines, { bg: 'rgba(8,10,18,.75)', border: this.own ? '#ffd36b' : 'rgba(255,255,255,.3)' });
   }
 
+  /** Braque les projecteurs du palier sur les œuvres visibles les plus proches. */
+  aimSpots(spots: THREE.SpotLight[], n: number, origin: THREE.Vector3): void {
+    const best: Array<{ d: number; x: number; y: number; z: number }> = [];
+    for (const s of this.shown.values()) {
+      if (!s.art.group.visible) continue;
+      s.art.group.getWorldPosition(_aim);
+      const dx = _aim.x - origin.x;
+      const dy = _aim.y - origin.y;
+      const dz = _aim.z - origin.z;
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d > 400) continue;
+      best.push({ d, x: _aim.x, y: _aim.y, z: _aim.z });
+    }
+    best.sort((a, b) => a.d - b.d);
+    for (let i = 0; i < spots.length; i++) {
+      const spot = spots[i];
+      const b = i < n ? best[i] : undefined;
+      if (!b) {
+        spot.intensity = 0;
+        spot.visible = false;
+        continue;
+      }
+      spot.visible = true;
+      spot.intensity = 6.5;
+      spot.position.set(b.x, b.y + 2.5, b.z);
+      spot.target.position.set(b.x, b.y, b.z);
+    }
+  }
+
   update(t: number, dt: number, now: number, cam?: THREE.Vector3, playerPos?: THREE.Vector3): void {
     // loin de la caméra, les œuvres (cachées derrière les murs) ne sont pas dessinées
     if (cam) this.far = Math.hypot(cam.x - this.plot.x, cam.z - (this.plot.z + this.plot.f * CELL)) > 75;
     for (const [uid, s] of this.shown) {
-      s.art.group.visible = s.label.sprite.visible = !this.far && uid !== this.hiddenUid && slotFloor(s.slot) <= this.cut;
-      if (!this.far) s.art.update(t, dt);
+      const show = !this.far && uid !== this.hiddenUid && slotFloor(s.slot) <= this.cut;
+      s.art.group.visible = show;
+      s.label.sprite.visible = show && (!cam || cam.distanceToSquared(s.label.sprite.position) < MuseumView.labelRange * MuseumView.labelRange);
+      if (s.sparkles) s.sparkles.points.visible = show;
+      if (show) s.art.update(t, dt);
     }
     // Haut du portique : masqué quand le joueur est dans ce musée (cut ≠ 99) ou sous le toit du portique,
     // sinon il recouvrait la moitié de l'écran (caméra en hauteur au-dessus des murs).
@@ -1102,6 +1145,7 @@ export class MuseumView {
       (this.rings[2].material as THREE.MeshBasicMaterial).opacity = locked ? 0.9 : now < this.lockReadyAt ? 0.25 : 0.6;
     }
     this.updateSecurity(t, now);
+    if (MuseumView.dustOn && this.cut !== 99 && playerPos) motes(playerPos, dt);
     this.status.sprite.position.y = 11.6 + Math.sin(t * 2) * 0.2;
     this.refreshStatus(now);
   }

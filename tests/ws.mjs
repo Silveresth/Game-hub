@@ -161,24 +161,17 @@ ok(!sA.artworks.some((a) => a.uid === target.uid) && sB.artworks.some((a) => a.w
 ok(!sA.artworks.some((a) => a.slot === target.slot), 'la place de l’œuvre volée reste vide (aucune œuvre de la réserve ne s’y accroche toute seule)');
 const plotAfter = [...cB.inbox].reverse().find((m) => m.t === 'plot' && m.plot.index === wA.you.plot);
 ok(plotAfter && !plotAfter.plot.owner.artworks.some((a) => a.uid === target.uid || a.slot === target.slot), 'les autres joueurs ne voient plus rien à cette place');
-ok(sA.immuneUntil > Date.now() && sA.immuneUntil <= Date.now() + 5 * 60_000, 'A est protégé 5 min (pas plus)');
+ok(!sA.immuneUntil || sA.immuneUntil <= Date.now(), 'pas d’immunité imposée après un vol : on peut revoler immédiatement');
 const boardT = await http('leaderboard?board=theft');
 ok(boardT.some((r) => r.name === 'Musée Bêta' && r.value > 0), 'classement « plus gros casses » à jour');
 // B revend son butin : A redevient une cible valable quel que soit le tirage du convoi
 const loot = sB.artworks.find((a) => a.workId === target.workId);
 await http('sell', { uid: loot.uid }, B);
 
-// Refus : immunité
+// Second vol immédiat (sans délai d'immunité)
 const other = sA.artworks.find((a) => a.slot !== null);
 if (other) {
-  cB.send({ t: 'pos', x: stand.x, z: stand.z, ry: 0, anim: 'Idle' });
-  await new Promise((r) => setTimeout(r, 200));
-  cB.send({ t: 'steal', plot: wA.you.plot, uid: other.uid });
-  const refusedImmune = await cB.wait((m) => m.t === 'steal' && m.phase === 'refused' && /cambriolé/.test(m.error));
-  ok(true, `second vol refusé : « ${refusedImmune.error} »`);
-
-  // --- Arrestation : on lève l'immunité, B vole, A le touche ---
-  await http('dev/age', {}, A);
+  // --- Arrestation : B vole immédiatement sans délai, A le touche ---
   const w2 = slotWorld(plotA, other.slot);
   const stand2 = { x: w2.x + (plotA.x - w2.x) * 0.25, z: w2.z + (plotA.z - w2.z) * 0.25 };
   cB.send({ t: 'pos', x: stand2.x, z: stand2.z, ry: 0, anim: 'Idle' });
@@ -695,15 +688,14 @@ cB.ws.close();
     await c1.wait((m) => m.t === 'steal' && m.phase === 'delivered' && m.thief === T1.id, 8000);
     // (on attend la mise à jour de la parcelle chez l'autre joueur : elle peut arriver juste après « delivered »)
     const last = await c2.wait((m) => m.t === 'plot' && m.plot.index === wV.you.plot && !m.plot.owner.artworks.some((a) => a.uid === shown[0].uid), 5000).catch(() => null);
-    const left = (last?.plot.owner.robbedUntil ?? 0) - Date.now();
-    ok(last && left > 9 * 60_000 && left <= 10 * 60_000, 'un autre joueur ne voit plus l’œuvre volée, et sait que le musée est protégé 10 min');
-    await http('dev/age', { keepOfflineLoss: true }, V); // fin des 5 min de pause après un vol, pas de la règle des 10 min
+    ok(last && !last.plot.owner.robbedUntil, 'un autre joueur ne voit plus l’œuvre volée, et aucune restriction de temps n’est imposée');
+    // Second vol immédiat sur le joueur absent sans attendre
     goTo(c2, shown[1]);
     await sleep(300);
     c2.send({ t: 'steal', plot: wV.you.plot, uid: shown[1].uid });
-    const no = await c2.wait((m) => m.t === 'steal' && ((m.phase === 'start' && m.thief === T2.id) || m.phase === 'refused'));
-    ok(no.phase === 'refused' && /absent/.test(no.error) && /moins de 10 min/.test(no.error), `second vol refusé : « ${no.error} »`);
-  } else ok(true, '(musée trop petit pour tester la règle des 10 min)');
+    const started = await c2.wait((m) => m.t === 'steal' && m.phase === 'start' && m.thief === T2.id, 5000).catch(() => null);
+    ok(started, 'second vol consécutif sur un propriétaire absent accepté immédiatement sans délai');
+  } else ok(true, '(musée trop petit pour tester le vol répété)');
   c1.ws.close();
   c2.ws.close();
 }

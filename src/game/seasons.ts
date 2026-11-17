@@ -4,6 +4,8 @@
 import * as THREE from 'three';
 import { CATALOG, type SeasonDef, type SeasonId } from './catalog';
 import type { SeasonState } from './api';
+import type { Quality } from './quality';
+import { tierOf } from './quality';
 import { DECO_CENTER, DECO_SPOTS, type District } from './district';
 
 export interface SeasonLights {
@@ -542,7 +544,7 @@ export class Seasons {
   private deco = new THREE.Group();
   private anims: Anim[] = [];
   private weather: Weather | null = null;
-  private quality: 'high' | 'low' = 'high';
+  private quality: Quality = 'high';
 
   constructor(private scene: THREE.Scene, private district: District, private lights: SeasonLights) {
     scene.add(this.deco);
@@ -555,7 +557,7 @@ export class Seasons {
     return this.id !== '' && this.id !== 'classique';
   }
 
-  setQuality(q: 'high' | 'low'): void {
+  setQuality(q: Quality): void {
     if (q === this.quality) return;
     this.quality = q;
     if (this.id) this.buildWeather();
@@ -617,7 +619,7 @@ export class Seasons {
     this.weather = null;
     const kind = this.def.particles;
     if (!kind) return;
-    this.weather = new Weather(kind, this.quality === 'high' ? 1400 : 600);
+    this.weather = new Weather(kind, tierOf(this.quality).weather);
     this.scene.add(this.weather.points);
   }
 

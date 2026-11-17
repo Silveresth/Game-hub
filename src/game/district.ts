@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { money } from './catalog';
+import { textureAnisotropy } from './quality';
+import { showcase } from './textures';
 
 /** Quartier des musées : place centrale, route du convoi, 7 parcelles de joueurs + l'hôtel des ventes. */
 export const BOUNDS = { minX: -84, maxX: 84, minZ: -62, maxZ: 62 };
@@ -51,8 +53,47 @@ function tileTexture(base: string, line: string, tiles: number, noise = 0.05): T
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.anisotropy = textureAnisotropy;
   return t;
+}
+
+/** Relief léger partagé (aucun fichier) : il donne du grain aux sols sans changer leur couleur. */
+let softNormalTex: THREE.CanvasTexture | null = null;
+function softNormal(): THREE.CanvasTexture {
+  if (softNormalTex) return softNormalTex;
+  const s = 64;
+  const h = new Float32Array(s * s);
+  for (let i = 0; i < h.length; i++) h[i] = Math.random();
+  const blur = new Float32Array(s * s);
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    let a = 0;
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) a += h[((y + j + s) % s) * s + ((x + i + s) % s)];
+    blur[y * s + x] = a / 9;
+  }
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(s, s);
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const l = blur[y * s + ((x - 1 + s) % s)];
+    const r = blur[y * s + ((x + 1) % s)];
+    const u = blur[((y - 1 + s) % s) * s + x];
+    const d = blur[((y + 1) % s) * s + x];
+    const dx = (l - r) * 2.2;
+    const dy = (u - d) * 2.2;
+    const dz = 1;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const i = (y * s + x) * 4;
+    img.data[i] = ((dx / len) * 0.5 + 0.5) * 255;
+    img.data[i + 1] = ((dy / len) * 0.5 + 0.5) * 255;
+    img.data[i + 2] = (dz / len) * 255;
+    img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  softNormalTex = new THREE.CanvasTexture(c);
+  softNormalTex.wrapS = softNormalTex.wrapT = THREE.RepeatWrapping;
+  softNormalTex.repeat.set(10, 10);
+  return softNormalTex;
 }
 
 /**
@@ -79,7 +120,7 @@ function grassTexture(base = '#4fa63f', snow = false, stripes = false): THREE.Ca
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.anisotropy = textureAnisotropy;
   return t;
 }
 
@@ -113,7 +154,7 @@ function paverTexture(a: string, b: string, grout: string, tiles = 4): THREE.Can
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.anisotropy = textureAnisotropy;
   return t;
 }
 
@@ -176,6 +217,8 @@ function textTexture(lines: Array<[string, string, number]>, w = 1024, h = 256, 
 
 export class District {
   readonly group = new THREE.Group();
+  /** Sols qui reçoivent le relief procédural (couleurs inchangées). */
+  private groundMats: THREE.MeshStandardMaterial[] = [];
   readonly boxes: Box[] = [];
   readonly circles: Circle[] = [];
   /** Volumes opaques qui peuvent masquer le joueur (pour la caméra). */
@@ -185,6 +228,7 @@ export class District {
   private water!: THREE.Mesh;
 
   constructor(scene: THREE.Scene) {
+    this.group.userData.decor = 1;
     scene.add(this.group);
     this.buildSky(scene);
     this.buildGround();
@@ -319,15 +363,22 @@ export class District {
     }
     const w = this.water.material as THREE.MeshStandardMaterial;
     w.emissiveIntensity = 0.25 + Math.sin(t * 1.5) * 0.08;
+    if (w.normalMap && this.sprayCount > 0) {
+      w.normalMap.offset.x = t * 0.015;
+      w.normalMap.offset.y = t * 0.008;
+    }
     // gouttes de la fontaine : chacune suit une parabole, du bol central jusqu'au bassin
-    if (this.sprayGeo) {
+    if (this.sprayGeo && this.sprayCount > 0) {
       const a = this.sprayGeo.getAttribute('position') as THREE.BufferAttribute;
-      this.sprayPhase.forEach(([ang, ph], i) => {
+      const n = this.sprayCount;
+      for (let i = 0; i < n; i++) {
+        const [ang, ph] = this.sprayPhase[i];
         const k = (t * 0.7 + ph) % 1;
         const r = 0.3 + k * 2.3;
         a.setXYZ(i, Math.cos(ang) * r, 3.1 + 1.7 * k - 4.0 * k * k, -12 + Math.sin(ang) * r);
-      });
+      }
       a.needsUpdate = true;
+      this.sprayGeo.setDrawRange(0, n);
     }
   }
 
@@ -349,6 +400,7 @@ export class District {
         tint: { value: this.skyTint.color },
         tintAmt: { value: 0 },
         sunDir: { value: new THREE.Vector3(26, 42, 14).normalize() },
+        octaves: { value: 5 },
       },
       vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: /* glsl */ `
@@ -358,13 +410,14 @@ export class District {
         uniform vec3 tint;
         uniform float tintAmt;
         uniform vec3 sunDir;
+        uniform float octaves;
         varying vec3 vP;
         float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float noise(vec2 p) {
           vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
           return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
         }
-        float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }
+        float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { if (float(i) >= octaves) break; v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }
         void main() {
           vec3 d = normalize(vP);
           vec3 col = mix(horizon, top, smoothstep(-0.02, 0.45, d.y));
@@ -386,6 +439,48 @@ export class District {
     const sky = new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), this.skyMat);
     sky.frustumCulled = false;
     scene.add(sky);
+  }
+
+  /**
+   * Détail selon le palier : nuages, netteté des textures, jets de la fontaine, relief des sols.
+   * Les couleurs (Neutral, pelouse, pavés) ne changent pas.
+   */
+  setVisual(o: { octaves: number; anisotropy: number; spray: number; relief: boolean }): void {
+    if (this.skyMat) this.skyMat.uniforms.octaves.value = o.octaves;
+    this.sprayCount = o.spray;
+    if (this.spray) this.spray.visible = o.spray > 0;
+    const normal = o.relief ? softNormal() : null;
+    for (const m of this.groundMats) {
+      m.normalMap = normal;
+      m.normalScale.set(o.relief ? 0.22 : 0, o.relief ? 0.22 : 0);
+      m.needsUpdate = true;
+    }
+    const water = this.water?.material as THREE.MeshStandardMaterial | undefined;
+    if (water) {
+      water.normalMap = o.relief ? this.waterNormal() : null;
+      water.normalScale.set(0.35, 0.35);
+      water.needsUpdate = true;
+    }
+    this.group.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
+      for (const mat of mats) {
+        const map = (mat as THREE.MeshStandardMaterial).map;
+        if (map && map.anisotropy !== o.anisotropy) {
+          map.anisotropy = o.anisotropy;
+          map.needsUpdate = true;
+        }
+      }
+    });
+  }
+
+  private waterNormalTex: THREE.Texture | null = null;
+  private waterNormal(): THREE.Texture {
+    if (this.waterNormalTex) return this.waterNormalTex;
+    const t = softNormal().clone();
+    t.repeat.set(3, 3);
+    this.waterNormalTex = t;
+    return t;
   }
 
   /** Teinte du ciel pendant un événement (null : ciel normal). */
@@ -413,24 +508,25 @@ export class District {
     const baseStone = grassTexture();
     baseStone.repeat.set(40, 30);
     this.grassMat = std(0xffffff, { map: baseStone, roughness: 0.95 });
+    this.groundMats.push(this.grassMat);
     this.plane(240, 180, 0, 0, this.grassMat, -0.05);
 
     // 2. Place centrale en pavés dorés et terre cuite (avant : un grand aplat beige qui « blanchissait » toute la scène)
     const pav = paverTexture('#eaae62', '#de9154', 'rgba(120,62,32,0.45)', 6);
     pav.repeat.set(170 / 6, 48 / 6);
-    this.plane(170, 48, 0, 0, std(0xffffff, { map: pav, roughness: 0.82 }), -0.01);
+    this.plane(170, 48, 0, 0, this.track(std(0xffffff, { map: pav, roughness: 0.82 })), -0.01);
 
     // 3. Trottoirs le long de la route (nord et sud) en briques rouges
     const brick = tileTexture('#c0583b', 'rgba(90,35,20,0.5)', 8, 0.05);
     brick.repeat.set(160 / 4, 1);
-    const walkwayMat = std(0xffffff, { map: brick, roughness: 0.8 });
+    const walkwayMat = this.track(std(0xffffff, { map: brick, roughness: 0.8 }));
     this.plane(160, 4.0, 0, -5.5, walkwayMat, 0.01);
     this.plane(160, 4.0, 0, 5.5, walkwayMat, 0.01);
 
     // 4. Chaussée du convoi (asphalte sombre avec bordures en granit clair)
     const asphalt = tileTexture('#282b30', 'rgba(0,0,0,0)', 1, 0.04);
     asphalt.repeat.set(30, 1);
-    this.plane(148, 6.4, 0, ROAD.z, std(0xffffff, { map: asphalt, roughness: 0.85 }), 0);
+    this.plane(148, 6.4, 0, ROAD.z, this.track(std(0xffffff, { map: asphalt, roughness: 0.85 })), 0);
 
     for (let x = ROAD.x0 + 2; x < ROAD.x1; x += 6) {
       this.plane(3, 0.25, x, ROAD.z, std(0xf4f0e4), 0.01);
@@ -446,10 +542,11 @@ export class District {
     const plot = grassTexture('#5cb84a', false, true);
     plot.repeat.set(5, 5);
     this.plotMat = std(0xffffff, { map: plot, roughness: 0.9 });
+    this.groundMats.push(this.plotMat);
     // allées des musées en pavés bleu ardoise : le tapis rouge des entrées s'y détache bien
     const alley = tileTexture('#6f7fa0', 'rgba(30,36,55,0.5)', 3, 0.05);
     alley.repeat.set(1, 3);
-    const alleyMat = std(0xffffff, { map: alley, roughness: 0.75 });
+    const alleyMat = this.track(std(0xffffff, { map: alley, roughness: 0.75 }));
     for (const x of [-60, -20, 20, 60]) {
       for (const z of [-41, 41]) {
         // pelouse de la parcelle
@@ -567,16 +664,16 @@ export class District {
   private buildPlaza(): void {
     // fontaine
     const f = new THREE.Group();
-    const basin = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.6, 0.8, 40), std(0xd9d1bf));
+    const basin = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.6, 0.8, 40), showcase().marble);
     basin.position.y = 0.4;
     this.water = new THREE.Mesh(
       new THREE.CylinderGeometry(3.05, 3.05, 0.1, 40),
       new THREE.MeshStandardMaterial({ color: 0x3f8fe0, emissive: 0x1b4f8f, emissiveIntensity: 0.25, roughness: 0.15, metalness: 0.2 }),
     );
     this.water.position.y = 0.76;
-    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 2.6, 16), std(0xd9d1bf));
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 2.6, 16), showcase().marble);
     column.position.y = 1.7;
-    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 0.4, 0.4, 24), std(0xd9d1bf));
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 0.4, 0.4, 24), showcase().marble);
     bowl.position.y = 3;
     f.add(basin, this.water, column, bowl);
     f.position.set(0, 0, -12);
@@ -586,44 +683,56 @@ export class District {
 
     // Lampadaires : sur le bord extérieur des trottoirs (z = ±7.3), jamais sur une allée de musée (x = ±20, ±60),
     // ni au milieu du trottoir (où l'on attend les camions), ni dans les dépôts (avant : x = ±75, dans les murs).
+    // Lampadaires instanciés : un seul appel de dessin pour les mâts, un pour les globes.
     const post = std(0x23262e, { metalness: 0.6, roughness: 0.4 });
     const bulb = new THREE.MeshStandardMaterial({ color: 0xfff1cf, emissive: 0xffd58a, emissiveIntensity: 1.4 });
     this.bulbMat = bulb;
-    for (const x of LAMP_X) {
-      for (const z of [-LAMP_Z, LAMP_Z]) {
-        const l = new THREE.Group();
-        const p = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 4.2, 10), post);
-        p.position.y = 2.1;
-        const b = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 12), bulb);
-        b.position.y = 4.35;
-        l.add(p, b);
-        l.position.set(x, 0, z);
-        l.traverse((o) => ((o as THREE.Mesh).castShadow = true));
-        this.group.add(l);
-        this.circles.push({ x, z, r: 0.2 });
-      }
-    }
+    const lampPos: Array<[number, number]> = [];
+    for (const x of LAMP_X) for (const z of [-LAMP_Z, LAMP_Z]) lampPos.push([x, z]);
+    const posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.13, 4.2, 8), post, lampPos.length);
+    const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.22, 10, 8), bulb, lampPos.length);
+    const dummy = new THREE.Object3D();
+    lampPos.forEach(([x, z], i) => {
+      dummy.position.set(x, 2.1, z);
+      dummy.updateMatrix();
+      posts.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, 4.35, z);
+      dummy.updateMatrix();
+      bulbs.setMatrixAt(i, dummy.matrix);
+      this.circles.push({ x, z, r: 0.2 });
+    });
+    posts.castShadow = bulbs.castShadow = true;
+    this.group.add(posts, bulbs);
 
     // arbres en bacs aux coins de la place
     const leaf = std(0x4e8f44, { flatShading: true });
-    const trunk = std(0x7a5232);
-    const planter = std(0xcfc6b2);
-    // (les coins nord x = ±40 accueillent désormais le marché noir et la boutique)
-    for (const [x, z] of [[-40, 14], [40, 14], [-75, 14], [75, 14], [-75, -14], [75, -14]] as const) {
-      const t = new THREE.Group();
-      const box = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.8, 2.4), planter);
-      box.position.y = 0.4;
-      const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 2.4, 8), trunk);
-      tr.position.y = 1.9;
-      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(1.8, 0), leaf);
-      crown.position.y = 3.9;
-      crown.scale.y = 1.15;
-      t.add(box, tr, crown);
-      t.position.set(x, 0, z);
-      t.traverse((o) => ((o as THREE.Mesh).castShadow = true));
-      this.group.add(t);
+    const trunkMat = showcase().woodDark;
+    const planter = showcase().marble;
+    const treeAt: Array<[number, number]> = [[-40, 14], [40, 14], [-75, 14], [75, 14], [-75, -14], [75, -14]];
+    const planters = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.8, 2.4), planter, treeAt.length);
+    const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.25, 2.4, 8), trunkMat, treeAt.length);
+    const crowns = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.8, 0), leaf, treeAt.length);
+    const treeM = new THREE.Matrix4();
+    const treeP = new THREE.Vector3();
+    const treeQ = new THREE.Quaternion();
+    const treeS = new THREE.Vector3(1, 1, 1);
+    treeAt.forEach(([x, z], i) => {
+      treeP.set(x, 0.4, z);
+      treeM.compose(treeP, treeQ, treeS);
+      planters.setMatrixAt(i, treeM);
+      treeP.set(x, 1.9, z);
+      treeM.compose(treeP, treeQ, treeS);
+      trunks.setMatrixAt(i, treeM);
+      treeP.set(x, 3.9, z);
+      treeS.set(1, 1.15, 1);
+      treeM.compose(treeP, treeQ, treeS);
+      crowns.setMatrixAt(i, treeM);
+      treeS.set(1, 1, 1);
       this.boxes.push({ minX: x - 1.2, maxX: x + 1.2, minZ: z - 1.2, maxZ: z + 1.2 });
-    }
+    });
+    planters.castShadow = trunks.castShadow = crowns.castShadow = true;
+    planters.receiveShadow = true;
+    this.group.add(planters, trunks, crowns);
 
     this.buildLiveliness();
 
@@ -715,7 +824,7 @@ export class District {
     this.group.add(flowers);
 
     // 3. bancs (bois et fonte), avec collision
-    const wood = std(0x9a6a3a, { roughness: 0.7 });
+    const wood = showcase().wood;
     const iron = std(0x23262e, { metalness: 0.6, roughness: 0.4 });
     for (const b of BENCHES) {
       const g = new THREE.Group();
@@ -744,7 +853,16 @@ export class District {
     this.sprayPhase = Array.from({ length: drops }, () => [Math.random() * Math.PI * 2, Math.random()]);
     const spray = new THREE.Points(this.sprayGeo, new THREE.PointsMaterial({ color: 0xbfe6ff, size: 0.13, transparent: true, opacity: 0.85, depthWrite: false }));
     spray.frustumCulled = false;
+    this.spray = spray;
     this.group.add(spray);
+  }
+
+  private spray: THREE.Points | null = null;
+  private sprayCount = 180;
+
+  private track(m: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+    this.groundMats.push(m);
+    return m;
   }
 
   private sprayGeo: THREE.BufferGeometry | null = null;

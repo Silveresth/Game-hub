@@ -4,8 +4,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { mountLiveBar, setupPwa } from '../shared/live';
 import * as api from './api';
 import type { ConvoyEvent, ConvoyItem, GuardTier, InboxItem, PlayerState, SeasonState, ToolId, UpgradeId } from './api';
-import { Character, hasOutfit, loadCharacterModel, loadCrowdModels } from './character';
-import { Coins, burst, dust, initFx, updateFx as updateParticles } from './fx';
+import { Character, hasOutfit, loadCharacterModel, loadCrowdModels, mountImpostors, setCharacterLod, setContactBlobs, updateCharacterLods } from './character';
+import { Coins, burst, cullSparkles, dust, initFx, rarityBurst, setSparkleBudget, updateFx as updateParticles } from './fx';
 import { updateRainbow } from './textures';
 import { AUCTION_DOOR, BLACK_MARKET, BOUTIQUE, District, type Box, type Circle } from './district';
 import { Guards } from './guards';
@@ -19,7 +19,7 @@ import { ChatUI, EMOTE_ICONS, SpeechBubble } from './chat';
 import { Voice } from './voice';
 import { Label } from './labels';
 import { RemotePlayers } from './remote';
-import { Convoy, artTexture } from './convoy';
+import { Convoy } from './convoy';
 import { Pedestrians, Visitors } from './visitors';
 import { Input } from './input';
 import { Sfx } from './sfx';
@@ -29,6 +29,9 @@ import { Seasons } from './seasons';
 import { Inventory, type InvTab } from './inventory';
 import { Tutorial, type TutoFacts } from './tutorial';
 import { CHANGELOG, GAME_VERSION, roadmapHtml, versionHtml } from '../shared/changelog';
+import { makeCarry, disposeCarry } from './carry';
+import { tierOf, stepDown, setTextureAnisotropy, setShadowMode, type Quality } from './quality';
+import { renderPost, resizePost, setPost } from './post';
 import { loadSettings, saveSettings } from './settings';
 
 const liveBar = mountLiveBar();
@@ -37,16 +40,23 @@ setupPwa('../sw.js');
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
 
+/** Réglages de l'écran Options (musique, son, graphismes, caméra), gardés sur l'appareil. */
+const settings = loadSettings();
+let quality: Quality = settings.quality;
+let gfx = tierOf(quality);
+setTextureAnisotropy(tierOf(quality).anisotropy);
+
 // ================================================================== rendu
 
 const canvas = $<HTMLCanvasElement>('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+const rendererAA = tierOf(quality).antialias;
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: rendererAA });
+renderer.setPixelRatio(Math.min(devicePixelRatio, tierOf(quality).dpr));
 renderer.setSize(innerWidth, innerHeight);
 // « Neutre » (Khronos PBR Neutral) au lieu d'ACES : les couleurs gardent leur saturation (ACES les délavait)
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1.08;
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = tierOf(quality).shadow > 0;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
@@ -63,35 +73,90 @@ sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 });
 sun.shadow.bias = -0.0004;
 scene.add(sun, sun.target);
+const indoor = new THREE.PointLight(0xffe4c2, 0, 14, 2);
+/** Deux projecteurs au plus, braqués sur les œuvres proches. Invisibles en économie. */
+const artSpots = [0, 1].map(() => {
+  const s = new THREE.SpotLight(0xfff6e2, 0, 14, 0.42, 0.62, 1.5);
+  s.visible = false;
+  scene.add(s, s.target);
+  return s;
+});
+indoor.castShadow = false;
+indoor.visible = false;
+scene.add(indoor);
 
-/** Réglages de l'écran Options (musique, son, graphismes, caméra), gardés sur l'appareil. */
-const settings = loadSettings();
-
-// Qualité graphique : « Éco » (sans ombres, résolution 1×) par défaut sur les téléphones et petites machines
-type Quality = 'high' | 'low';
-let quality: Quality = settings.quality;
-function applyQuality(): void {
-  const high = quality === 'high';
-  renderer.setPixelRatio(high ? Math.min(devicePixelRatio, 1.75) : 1);
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = high;
-  sun.castShadow = high;
+function applyShadowCasters(): void {
   scene.traverse((o) => {
-    const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
-    (Array.isArray(m) ? m : m ? [m] : []).forEach((x) => (x.needsUpdate = true));
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh && !(o as THREE.InstancedMesh).isInstancedMesh) return;
+    if (mesh.userData.canCast === undefined) mesh.userData.canCast = !!mesh.castShadow;
+    if (!mesh.userData.canCast) {
+      mesh.castShadow = false;
+      return;
+    }
+    if (quality === 'low') {
+      mesh.castShadow = false;
+      return;
+    }
+    if (quality === 'high') {
+      mesh.castShadow = true;
+      return;
+    }
+    let p: THREE.Object3D | null = mesh;
+    let decor = false;
+    let art = false;
+    let actor = false;
+    while (p) {
+      if (p.userData.decor) decor = true;
+      if (p.userData.art) art = true;
+      if (p.userData.actor) actor = true;
+      p = p.parent;
+    }
+    // Moyen : les personnages projettent, le décor de la place non. Les musées et les camions restent.
+    mesh.castShadow = actor || (!decor && !art);
   });
 }
+
+/** Résolution, ombres, HUD. Appelable avant la construction du quartier. */
+function applyRendererQuality(): void {
+  const tier = tierOf(quality);
+  gfx = tier;
+  setTextureAnisotropy(tier.anisotropy);
+  setShadowMode(quality);
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, tier.dpr));
+  renderer.setSize(innerWidth, innerHeight);
+  const size = tier.shadow;
+  renderer.shadowMap.enabled = size > 0;
+  sun.castShadow = size > 0;
+  if (size > 0 && (sun.shadow.mapSize.x !== size || sun.shadow.mapSize.y !== size)) {
+    sun.shadow.mapSize.set(size, size);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+  }
+  document.body.dataset.q = quality;
+  setSparkleBudget(tier.sparkleDist, tier.sparkleCap);
+  setContactBlobs(tier.contactBlob);
+  MuseumView.labelRange = tier.labelRange;
+  MuseumView.dustOn = tier.relief;
+  setCharacterLod(tier.lod);
+  sun.shadow.radius = tier.shadowRadius;
+  scene.environmentIntensity = tier.env;
+}
+
 /** Choix fait dans les options : appliqué tout de suite et gardé pour les prochaines parties. */
 function setQuality(q: Quality): void {
   quality = q;
   settings.quality = q;
   settings.qualityChosen = true;
   saveSettings(settings);
-  applyQuality();
-  pedestrians.setCount(pedestrianCount());
-  seasons.setQuality(quality);
+  applyWorldQuality();
+  if (player) {
+    player.setRim(tierOf(quality).rim);
+    pedestrians.setCount(tierOf(quality).pedestrians);
+  }
+  if (tierOf(q).antialias !== rendererAA) toast('L’anticrénelage changera au prochain chargement de la page.');
 }
-applyQuality();
+applyRendererQuality();
 
 const BASE_FOV = 58;
 const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.1, 1200);
@@ -140,6 +205,7 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  resizePost(renderer);
   hall.resize(innerWidth, innerHeight);
 });
 
@@ -148,12 +214,32 @@ addEventListener('resize', () => {
 const district = new District(scene);
 /** Thème du monde (saison) : décor, particules, couleurs du ciel, du sol et de la lumière. */
 const seasons = new Seasons(scene, district, { hemi, sun, fog: scene.fog as THREE.Fog, base: LIGHT_BASE });
-seasons.setQuality(quality);
 const convoy = new Convoy(scene);
 const visitors = new Visitors(scene);
 const pedestrians = new Pedestrians(scene);
-/** Passants sur la place : moins nombreux en mode Éco. */
-const pedestrianCount = () => (quality === 'high' ? 10 : 5);
+
+/** Palier complet : renderer, ciel, fontaine, passants, ombres. */
+function applyWorldQuality(): void {
+  const tier = tierOf(quality);
+  applyRendererQuality();
+  district.setVisual({ octaves: tier.skyOctaves, anisotropy: tier.anisotropy, spray: tier.spray, relief: tier.relief });
+  seasons.setQuality(quality);
+  applyShadowCasters();
+  scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
+    for (const mat of mats) {
+      const map = (mat as THREE.MeshStandardMaterial).map;
+      if (map && map.anisotropy !== tier.anisotropy) {
+        map.anisotropy = tier.anisotropy;
+        map.needsUpdate = true;
+      }
+    }
+  });
+  setPost(renderer, scene, camera, tier.post, tier.smaa);
+}
+mountImpostors(scene);
+applyWorldQuality();
 const remotes = new RemotePlayers(scene);
 const guards = new Guards(scene);
 remotes.hidden = (x, z, f) => hiddenAt(x, z, f);
@@ -217,17 +303,26 @@ chat.onOpenChange = (open) => {
 // ---------------------------------------------------------------- confettis et gains flottants (moments forts)
 
 const CONFETTI_COLORS = [0xffd36b, 0xff5e62, 0x3d8bff, 0x4cc38a, 0xb46bff, 0xff9f43, 0xffffff];
+const CONFETTI_MAX = 140;
 const confettiGeo = new THREE.PlaneGeometry(0.14, 0.22);
-const confettiMats = CONFETTI_COLORS.map((c) => new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide }));
-const confettiList: Array<{ m: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3; life: number }> = [];
+const confettiMesh = new THREE.InstancedMesh(confettiGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }), CONFETTI_MAX);
+confettiMesh.frustumCulled = false;
+confettiMesh.count = 0;
+scene.add(confettiMesh);
+const confettiDummy = new THREE.Object3D();
+const confettiCol = new THREE.Color();
+const confettiList: Array<{ x: number; y: number; z: number; vx: number; vy: number; vz: number; rx: number; ry: number; sx: number; sy: number; life: number; color: number }> = [];
 function confetti(at: THREE.Vector3, n = 70): void {
-  for (let i = 0; i < n; i++) {
-    const m = new THREE.Mesh(confettiGeo, confettiMats[i % confettiMats.length]);
-    m.position.copy(at).add(new THREE.Vector3(0, 2.2, 0));
-    scene.add(m);
+  const count = Math.min(n, CONFETTI_MAX - confettiList.length);
+  for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
     const s = 2 + Math.random() * 4;
-    confettiList.push({ m, v: new THREE.Vector3(Math.cos(a) * s, 6 + Math.random() * 5, Math.sin(a) * s), spin: new THREE.Vector3(Math.random() * 10, Math.random() * 10, 0), life: 2.4 + Math.random() });
+    confettiList.push({
+      x: at.x, y: at.y + 2.2, z: at.z,
+      vx: Math.cos(a) * s, vy: 6 + Math.random() * 5, vz: Math.sin(a) * s,
+      rx: 0, ry: 0, sx: Math.random() * 10, sy: Math.random() * 10,
+      life: 2.4 + Math.random(), color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    });
   }
 }
 const floaters: Array<{ label: Label; life: number }> = [];
@@ -240,17 +335,33 @@ function floatText(at: THREE.Vector3, text: string, color = '#ffd36b'): void {
   floaters.push({ label, life: 1.6 });
 }
 function updateCelebrations(dt: number): void {
-  for (const c of [...confettiList]) {
+  for (let i = confettiList.length - 1; i >= 0; i--) {
+    const c = confettiList[i];
     c.life -= dt;
-    c.v.y -= 12 * dt;
-    c.v.multiplyScalar(1 - dt * 0.8); // freinage de l'air : ils flottent en retombant
-    c.m.position.addScaledVector(c.v, dt);
-    c.m.rotation.x += c.spin.x * dt;
-    c.m.rotation.y += c.spin.y * dt;
-    if (c.life <= 0 || c.m.position.y < 0) {
-      c.m.removeFromParent();
-      confettiList.splice(confettiList.indexOf(c), 1);
-    }
+    c.vy -= 12 * dt;
+    const drag = 1 - dt * 0.8;
+    c.vx *= drag;
+    c.vy *= drag;
+    c.vz *= drag;
+    c.x += c.vx * dt;
+    c.y += c.vy * dt;
+    c.z += c.vz * dt;
+    c.rx += c.sx * dt;
+    c.ry += c.sy * dt;
+    if (c.life <= 0 || c.y < 0) confettiList.splice(i, 1);
+  }
+  confettiMesh.count = confettiList.length;
+  for (let i = 0; i < confettiList.length; i++) {
+    const c = confettiList[i];
+    confettiDummy.position.set(c.x, c.y, c.z);
+    confettiDummy.rotation.set(c.rx, c.ry, 0);
+    confettiDummy.updateMatrix();
+    confettiMesh.setMatrixAt(i, confettiDummy.matrix);
+    confettiMesh.setColorAt(i, confettiCol.setHex(c.color));
+  }
+  if (confettiList.length) {
+    confettiMesh.instanceMatrix.needsUpdate = true;
+    if (confettiMesh.instanceColor) confettiMesh.instanceColor.needsUpdate = true;
   }
   for (const f of [...floaters]) {
     f.life -= dt;
@@ -305,6 +416,7 @@ function rebuildPlayer(): void {
   fresh.root.rotation.copy(player.root.rotation);
   player.dispose();
   player = fresh;
+  player.setRim(tierOf(quality).rim);
   scene.add(player.root);
 }
 
@@ -409,10 +521,8 @@ function renderTimers(): void {
   const now = serverNow();
   $('shieldInfo').textContent = state.shielded
     ? '🛡 Bouclier débutant : personne ne peut vous voler'
-    : state.immuneUntil > now
-      ? `🛡 Protégé encore ${Math.ceil((state.immuneUntil - now) / 60_000)} min`
-      : '⚠ Votre musée peut être cambriolé';
-  $('shieldInfo').classList.toggle('danger', !state.shielded && state.immuneUntil <= now);
+    : '⚠ Votre musée peut être cambriolé';
+  $('shieldInfo').classList.toggle('danger', !state.shielded);
   const parts: string[] = [];
   const guardsLeft = state.guardsUntil - now;
   if (guardsLeft > 0) parts.push(`👮 ${state.sec.guards} · ${fmtDur(guardsLeft)}`);
@@ -1332,6 +1442,31 @@ function bumpWallet(): void {
   w.classList.remove('bump');
   void w.offsetWidth;
   w.classList.add('bump');
+  flyCoins();
+}
+
+/** Pièces qui filent vers le porte-monnaie. Rien si le joueur a demandé moins d'animation. */
+function flyCoins(): void {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const dest = $('coins').getBoundingClientRect();
+  if (!dest.width) return;
+  for (let i = 0; i < 6; i++) {
+    const el = document.createElement('i');
+    el.className = 'coin fly';
+    const x = innerWidth * 0.5 + (Math.random() - 0.5) * 90;
+    const y = innerHeight * 0.62;
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    document.body.appendChild(el);
+    const anim = el.animate(
+      [
+        { transform: 'translate(0,0) scale(1)', opacity: 1 },
+        { transform: `translate(${dest.left + dest.width / 2 - x}px, ${dest.top + dest.height / 2 - y}px) scale(.35)`, opacity: 0.15 },
+      ],
+      { duration: 620 + i * 45, delay: i * 40, easing: 'cubic-bezier(.2,.7,.2,1)', fill: 'forwards' },
+    );
+    anim.onfinish = () => el.remove();
+  }
 }
 
 let toastTimer: number | undefined;
@@ -1344,8 +1479,9 @@ function toast(msg: string): void {
 }
 
 let bannerTimer: number | undefined;
-function banner(title: string, sub = ''): void {
+function banner(title: string, sub = '', kind: '' | 'heist' | 'loss' = ''): void {
   const b = $('banner');
+  b.className = kind;
   b.textContent = title;
   if (sub) {
     const s = document.createElement('small');
@@ -1481,7 +1617,7 @@ async function doBuy(item: ConvoyItem, _from: THREE.Vector3): Promise<void> {
   if (item.frame === 'arcenciel' || item.rarity === 'mythique') {
     // jackpot : grosse fête (confettis, onde de choc, message dans la discussion)
     confetti(pos, 120);
-    burst(pos.clone(), 0xff8fd8, true);
+    rarityBurst(pos, 0xff8fd8, 4);
     chat.system(`🌈 Vous décrochez « ${wk.title} » ${item.frame === 'arcenciel' ? 'en cadre arc-en-ciel (×10) !' : ', une Mythique !'}`);
   }
   banner(wk.title, `Œuvre entre vos mains ! Entrez dans votre musée et appuyez sur E devant un emplacement pour l'accrocher.`);
@@ -1501,6 +1637,7 @@ async function doCollect(): Promise<void> {
       floatText(myView.registerPos.clone().setY(3.4), `+${money(r.collected)}`);
     }
     toast(`+${money(r.collected)} pièces encaissées`);
+    impulse(0.08);
   }
 }
 
@@ -1630,6 +1767,11 @@ let bonkAt = 0;
 /** Secousse de la caméra (s), appliquée juste avant le rendu puis retirée. */
 let shake = 0;
 const shakeOff = new THREE.Vector3();
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function impulse(amount: number): void {
+  if (reduceMotion) amount *= 0.15;
+  shake = Math.min(0.5, Math.max(shake, amount));
+}
 
 /** Événement en cours (convoi ou « admin abuse »), ou null. */
 function liveKind(): string | null {
@@ -1672,10 +1814,11 @@ function onBonk(m: Extract<ServerMsg, { t: 'bonk' }>): void {
     if (away.lengthSq() < 1e-4) away.set(Math.sin(facing), Math.cos(facing));
     vel.copy(away.normalize().multiplyScalar(9));
     vy = 5;
-    shake = 0.35;
+    impulse(0.35);
     selfBubble.emote('💫');
     if (stealing) stealing = null;
   } else if (m.from === me && m.dropped) {
+    impulse(0.12);
     sfx.coin(3);
     toast('☂ En plein dans le mille : le voleur lâche l’œuvre !');
   }
@@ -2056,9 +2199,10 @@ let carrying: { workId: string; frame: string } | null = null;
 /** Vrai seulement quand l'œuvre portée est volée (le serveur suit alors le casse). */
 let heist = false;
 let carryPlot = -1; // musée d'où vient l'œuvre portée (lasers à la sortie)
-let carryMesh: THREE.Mesh | null = null;
+let carryMesh: THREE.Object3D | null = null;
 let jailUntil = 0;
 let stealRequested = false;
+let lastPry = 0;
 let alarmUntil = 0;
 let welcomed = false;
 let stateRefreshTimer: number | undefined;
@@ -2070,22 +2214,21 @@ const refreshSoon = () => {
 function setCarry(c: { workId: string; frame: string } | null): void {
   carrying = c;
   if (carryMesh) {
-    carryMesh.removeFromParent();
-    carryMesh.geometry.dispose();
+    disposeCarry(carryMesh);
     carryMesh = null;
   }
   if (c && player) {
-    // Cadre et tableau portés à deux mains devant le personnage (hauteur poitrine/torse ~1.0m, avancé de 0.55m)
-    carryMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.9), new THREE.MeshBasicMaterial({ map: artTexture(c.workId), side: THREE.DoubleSide }));
-    carryMesh.position.set(0, 1.1, 0.55);
-    carryMesh.rotation.set(-0.15, 0, 0); // Légèrement incliné pour un portage naturel à deux mains
+    carryMesh = makeCarry(c.workId, c.frame);
     player.root.add(carryMesh);
   }
 }
 
 function alarm(on: boolean): void {
   alarmUntil = on ? performance.now() + 4000 : 0;
-  if (on) sfx.alarm();
+  if (on) {
+    sfx.alarm();
+    impulse(0.16);
+  }
 }
 
 function applyPlot(info: PlotInfo): void {
@@ -2124,6 +2267,7 @@ function onWelcome(m: Extract<ServerMsg, { t: 'welcome' }>): void {
     if (state) applyState(state);
   }
   for (const info of m.plots) applyPlot(info);
+  applyShadowCasters();
   remotes.sync(m.players, state?.id ?? '');
   guards.sync(m.guards ?? []);
   rainCoins.clear();
@@ -2221,7 +2365,7 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
         stealRequested = false;
         jailUntil = m.jailUntil;
         sfx.error();
-        banner('Attrapé par un garde !', `${Math.round((m.jailUntil - serverNow()) / 1000)} s en cellule. Guettez son cône de vision la prochaine fois.`);
+        banner('Attrapé par un garde !', `${Math.round((m.jailUntil - serverNow()) / 1000)} s en cellule. Guettez son cône de vision la prochaine fois.`, 'loss');
       } else if (m.plot === myPlot) {
         alarm(false);
         sfx.coin(2);
@@ -2240,12 +2384,12 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
         heist = true;
         setCarry({ workId: m.workId, frame: m.frame });
         sfx.rare();
-        banner('Vous l’avez !', 'Ramenez-la dans votre musée sans vous faire toucher par le propriétaire ni par un garde');
+        banner('Vous l’avez !', 'Ramenez-la dans votre musée sans vous faire toucher par le propriétaire ni par un garde', 'heist');
       } else if (m.plot === myPlot) {
         // l'œuvre disparaît du mur : on le voit, mais sans caméra la sirène ne sonne pas
         remotes.setWanted(m.thief, true);
         refreshSoon();
-        banner('Au voleur !', `${m.thiefName} s’enfuit avec « ${title} » : touchez-le pour l’arrêter`);
+        banner('Au voleur !', `${m.thiefName} s’enfuit avec « ${title} » : touchez-le pour l’arrêter`, 'loss');
       }
       break;
     case 'delivered':
@@ -2255,12 +2399,12 @@ function onSteal(m: Extract<ServerMsg, { t: 'steal' }>): void {
         setCarry(null);
         sfx.expand();
         player?.gesture('Wave', 'Idle');
-        banner('Casse réussi !', `« ${title} » est maintenant dans votre musée`);
+        banner('Casse réussi !', `« ${title} » est maintenant dans votre musée`, 'heist');
         refreshSoon();
       } else if (m.plot === myPlot) {
         alarm(false);
         sfx.error();
-        banner('On vous a volé…', m.refund > 0 ? `${m.thiefName} est reparti avec « ${title} ». Assurance : +${money(m.refund)} pièces` : `${m.thiefName} est reparti avec « ${title} ». Protégez-vous : G`);
+        banner('On vous a volé…', m.refund > 0 ? `${m.thiefName} est reparti avec « ${title} ». Assurance : +${money(m.refund)} pièces` : `${m.thiefName} est reparti avec « ${title} ». Protégez-vous : G`, 'loss');
         refreshSoon();
         setTimeout(freeSlotHint, 4000);
       } else toast(`${m.thiefName} a volé « ${title} » au ${m.victimName}`);
@@ -2859,12 +3003,13 @@ async function loadModels(): Promise<boolean> {
     }
   }
   player = new Character();
+  player.setRim(tierOf(quality).rim);
   player.root.position.copy(pos);
   scene.add(player.root);
   $('loading').remove();
   // tenues de la foule en arrière-plan, puis les passants de la place
   void loadCrowdModels().finally(() => {
-    pedestrians.setCount(pedestrianCount());
+    pedestrians.setCount(tierOf(quality).pedestrians);
     rebuildPlayer(); // votre tenue est maintenant disponible
   });
   return true;
@@ -2938,6 +3083,7 @@ function canMove(x: number, z: number): boolean {
 /** Sauts depuis le dernier contact avec le sol (2 = double saut utilisé). */
 let jumps = 0;
 let dustAcc = 0;
+let stepAcc = 0;
 let airborne = false;
 
 function updatePlayer(dt: number): void {
@@ -3012,6 +3158,8 @@ function updatePlayer(dt: number): void {
     if (airborne && vy < -4) {
       dust(pos.clone().setY(floor * FLOOR_H), 7, 0.75); // atterrissage
       squash = Math.min(0.12, -vy * 0.012); // petit écrasement à l'atterrissage
+      sfx.land();
+      impulse(Math.min(0.2, -vy * 0.012));
     }
     airborne = false;
     vy = 0;
@@ -3045,6 +3193,13 @@ function updatePlayer(dt: number): void {
     d = Math.atan2(Math.sin(d), Math.cos(d));
     facing += d * Math.min(1, dt * 20);
   }
+  if (sp > 0.8 && pos.y === 0 && !stunned) {
+    stepAcc += dt * (sp > 6.2 ? 2.8 : 1.9);
+    if (stepAcc >= 1) {
+      stepAcc = 0;
+      sfx.step();
+    }
+  } else stepAcc = 0;
   const anim = sp > 6.2 ? 'Running' : sp > 0.25 ? 'Walking' : 'Idle';
   player.play(anim);
   // cadence des pas accordée à la vitesse (sinon les pieds glissent et le personnage paraît mou)
@@ -3085,13 +3240,10 @@ function stairsInteraction(items: Array<{ key: string; text: string; poor?: bool
 }
 
 /** Ce qui protège un musée rival, vu du client (le serveur tranche de toute façon). */
-function protection(v: MuseumView, now: number): string | null {
+function protection(v: MuseumView): string | null {
   const o = v.owner;
   if (!o || !state) return 'Rien à voler ici';
   if (o.shielded) return 'Protégé : bouclier débutant';
-  if (o.immuneUntil > now) return `Protégé encore ${Math.ceil((o.immuneUntil - now) / 60_000)} min (déjà cambriolé)`;
-  // même règle que le serveur : un propriétaire absent ne perd qu'une œuvre toutes les 10 min
-  if (!v.online && (o.robbedUntil ?? 0) > now) return `musée protégé : son propriétaire est absent et s’est déjà fait voler une œuvre (encore ${fmtDur((o.robbedUntil ?? 0) - now)})`;
   return null;
 }
 
@@ -3119,6 +3271,10 @@ function theftInteractions(items: Array<{ key: string; text: string; poor?: bool
     const total = stealing.total || (STEAL_TIME[work(stealing.workId).rarity] ?? 3) * 1000;
     const left = Math.max(0, stealing.endsAt - now);
     items.push({ key: 'E', text: `Décrochage… ${Math.round(100 - (left / total) * 100)} % — ne lâchez pas !` });
+    if (performance.now() - lastPry > 420) {
+      lastPry = performance.now();
+      sfx.pry();
+    }
     if (!input.holdingAction()) {
       net.send({ t: 'steal-cancel' });
       stealing = null;
@@ -3142,7 +3298,7 @@ function theftInteractions(items: Array<{ key: string; text: string; poor?: bool
     items.push({ key: '⛓', text: `En cellule encore ${Math.ceil((jailUntil - now) / 1000)} s` });
     return true;
   }
-  const blocked = protection(rival, now);
+  const blocked = protection(rival);
   if (blocked) {
     items.push({ key: '🛡', text: `« ${wk.title} » : ${blocked}`, poor: true });
     return true;
@@ -3415,6 +3571,9 @@ function updateTutorial(t: number): void {
 // ================================================================== boucle
 
 const clock = new THREE.Clock();
+let shownFps = 0;
+let fpsN = 0;
+let fpsT = 0;
 /** Tests visuels (mode développement) : caméra placée à la main, la boucle ne la déplace plus. */
 let camFrozen = false;
 /**
@@ -3432,11 +3591,12 @@ function probeFps(): void {
   if (elapsed < 5000) return;
   fpsProbe.done = true;
   const fps = (fpsProbe.frames * 1000) / elapsed;
-  if (quality === 'high' && fps < 26) {
-    quality = 'low';
-    applyQuality();
-    pedestrians.setCount(pedestrianCount());
-    toast(`Mode Économie activé pour la fluidité (${Math.round(fps)} images/s). Menu ☰ → Options pour revenir.`);
+  const next = fps < (quality === 'high' ? 26 : 22) ? stepDown(quality) : null;
+  if (next && quality !== 'low') {
+    quality = next;
+    applyWorldQuality();
+    const label = next === 'medium' ? 'Moyens' : 'Économie';
+    toast(`Graphismes ${label} pour la fluidité (${Math.round(fps)} images/s). Menu ☰ → Options pour revenir.`);
   }
 }
 
@@ -3444,6 +3604,13 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.066);
   const t = clock.elapsedTime;
   probeFps();
+  fpsN++;
+  const wall = performance.now();
+  if (wall - fpsT > 1000) {
+    shownFps = (fpsN * 1000) / (wall - fpsT);
+    fpsN = 0;
+    fpsT = wall;
+  }
   const now = serverNow();
   if (hall.active) {
     // salle des ventes : une scène à part, le quartier continue de vivre sans être dessiné
@@ -3479,11 +3646,23 @@ renderer.setAnimationLoop(() => {
   }
   updateCelebrations(dt);
   guards.update(dt, t);
+  updateCharacterLods(camera.position);
+  cullSparkles(camera.position);
   updateFx(t);
   updateParticles(t, dt);
   updateRainbow(t);
   rainCoins.update(t);
   district.update(t);
+  const insideNow = !!here && quality !== 'low';
+  indoor.visible = insideNow;
+  if (insideNow) indoor.position.set(pos.x, floor * FLOOR_H + 2.7, pos.z);
+  indoor.intensity = insideNow ? (quality === 'high' ? 0.95 : 0.7) : 0;
+  scene.environmentIntensity = insideNow ? gfx.envIn : gfx.env;
+  if (insideNow && here && gfx.spots) here.aimSpots(artSpots, gfx.spots, pos);
+  else for (const s of artSpots) {
+    s.visible = false;
+    s.intensity = 0;
+  }
   // décor animé et particules de la saison (la neige / les feuilles suivent le joueur, à son étage)
   seasons.update(t, dt, weatherAt.set(pos.x, floor * FLOOR_H, pos.z));
   const alarmOn = performance.now() < alarmUntil;
@@ -3500,7 +3679,7 @@ renderer.setAnimationLoop(() => {
   shake = Math.max(0, shake - dt);
   shakeOff.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
   camera.position.add(shakeOff);
-  renderer.render(scene, camera);
+  if (!renderPost()) renderer.render(scene, camera);
   camera.position.sub(shakeOff);
 });
 
@@ -3517,7 +3696,19 @@ if (import.meta.env.DEV) {
     teleport(x: number, z: number) { pos.set(x, 0, z); focus.copy(pos); },
     get floor() { return floor; },
     scene,
-    get renderInfo() { return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures }; },
+    get renderInfo() {
+      return {
+        calls: renderer.info.render.calls,
+        triangles: renderer.info.render.triangles,
+        geometries: renderer.info.memory.geometries,
+        textures: renderer.info.memory.textures,
+        quality,
+        fps: shownFps,
+        dpr: renderer.getPixelRatio(),
+        shadow: sun.shadow.mapSize.x,
+        shadows: renderer.shadowMap.enabled,
+      };
+    },
     get museum() { return myView; },
     views,
     convoy,
@@ -3560,6 +3751,19 @@ if (import.meta.env.DEV) {
       return true;
     },
   };
+  const gfx = document.createElement('pre');
+  gfx.id = 'gfx';
+  gfx.style.cssText = 'display:none;position:fixed;left:8px;bottom:8px;z-index:80;margin:0;padding:6px 8px;background:rgba(0,0,0,.72);color:#d6ffb0;font:11px/1.35 ui-monospace,monospace;pointer-events:none';
+  document.body.appendChild(gfx);
+  addEventListener('keydown', (e) => {
+    if (e.key !== 'F8') return;
+    gfx.style.display = gfx.style.display === 'none' ? 'block' : 'none';
+  });
+  setInterval(() => {
+    if (gfx.style.display === 'none') return;
+    const i = renderer.info.render;
+    gfx.textContent = `${quality}  ${shownFps.toFixed(0)} ips  dpr ${renderer.getPixelRatio().toFixed(2)}\nappels ${i.calls}  triangles ${i.triangles}\nombres ${renderer.shadowMap.enabled ? sun.shadow.mapSize.x : 0}`;
+  }, 500);
 }
 
 void boot();

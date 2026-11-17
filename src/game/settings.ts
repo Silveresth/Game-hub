@@ -1,3 +1,5 @@
+import { defaultQuality, type Quality } from './quality';
+
 /** Réglages du joueur (écran Options), gardés sur l'appareil. */
 export interface Settings {
   /** Volume de la musique, 0 à 100 (0 = coupée). */
@@ -6,7 +8,7 @@ export interface Settings {
   sfx: number;
   /** Tout le son coupé (bouton 🔊 du menu). */
   muted: boolean;
-  quality: 'high' | 'low';
+  quality: Quality;
   /** Qualité choisie par le joueur (sinon le jeu peut passer seul en Économie s'il rame). */
   qualityChosen: boolean;
   /** Vitesse de rotation de la caméra, en % (50 à 200). */
@@ -19,16 +21,12 @@ export interface Settings {
 
 const KEY = 'sam-settings';
 
-/** « Éco » par défaut sur les téléphones et les petites machines. */
-export const defaultQuality = (): Settings['quality'] =>
-  matchMedia('(pointer: coarse)').matches || (navigator.hardwareConcurrency ?? 8) <= 4 ? 'low' : 'high';
-
 export function loadSettings(): Settings {
   const s: Settings = { music: 50, sfx: 80, muted: false, quality: defaultQuality(), qualityChosen: false, camSpeed: 100, autoCam: true, fullscreen: true };
   try {
     // ancien réglage (bouton HD / Éco du menu)
     const legacy = localStorage.getItem('sam-quality');
-    if (legacy === 'high' || legacy === 'low') {
+    if (legacy === 'high' || legacy === 'medium' || legacy === 'low') {
       s.quality = legacy;
       s.qualityChosen = true;
     }
@@ -38,7 +36,7 @@ export function loadSettings(): Settings {
       s.music = num(raw.music, 0, 100, s.music);
       s.sfx = num(raw.sfx, 0, 100, s.sfx);
       s.camSpeed = num(raw.camSpeed, 50, 200, s.camSpeed);
-      if (raw.quality === 'high' || raw.quality === 'low') s.quality = raw.quality;
+      if (raw.quality === 'high' || raw.quality === 'medium' || raw.quality === 'low') s.quality = raw.quality;
       for (const k of ['muted', 'qualityChosen', 'autoCam', 'fullscreen'] as const) if (typeof raw[k] === 'boolean') s[k] = raw[k];
     }
   } catch {
